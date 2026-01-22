@@ -1,0 +1,13 @@
+[project]
+name = "gtm-advisor-gtm-strategist"
+version = "0.1.0"
+description = "GTM Strategist Agent - Coordinates all agents and synthesizes strategy"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "structlog>=24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

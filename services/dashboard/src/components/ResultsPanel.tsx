@@ -159,7 +159,7 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
           <div className="space-y-2">
             {results.leads.map((lead, i) => (
               <motion.div
-                key={lead.name}
+                key={lead.id || lead.companyName}
                 className="glass-card p-3 rounded-xl group cursor-pointer"
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -169,12 +169,21 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
                 <div className="flex items-start justify-between">
                   <div>
                     <h4 className="font-medium text-white text-sm flex items-center gap-2">
-                      {lead.name}
-                      <ExternalLink className="w-3 h-3 text-white/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      {lead.companyName}
+                      {lead.website && (
+                        <a href={lead.website} target="_blank" rel="noopener noreferrer">
+                          <ExternalLink className="w-3 h-3 text-white/30 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </a>
+                      )}
                     </h4>
                     <p className="text-xs text-white/50 mt-0.5">
-                      {lead.industry} • {lead.size} employees
+                      {lead.industry} • {lead.employeeCount ? `${lead.employeeCount} employees` : 'SME'}
                     </p>
+                    {lead.contactName && (
+                      <p className="text-xs text-white/40 mt-0.5">
+                        Contact: {lead.contactName}{lead.contactTitle ? ` (${lead.contactTitle})` : ''}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {lead.scoringMethod && (
@@ -195,9 +204,11 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
             ))}
           </div>
 
-          <button className="w-full mt-3 py-2 text-sm text-blue-400 hover:text-blue-300 transition-colors">
-            View all 12 leads →
-          </button>
+          {results.leads.length > 3 && (
+            <button className="w-full mt-3 py-2 text-sm text-blue-400 hover:text-blue-300 transition-colors">
+              View all {results.leads.length} leads →
+            </button>
+          )}
         </motion.section>
 
         {/* Insights Section */}

@@ -1,0 +1,13 @@
+[project]
+name = "gtm-advisor-governance"
+version = "0.1.0"
+description = "Governance layer for GTM Advisor (RBAC, audit, compliance)"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "structlog>=24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,5 +1,5 @@
 """Gateway API Routers."""
 
-from . import agents, analysis, companies, health
+from . import agents, analysis, companies, health, websocket
 
-__all__ = ["health", "agents", "companies", "analysis"]
+__all__ = ["health", "agents", "companies", "analysis", "websocket"]

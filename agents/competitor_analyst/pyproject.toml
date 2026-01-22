@@ -1,0 +1,13 @@
+[project]
+name = "gtm-advisor-competitor-analyst"
+version = "0.1.0"
+description = "Competitor Analyst Agent - Analyzes competitive landscape"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "structlog>=24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

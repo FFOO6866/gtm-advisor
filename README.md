@@ -128,12 +128,30 @@ GTM Advisor is built on the **Grace Framework** patterns:
                └─────────┘ └─────────┘ └─────────┘
 ```
 
+### Four-Layer Architecture
+
+Each agent operates across four layers for reliable, auditable decisions:
+
+| Layer | Purpose | Examples |
+|-------|---------|----------|
+| **Cognitive (LLM)** | Synthesis, explanation, generation | Market summaries, outreach messages |
+| **Analytical (Algorithms)** | Deterministic scoring, calculations | ICP scoring, BANT scoring, lead value |
+| **Operational (Tools)** | Data acquisition from external sources | Company enrichment, news search |
+| **Governance (Rules)** | Compliance, access control, audit | PDPA checks, rate limiting |
+
+**Why this matters:**
+- **Repeatability**: Algorithmic scores are deterministic (same input = same output)
+- **Explainability**: Every decision can be traced to its source
+- **Cost efficiency**: Algorithms are free; LLM calls only where needed
+- **Auditability**: Complete decision trail for compliance
+
 ### Core Patterns
 
 - **PDCA Agents** - Self-correcting with confidence thresholds
 - **A2A Protocol** - Agents communicate and collaborate
 - **Schema-First** - All data models defined as JSON Schema
 - **Governance-First** - PDPA compliance at service boundaries
+- **Real-Time Updates** - WebSocket for live agent progress
 
 ---
 
@@ -197,6 +215,21 @@ GTM_ENABLE_GOVERNANCE=true
 | `/api/v1/analysis/start` | POST | Start full GTM analysis |
 | `/api/v1/analysis/{id}/status` | GET | Check analysis status |
 | `/api/v1/analysis/{id}/result` | GET | Get analysis results |
+
+---
+
+## 📚 Documentation
+
+Comprehensive documentation is available in the `docs/` directory:
+
+| Document | Description |
+|----------|-------------|
+| [Getting Started](docs/guides/getting-started.md) | First analysis walkthrough |
+| [Agent Development](docs/guides/agent-development.md) | Building new agents |
+| [Tool Development](docs/guides/tool-development.md) | Creating external integrations |
+| [Gateway API](docs/api/gateway.md) | REST API reference |
+| [Agent API](docs/api/agents.md) | Agent interfaces |
+| [ADR-0001: Four-Layer Architecture](docs/adr/0001-four-layer-architecture.md) | Architecture decision |
 
 ---
 

@@ -1,0 +1,10 @@
+[project]
+name = "gtm-advisor-dashboard"
+version = "0.1.0"
+description = "Dashboard frontend for GTM Advisor (React/TypeScript)"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

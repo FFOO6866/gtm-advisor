@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 
 from packages.core.src.config import get_config
 
-from .routers import agents, analysis, companies, health
+from .routers import agents, analysis, companies, health, websocket
 
 logger = structlog.get_logger()
 
@@ -88,6 +88,7 @@ app.include_router(health.router, tags=["Health"])
 app.include_router(agents.router, prefix="/api/v1/agents", tags=["Agents"])
 app.include_router(companies.router, prefix="/api/v1/companies", tags=["Companies"])
 app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["Analysis"])
+app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
 
 
 @app.get("/")

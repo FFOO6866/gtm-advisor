@@ -1,0 +1,15 @@
+[project]
+name = "gtm-advisor-agents-core"
+version = "0.1.0"
+description = "Core agent infrastructure for GTM Advisor (BaseAgent, ToolEmpoweredAgent)"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "structlog>=24.0",
+    "openai>=1.30",
+    "instructor>=1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

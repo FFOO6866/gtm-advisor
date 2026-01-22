@@ -1,0 +1,19 @@
+[project]
+name = "gtm-advisor-observability"
+version = "0.1.0"
+description = "Observability layer for GTM Advisor (tracing, metrics)"
+requires-python = ">=3.12"
+dependencies = [
+    "structlog>=24.0",
+]
+
+[project.optional-dependencies]
+full = [
+    "opentelemetry-api>=1.25",
+    "opentelemetry-sdk>=1.25",
+    "prometheus-client>=0.20",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,34 +1,115 @@
+/**
+ * GTM Advisor Dashboard Types
+ *
+ * Types aligned with backend Pydantic models for production use.
+ */
+
 export interface CompanyInfo {
   name: string;
   description: string;
   industry: string;
   goals: string[];
+  challenges: string[];
   competitors: string[];
+  targetMarkets: string[];
   valueProposition?: string;
 }
 
 export interface Message {
   id: string;
-  role: 'user' | 'agent';
+  role: 'user' | 'agent' | 'system';
   agentId?: string;
+  agentName?: string;
   content: string;
   timestamp: Date;
 }
 
 export interface AgentActivity {
   agentId: string;
-  status: 'idle' | 'thinking' | 'active' | 'complete';
+  agentName?: string;
+  status: 'idle' | 'thinking' | 'active' | 'complete' | 'error';
   progress: number;
   currentTask?: string;
+  message?: string;
 }
 
+// Lead from backend
 export interface Lead {
-  name: string;
-  fitScore: number;
+  id: string;
+  companyName: string;
+  contactName: string | null;
+  contactTitle: string | null;
+  contactEmail: string | null;
   industry: string;
-  size: string;
-  scoringMethod?: 'algorithm' | 'llm';  // How this lead was scored
-  expectedValue?: number;  // Pipeline value
+  employeeCount: number | null;
+  location: string | null;
+  website: string | null;
+  fitScore: number;
+  intentScore: number;
+  overallScore: number;
+  painPoints: string[];
+  triggerEvents: string[];
+  recommendedApproach: string | null;
+  source: string;
+  // UI display fields
+  scoringMethod?: 'algorithm' | 'llm';
+  expectedValue?: number;
+}
+
+// Market insight from backend
+export interface MarketInsight {
+  id: string;
+  title: string;
+  summary: string;
+  category: string;
+  keyFindings: string[];
+  implications: string[];
+  recommendations: string[];
+  sources: string[];
+  confidence: number;
+}
+
+// Competitor analysis from backend
+export interface CompetitorAnalysis {
+  id: string;
+  competitorName: string;
+  website: string | null;
+  description: string;
+  strengths: string[];
+  weaknesses: string[];
+  opportunities: string[];
+  threats: string[];
+  products: string[];
+  positioning: string | null;
+  keyDifferentiators: string[];
+  confidence: number;
+}
+
+// Customer persona from backend
+export interface CustomerPersona {
+  id: string;
+  name: string;
+  role: string;
+  companySize: string | null;
+  industries: string[];
+  goals: string[];
+  challenges: string[];
+  painPoints: string[];
+  preferredChannels: string[];
+}
+
+// Campaign brief from backend
+export interface CampaignBrief {
+  id: string;
+  name: string;
+  objective: string;
+  targetPersona: string | null;
+  keyMessages: string[];
+  valuePropositions: string[];
+  callToAction: string | null;
+  channels: string[];
+  emailTemplates: string[];
+  linkedinPosts: string[];
 }
 
 // Decision attribution for transparency
@@ -36,7 +117,7 @@ export interface DecisionAttribution {
   algorithmDecisions: number;
   llmDecisions: number;
   toolCalls: number;
-  determinismRatio: number;  // 0-1, higher = more deterministic
+  determinismRatio: number;
   breakdown: DecisionBreakdown[];
 }
 
@@ -48,22 +129,36 @@ export interface DecisionBreakdown {
   executionTimeMs: number;
 }
 
-export interface Insight {
-  text: string;
-}
-
+// Campaign for display (simplified)
 export interface Campaign {
   type: string;
   title: string;
   ready: boolean;
+  content?: string;
 }
 
+// Full analysis result
 export interface AnalysisResult {
+  // From backend
+  id?: string;
+  executiveSummary?: string;
+  keyRecommendations?: string[];
+  agentsUsed?: string[];
+  totalConfidence?: number;
+  processingTimeSeconds?: number;
+
+  // Transformed for UI display
   leads: Lead[];
   insights: string[];
+  marketInsights?: MarketInsight[];
+  competitors?: CompetitorAnalysis[];
+  personas?: CustomerPersona[];
   campaigns: Campaign[];
-  decisionAttribution?: DecisionAttribution;
+  campaignBrief?: CampaignBrief;
+
+  // Metrics
   totalPipelineValue?: number;
+  decisionAttribution?: DecisionAttribution;
 }
 
 export interface Agent {
@@ -125,3 +220,19 @@ export const AGENTS: Agent[] = [
     capabilities: ['Messaging', 'Content Creation', 'Campaign Planning'],
   },
 ];
+
+// Industry options matching backend
+export const INDUSTRIES = [
+  { value: 'fintech', label: 'Fintech' },
+  { value: 'saas', label: 'SaaS' },
+  { value: 'ecommerce', label: 'E-commerce' },
+  { value: 'healthtech', label: 'Healthtech' },
+  { value: 'edtech', label: 'Edtech' },
+  { value: 'proptech', label: 'Proptech' },
+  { value: 'logistics', label: 'Logistics' },
+  { value: 'manufacturing', label: 'Manufacturing' },
+  { value: 'professional_services', label: 'Professional Services' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+export type IndustryValue = typeof INDUSTRIES[number]['value'];

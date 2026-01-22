@@ -1,0 +1,13 @@
+[project]
+name = "gtm-advisor-market-intelligence"
+version = "0.1.0"
+description = "Market Intelligence Agent - Analyzes market trends and opportunities"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "structlog>=24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

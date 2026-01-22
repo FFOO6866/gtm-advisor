@@ -1,36 +1,44 @@
+/**
+ * Onboarding Modal for GTM Advisor
+ *
+ * Collects company information for analysis.
+ * Backend-aware with proper industry values.
+ */
+
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Sparkles, ArrowRight, Building2, Target, Users, Zap } from 'lucide-react';
-import { CompanyInfo, AGENTS } from '../types';
+import { Sparkles, ArrowRight, Building2, Target, Users, Zap, AlertTriangle, Globe } from 'lucide-react';
+import { CompanyInfo, AGENTS, INDUSTRIES } from '../types';
 
 interface OnboardingModalProps {
   onSubmit: (company: CompanyInfo) => void;
+  isBackendAvailable?: boolean;
 }
 
-const INDUSTRIES = [
-  'Fintech',
-  'SaaS',
-  'E-commerce',
-  'Healthtech',
-  'Edtech',
-  'Proptech',
-  'Logistics',
-  'Professional Services',
-  'Other',
-];
-
-export function OnboardingModal({ onSubmit }: OnboardingModalProps) {
+export function OnboardingModal({ onSubmit, isBackendAvailable = true }: OnboardingModalProps) {
   const [step, setStep] = useState(0);
   const [formData, setFormData] = useState<Partial<CompanyInfo>>({
     name: '',
     description: '',
     industry: '',
     goals: [],
+    challenges: [],
     competitors: [],
+    targetMarkets: ['Singapore'],
+    valueProposition: '',
   });
 
   const handleSubmit = () => {
-    onSubmit(formData as CompanyInfo);
+    onSubmit({
+      name: formData.name || '',
+      description: formData.description || '',
+      industry: formData.industry || 'other',
+      goals: formData.goals || [],
+      challenges: formData.challenges || [],
+      competitors: formData.competitors || [],
+      targetMarkets: formData.targetMarkets || ['Singapore'],
+      valueProposition: formData.valueProposition,
+    });
   };
 
   const canProceed = () => {
@@ -57,6 +65,25 @@ export function OnboardingModal({ onSubmit }: OnboardingModalProps) {
         exit={{ scale: 0.95, y: 20 }}
       >
         <div className="glass-card p-8 rounded-3xl">
+          {/* Backend Warning */}
+          {!isBackendAvailable && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 p-4 rounded-xl bg-amber-500/20 border border-amber-500/30"
+            >
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />
+                <div>
+                  <p className="text-amber-200 font-medium">Backend Not Available</p>
+                  <p className="text-amber-200/70 text-sm">
+                    Start the gateway server: <code className="bg-black/30 px-2 py-0.5 rounded">uv run uvicorn services.gateway.src.main:app --reload --port 8000</code>
+                  </p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
           {/* Header */}
           <div className="text-center mb-8">
             <motion.div
@@ -94,6 +121,7 @@ export function OnboardingModal({ onSubmit }: OnboardingModalProps) {
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: i * 0.1 }}
                 whileHover={{ scale: 1.1, y: -5 }}
+                title={agent.name}
               >
                 {agent.avatar}
               </motion.div>
@@ -129,19 +157,19 @@ export function OnboardingModal({ onSubmit }: OnboardingModalProps) {
                     Industry
                   </label>
                   <div className="grid grid-cols-3 gap-2">
-                    {INDUSTRIES.map((industry) => (
+                    {INDUSTRIES.map(({ value, label }) => (
                       <button
-                        key={industry}
-                        onClick={() => setFormData({ ...formData, industry })}
+                        key={value}
+                        onClick={() => setFormData({ ...formData, industry: value })}
                         className={`
                           px-4 py-2 rounded-xl text-sm font-medium transition-all
-                          ${formData.industry === industry
+                          ${formData.industry === value
                             ? 'bg-gradient-to-r from-purple-500 to-blue-500 text-white'
                             : 'bg-white/5 text-white/70 hover:bg-white/10 border border-white/10'
                           }
                         `}
                       >
-                        {industry}
+                        {label}
                       </button>
                     ))}
                   </div>
@@ -164,8 +192,22 @@ export function OnboardingModal({ onSubmit }: OnboardingModalProps) {
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     placeholder="Describe your product/service, target customers, and unique value proposition..."
-                    className="input-glass min-h-[120px] resize-none"
+                    className="input-glass min-h-[100px] resize-none"
                     autoFocus
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-white/70 mb-2">
+                    <Target className="w-4 h-4 inline mr-2" />
+                    Value Proposition (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.valueProposition}
+                    onChange={(e) => setFormData({ ...formData, valueProposition: e.target.value })}
+                    placeholder="e.g., We help SMEs reduce costs by 40% through automation"
+                    className="input-glass"
                   />
                 </div>
 
@@ -184,6 +226,36 @@ export function OnboardingModal({ onSubmit }: OnboardingModalProps) {
                     placeholder="e.g., Competitor A, Competitor B"
                     className="input-glass"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-white/70 mb-2">
+                    <Globe className="w-4 h-4 inline mr-2" />
+                    Target Markets
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {['Singapore', 'Malaysia', 'Indonesia', 'Thailand', 'Vietnam', 'Philippines'].map((market) => (
+                      <button
+                        key={market}
+                        onClick={() => {
+                          const current = formData.targetMarkets || [];
+                          const updated = current.includes(market)
+                            ? current.filter(m => m !== market)
+                            : [...current, market];
+                          setFormData({ ...formData, targetMarkets: updated });
+                        }}
+                        className={`
+                          px-3 py-1.5 rounded-lg text-sm font-medium transition-all
+                          ${formData.targetMarkets?.includes(market)
+                            ? 'bg-gradient-to-r from-purple-500 to-blue-500 text-white'
+                            : 'bg-white/5 text-white/70 hover:bg-white/10 border border-white/10'
+                          }
+                        `}
+                      >
+                        {market}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -230,7 +302,7 @@ export function OnboardingModal({ onSubmit }: OnboardingModalProps) {
               ) : (
                 <button
                   onClick={handleSubmit}
-                  disabled={!canProceed()}
+                  disabled={!canProceed() || !isBackendAvailable}
                   className="btn-primary flex items-center gap-2 disabled:opacity-50"
                 >
                   <Sparkles className="w-4 h-4" />
