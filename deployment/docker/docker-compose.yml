@@ -1,0 +1,146 @@
+version: '3.8'
+
+services:
+  # =============================================================================
+  # Gateway Service (FastAPI Backend)
+  # =============================================================================
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - GATEWAY_HOST=0.0.0.0
+      - GATEWAY_PORT=8000
+      - GATEWAY_ENVIRONMENT=development
+      - GTM_ENVIRONMENT=development
+      - GTM_ENABLE_GOVERNANCE=true
+      - GTM_ENABLE_OBSERVABILITY=false
+      # LLM API Keys (from .env file)
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - NEWSAPI_API_KEY=${NEWSAPI_API_KEY}
+      - EODHD_API_KEY=${EODHD_API_KEY}
+      # Database (optional)
+      - GTM_REDIS_URL=redis://redis:6379
+      - GTM_POSTGRES_URL=${GTM_POSTGRES_URL:-}
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # =============================================================================
+  # Dashboard (React Frontend)
+  # =============================================================================
+  dashboard:
+    build:
+      context: ../../services/dashboard
+      dockerfile: ../../deployment/docker/Dockerfile.dashboard
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # Redis (Rate Limiting & Caching)
+  # =============================================================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # PostgreSQL (Optional - for persistent storage)
+  # =============================================================================
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=gtm_advisor
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-gtm_dev_password}
+      - POSTGRES_DB=gtm_advisor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gtm_advisor"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    profiles:
+      - full
+
+  # =============================================================================
+  # Observability (Optional)
+  # =============================================================================
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    ports:
+      - "16686:16686"  # UI
+      - "6831:6831/udp"  # Compact thrift
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+    profiles:
+      - observability
+
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: unless-stopped
+    profiles:
+      - observability
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    profiles:
+      - observability
+
+volumes:
+  redis_data:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: gtm-advisor-network

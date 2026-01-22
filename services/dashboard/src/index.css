@@ -1,0 +1,528 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================
+   ROOT VARIABLES
+   ============================================ */
+:root {
+  /* Agent glow colors */
+  --agent-strategist: 139, 92, 246;
+  --agent-market: 16, 185, 129;
+  --agent-competitor: 245, 158, 11;
+  --agent-customer: 236, 72, 153;
+  --agent-leads: 59, 130, 246;
+  --agent-campaign: 239, 68, 68;
+
+  /* Aurora colors */
+  --aurora-1: 59, 130, 246;
+  --aurora-2: 139, 92, 246;
+  --aurora-3: 236, 72, 153;
+  --aurora-4: 16, 185, 129;
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+@layer base {
+  * {
+    @apply border-surface-200;
+  }
+
+  html {
+    @apply antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-surface text-white font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-50;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-300 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-surface-300/80;
+  }
+}
+
+/* ============================================
+   AURORA BACKGROUND
+   ============================================ */
+@layer components {
+  .aurora-bg {
+    @apply fixed inset-0 overflow-hidden pointer-events-none;
+    z-index: -1;
+  }
+
+  .aurora-bg::before {
+    content: '';
+    @apply absolute inset-0;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(var(--aurora-1), 0.15), transparent),
+      radial-gradient(ellipse 60% 40% at 80% 50%, rgba(var(--aurora-2), 0.1), transparent),
+      radial-gradient(ellipse 50% 60% at 20% 80%, rgba(var(--aurora-3), 0.1), transparent),
+      radial-gradient(ellipse 70% 50% at 60% 100%, rgba(var(--aurora-4), 0.08), transparent);
+    animation: aurora-shift 30s ease-in-out infinite alternate;
+  }
+
+  .aurora-bg::after {
+    content: '';
+    @apply absolute inset-0;
+    background:
+      radial-gradient(ellipse 100% 100% at 50% 50%, transparent 40%, rgba(10, 10, 15, 0.8)),
+      linear-gradient(180deg, rgba(10, 10, 15, 0.2) 0%, rgba(10, 10, 15, 0.8) 100%);
+  }
+
+  @keyframes aurora-shift {
+    0% {
+      transform: translateX(0) translateY(0) scale(1);
+      filter: blur(40px);
+    }
+    50% {
+      transform: translateX(-5%) translateY(-5%) scale(1.1);
+      filter: blur(50px);
+    }
+    100% {
+      transform: translateX(5%) translateY(5%) scale(1);
+      filter: blur(40px);
+    }
+  }
+}
+
+/* ============================================
+   GLASSMORPHISM CARDS
+   ============================================ */
+@layer components {
+  .glass-card {
+    @apply relative overflow-hidden rounded-2xl;
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.02) 100%
+    );
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .glass-card::before {
+    content: '';
+    @apply absolute inset-0 pointer-events-none;
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.1) 0%,
+      transparent 50%
+    );
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+
+  .glass-card:hover::before {
+    opacity: 1;
+  }
+
+  /* Agent card with glow */
+  .agent-card {
+    @apply glass-card transition-all duration-500;
+    --glow-color: rgba(var(--agent-color, 139, 92, 246), 0.4);
+  }
+
+  .agent-card:hover {
+    transform: translateY(-4px);
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.4),
+      0 0 30px -10px var(--glow-color),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
+  .agent-card.active {
+    border-color: rgba(var(--agent-color), 0.5);
+    box-shadow:
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      0 0 40px -10px var(--glow-color),
+      inset 0 0 20px -10px var(--glow-color);
+  }
+}
+
+/* ============================================
+   CONNECTION LINES (A2A VISUALIZATION)
+   ============================================ */
+@layer components {
+  .connection-line {
+    stroke: url(#connection-gradient);
+    stroke-width: 2;
+    fill: none;
+    stroke-dasharray: 8 4;
+    animation: connection-flow 2s linear infinite;
+    filter: drop-shadow(0 0 4px rgba(139, 92, 246, 0.5));
+  }
+
+  .connection-line.active {
+    stroke-width: 3;
+    stroke-dasharray: none;
+    animation: connection-pulse 1s ease-in-out infinite;
+    filter: drop-shadow(0 0 8px rgba(139, 92, 246, 0.8));
+  }
+
+  @keyframes connection-flow {
+    from {
+      stroke-dashoffset: 24;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  /* Particle effect on connections */
+  .connection-particle {
+    @apply absolute w-2 h-2 rounded-full;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.9), rgba(139, 92, 246, 0.5));
+    box-shadow: 0 0 10px 2px rgba(139, 92, 246, 0.6);
+    animation: particle-flow 2s ease-in-out infinite;
+  }
+
+  @keyframes particle-flow {
+    0% {
+      offset-distance: 0%;
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    90% {
+      opacity: 1;
+    }
+    100% {
+      offset-distance: 100%;
+      opacity: 0;
+    }
+  }
+}
+
+/* ============================================
+   AGENT STATUS INDICATORS
+   ============================================ */
+@layer components {
+  .status-indicator {
+    @apply relative w-3 h-3 rounded-full;
+  }
+
+  .status-indicator::before {
+    content: '';
+    @apply absolute inset-0 rounded-full;
+    background: inherit;
+    animation: status-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  .status-indicator.idle {
+    @apply bg-gray-500;
+  }
+
+  .status-indicator.thinking {
+    @apply bg-amber-500;
+  }
+
+  .status-indicator.thinking::before {
+    animation: status-ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  .status-indicator.active {
+    @apply bg-green-500;
+  }
+
+  .status-indicator.active::before {
+    animation: status-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  @keyframes status-ping {
+    0% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    75%, 100% {
+      transform: scale(2);
+      opacity: 0;
+    }
+  }
+}
+
+/* ============================================
+   THINKING / TYPING ANIMATION
+   ============================================ */
+@layer components {
+  .thinking-dots {
+    @apply flex gap-1.5 items-center;
+  }
+
+  .thinking-dots span {
+    @apply w-2 h-2 rounded-full bg-white/60;
+    animation: thinking-bounce 1.4s ease-in-out infinite;
+  }
+
+  .thinking-dots span:nth-child(1) {
+    animation-delay: 0s;
+  }
+
+  .thinking-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .thinking-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @keyframes thinking-bounce {
+    0%, 60%, 100% {
+      transform: translateY(0);
+      opacity: 0.4;
+    }
+    30% {
+      transform: translateY(-8px);
+      opacity: 1;
+    }
+  }
+
+  /* Brain wave animation for "thinking" */
+  .brain-wave {
+    @apply relative overflow-hidden;
+  }
+
+  .brain-wave::after {
+    content: '';
+    @apply absolute inset-0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(139, 92, 246, 0.2),
+      transparent
+    );
+    animation: brain-wave-sweep 2s ease-in-out infinite;
+  }
+
+  @keyframes brain-wave-sweep {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+}
+
+/* ============================================
+   BUTTON STYLES
+   ============================================ */
+@layer components {
+  .btn-primary {
+    @apply relative px-6 py-3 rounded-xl font-medium text-white overflow-hidden;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    transition: all 0.3s ease;
+  }
+
+  .btn-primary::before {
+    content: '';
+    @apply absolute inset-0 opacity-0;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    transition: opacity 0.3s ease;
+  }
+
+  .btn-primary:hover::before {
+    opacity: 1;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px -10px rgba(139, 92, 246, 0.5);
+  }
+
+  .btn-primary span {
+    @apply relative z-10;
+  }
+
+  .btn-ghost {
+    @apply px-4 py-2 rounded-lg font-medium text-white/70 transition-all duration-200;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .btn-ghost:hover {
+    @apply text-white bg-white/5 border-white/20;
+  }
+}
+
+/* ============================================
+   INPUT STYLES
+   ============================================ */
+@layer components {
+  .input-glass {
+    @apply w-full px-4 py-3 rounded-xl text-white placeholder-white/40;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(8px);
+    transition: all 0.2s ease;
+  }
+
+  .input-glass:focus {
+    outline: none;
+    border-color: rgba(139, 92, 246, 0.5);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+  }
+}
+
+/* ============================================
+   AGENT AVATAR RING
+   ============================================ */
+@layer components {
+  .avatar-ring {
+    @apply relative rounded-full p-0.5;
+    background: conic-gradient(
+      from 0deg,
+      rgba(var(--agent-color), 0.8),
+      rgba(var(--agent-color), 0.2),
+      rgba(var(--agent-color), 0.8)
+    );
+  }
+
+  .avatar-ring.active {
+    animation: ring-spin 3s linear infinite;
+  }
+
+  @keyframes ring-spin {
+    from {
+      background: conic-gradient(
+        from 0deg,
+        rgba(var(--agent-color), 0.8),
+        rgba(var(--agent-color), 0.2),
+        rgba(var(--agent-color), 0.8)
+      );
+    }
+    to {
+      background: conic-gradient(
+        from 360deg,
+        rgba(var(--agent-color), 0.8),
+        rgba(var(--agent-color), 0.2),
+        rgba(var(--agent-color), 0.8)
+      );
+    }
+  }
+}
+
+/* ============================================
+   PROGRESS INDICATORS
+   ============================================ */
+@layer components {
+  .progress-ring {
+    @apply relative;
+    --progress: 0;
+    --size: 48px;
+    --stroke-width: 4px;
+  }
+
+  .progress-ring svg {
+    transform: rotate(-90deg);
+  }
+
+  .progress-ring .progress-circle {
+    fill: none;
+    stroke: rgba(var(--agent-color), 0.8);
+    stroke-width: var(--stroke-width);
+    stroke-linecap: round;
+    stroke-dasharray: 283;
+    stroke-dashoffset: calc(283 - (283 * var(--progress)));
+    transition: stroke-dashoffset 0.5s ease;
+  }
+
+  .progress-ring .progress-bg {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.1);
+    stroke-width: var(--stroke-width);
+  }
+}
+
+/* ============================================
+   MESSAGE BUBBLES
+   ============================================ */
+@layer components {
+  .message-bubble {
+    @apply relative max-w-[80%] px-4 py-3 rounded-2xl;
+    animation: message-appear 0.3s ease-out;
+  }
+
+  .message-bubble.user {
+    @apply ml-auto bg-gradient-to-br from-brand-500 to-brand-600;
+    border-bottom-right-radius: 6px;
+  }
+
+  .message-bubble.agent {
+    @apply mr-auto;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom-left-radius: 6px;
+  }
+
+  @keyframes message-appear {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #3b82f6, #8b5cf6, #ec4899);
+  }
+
+  .text-gradient-subtle {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #ffffff, #a5b4fc);
+  }
+
+  .border-gradient {
+    border: 1px solid transparent;
+    background: linear-gradient(#0a0a0f, #0a0a0f) padding-box,
+                linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(59, 130, 246, 0.5)) border-box;
+  }
+
+  .glow-strategist { --glow-color: rgba(139, 92, 246, 0.5); }
+  .glow-market { --glow-color: rgba(16, 185, 129, 0.5); }
+  .glow-competitor { --glow-color: rgba(245, 158, 11, 0.5); }
+  .glow-customer { --glow-color: rgba(236, 72, 153, 0.5); }
+  .glow-leads { --glow-color: rgba(59, 130, 246, 0.5); }
+  .glow-campaign { --glow-color: rgba(239, 68, 68, 0.5); }
+
+  /* Mask for fading edges */
+  .mask-fade-y {
+    mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
+  }
+}
