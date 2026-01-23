@@ -40,7 +40,7 @@ class PerplexityProvider(LLMProvider):
 
     @property
     def default_model(self) -> str:
-        return "llama-3.1-sonar-large-128k-online"
+        return "sonar"  # Updated model name per Perplexity API docs
 
     def _get_client(self) -> Any:
         """Lazy initialization of Perplexity client (OpenAI-compatible)."""
