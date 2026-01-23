@@ -235,17 +235,43 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 context=context,
             )
 
-            # Convert to MarketInsight format
+            # Convert MarketIntelligenceOutput to MarketInsight format
             if hasattr(market_result, "insights"):
                 result.market_insights = market_result.insights
             else:
-                # Create MarketInsight from the result
+                # Extract key findings from trends and opportunities
+                key_findings = []
+                implications = []
+                recommendations = []
+
+                # Extract from trends
+                if hasattr(market_result, "key_trends"):
+                    for trend in market_result.key_trends[:3]:
+                        key_findings.append(f"{trend.name}: {trend.description}")
+
+                # Extract from opportunities
+                if hasattr(market_result, "opportunities"):
+                    for opp in market_result.opportunities[:3]:
+                        key_findings.append(f"Opportunity: {opp.title}")
+                        recommendations.append(opp.recommended_action)
+
+                # Extract implications
+                if hasattr(market_result, "implications_for_gtm"):
+                    implications = market_result.implications_for_gtm[:5]
+
+                # Extract threats
+                if hasattr(market_result, "threats"):
+                    for threat in market_result.threats[:3]:
+                        key_findings.append(f"Threat: {threat}")
+
                 result.market_insights = [
                     MarketInsight(
-                        title=f"{request.industry.value.title()} Market Analysis",
-                        summary=market_result.summary if hasattr(market_result, "summary") else str(market_result),
+                        title=f"{request.industry.value.title()} Market Analysis - {market_result.region if hasattr(market_result, 'region') else 'Singapore'}",
+                        summary=market_result.market_summary if hasattr(market_result, "market_summary") else "Market analysis completed.",
                         category="trend",
-                        key_findings=market_result.key_findings if hasattr(market_result, "key_findings") else [],
+                        key_findings=key_findings or ["Market data gathered successfully"],
+                        implications=implications,
+                        recommendations=recommendations,
                         sources=market_result.sources if hasattr(market_result, "sources") else [],
                         confidence=market_result.confidence if hasattr(market_result, "confidence") else 0.7,
                     )

@@ -23,26 +23,40 @@ export function AgentNetwork({ activities, activeConnections, isAnalyzing }: Age
     return activities.find(a => a.agentId === agentId) || { status: 'idle', progress: 0 };
   };
 
-  // Calculate connection paths
+  // Calculate connection paths with offset to avoid overlaying nodes
   const connectionPaths = useMemo(() => {
+    const nodeRadius = 8; // Radius to stop before nodes (in viewBox units)
+
     return activeConnections.map(([from, to]) => {
       const fromPos = AGENT_POSITIONS[from];
       const toPos = AGENT_POSITIONS[to];
       if (!fromPos || !toPos) return null;
 
-      // Create curved path
-      const midX = (fromPos.x + toPos.x) / 2;
-      const midY = (fromPos.y + toPos.y) / 2;
       const dx = toPos.x - fromPos.x;
       const dy = toPos.y - fromPos.y;
-      // Perpendicular offset for curve
-      const offset = Math.sqrt(dx * dx + dy * dy) * 0.2;
-      const perpX = -dy / Math.sqrt(dx * dx + dy * dy) * offset;
-      const perpY = dx / Math.sqrt(dx * dx + dy * dy) * offset;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      // Normalize direction
+      const nx = dx / distance;
+      const ny = dy / distance;
+
+      // Offset start and end points to stop before node circles
+      const startX = fromPos.x + nx * nodeRadius;
+      const startY = fromPos.y + ny * nodeRadius;
+      const endX = toPos.x - nx * nodeRadius;
+      const endY = toPos.y - ny * nodeRadius;
+
+      // Create curved path with larger curve offset
+      const midX = (startX + endX) / 2;
+      const midY = (startY + endY) / 2;
+      // Perpendicular offset for curve - increased for better arcing
+      const curveOffset = Math.sqrt(dx * dx + dy * dy) * 0.35;
+      const perpX = -ny * curveOffset;
+      const perpY = nx * curveOffset;
 
       return {
         id: `${from}-${to}`,
-        d: `M ${fromPos.x} ${fromPos.y} Q ${midX + perpX} ${midY + perpY} ${toPos.x} ${toPos.y}`,
+        d: `M ${startX} ${startY} Q ${midX + perpX} ${midY + perpY} ${endX} ${endY}`,
         from,
         to,
       };
@@ -85,18 +99,32 @@ export function AgentNetwork({ activities, activeConnections, isAnalyzing }: Age
             </filter>
           </defs>
 
-          {/* Static connection lines (subtle) */}
+          {/* Static connection lines (subtle) - offset from node centers */}
           {AGENTS.slice(1).map(agent => {
             const strategist = AGENT_POSITIONS['gtm-strategist'];
             const agentPos = AGENT_POSITIONS[agent.id];
+            const nodeRadius = 8;
+
+            const dx = agentPos.x - strategist.x;
+            const dy = agentPos.y - strategist.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const nx = dx / distance;
+            const ny = dy / distance;
+
+            // Offset to stop before node circles
+            const x1 = strategist.x + nx * nodeRadius;
+            const y1 = strategist.y + ny * nodeRadius;
+            const x2 = agentPos.x - nx * nodeRadius;
+            const y2 = agentPos.y - ny * nodeRadius;
+
             return (
               <line
                 key={`static-${agent.id}`}
-                x1={strategist.x}
-                y1={strategist.y}
-                x2={agentPos.x}
-                y2={agentPos.y}
-                stroke="rgba(255, 255, 255, 0.05)"
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke="rgba(255, 255, 255, 0.08)"
                 strokeWidth="0.5"
                 strokeDasharray="2 2"
               />
