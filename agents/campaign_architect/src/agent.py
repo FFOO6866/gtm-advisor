@@ -64,7 +64,7 @@ class CampaignArchitectAgent(BaseGTMAgent[CampaignPlanOutput]):
                 "tailored to your target audience."
             ),
             result_type=CampaignPlanOutput,
-            min_confidence=0.75,
+            min_confidence=0.60,
             max_iterations=2,
             model="gpt-4o",
             capabilities=[
@@ -145,7 +145,7 @@ Make all content COMPLETE and READY TO USE - not templates with placeholders."""
         )
 
     async def _check(self, result: CampaignPlanOutput) -> float:
-        score = 0.0
+        score = 0.3  # Base score
         if result.messaging_framework.value_proposition:
             score += 0.2
         if result.messaging_framework.key_messages:

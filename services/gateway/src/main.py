@@ -11,6 +11,19 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+# Load .env file BEFORE any other imports that might need env vars
+from dotenv import load_dotenv
+
+# Find and load .env from project root
+_project_root = Path(__file__).parent.parent.parent.parent
+_env_file = _project_root / ".env"
+if _env_file.exists():
+    load_dotenv(_env_file)
+else:
+    # Try current working directory
+    load_dotenv()
 from typing import Any
 
 import structlog

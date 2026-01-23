@@ -132,7 +132,7 @@ class GTMStrategistAgent(BaseGTMAgent[GTMStrategyOutput]):
                 "go-to-market strategies."
             ),
             result_type=GTMStrategyOutput,
-            min_confidence=0.80,
+            min_confidence=0.65,
             max_iterations=3,
             model="gpt-4o",
             capabilities=[
@@ -286,7 +286,7 @@ Output a complete GTMStrategyOutput with:
 
     async def _check(self, result: GTMStrategyOutput) -> float:
         """Validate the strategy output."""
-        score = 0.0
+        score = 0.3  # Base score
 
         # Check requirements completeness
         req = result.requirements

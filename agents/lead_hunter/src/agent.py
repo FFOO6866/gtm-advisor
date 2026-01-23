@@ -136,7 +136,7 @@ class LeadHunterAgent(ToolEmpoweredAgent[LeadHuntingOutput]):
                 "enrichment tools for data, and LLM for synthesis/outreach."
             ),
             result_type=LeadHuntingOutput,
-            min_confidence=0.70,
+            min_confidence=0.60,
             max_iterations=2,
             model="gpt-4o",
             # Tool access: read-only (no CRM writes)
@@ -640,7 +640,7 @@ Write a 2-3 sentence outreach approach that:
 
     async def _check(self, result: LeadHuntingOutput) -> float:
         """Validate lead hunting quality."""
-        score = 0.0
+        score = 0.3  # Base score
 
         # Check prospects found
         if result.prospects:

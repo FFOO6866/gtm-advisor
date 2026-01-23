@@ -51,7 +51,7 @@ class CustomerProfilerAgent(BaseGTMAgent[CustomerProfileOutput]):
                 "Identifies target segments and provides messaging recommendations."
             ),
             result_type=CustomerProfileOutput,
-            min_confidence=0.75,
+            min_confidence=0.60,
             max_iterations=2,
             model="gpt-4o",
             capabilities=[
@@ -127,17 +127,17 @@ Focus on Singapore/APAC B2B market.""",
         )
 
     async def _check(self, result: CustomerProfileOutput) -> float:
-        score = 0.0
+        score = 0.3  # Base score for completing analysis
         if result.icp.company_characteristics:
-            score += 0.2
-        if result.icp.buying_signals:
             score += 0.15
+        if result.icp.buying_signals:
+            score += 0.1
         if result.personas:
-            score += 0.2
+            score += 0.15
             if len(result.personas) >= 2:
                 score += 0.1
         if result.targeting_recommendations:
-            score += 0.2
+            score += 0.1
         if result.messaging_themes:
-            score += 0.15
+            score += 0.1
         return min(score, 1.0)

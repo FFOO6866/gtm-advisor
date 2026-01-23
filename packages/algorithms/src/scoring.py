@@ -82,7 +82,12 @@ class ICPScorer:
     Fully explainable - every score can be attributed to specific criteria.
     """
 
-    def __init__(self, criteria: ICPCriteria):
+    def __init__(self, criteria: ICPCriteria | None = None):
+        self.criteria = criteria or ICPCriteria()  # Use defaults if not provided
+        self._validate_weights()
+
+    def configure(self, criteria: ICPCriteria) -> None:
+        """Update scoring criteria."""
         self.criteria = criteria
         self._validate_weights()
 
