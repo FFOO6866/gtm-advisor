@@ -1,0 +1,11 @@
+[project]
+name = "gtm-company-enricher"
+version = "0.1.0"
+description = "Company Enricher Agent - Website analysis and company profile enrichment"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

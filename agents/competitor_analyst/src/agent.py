@@ -1,16 +1,24 @@
 """Competitor Analyst Agent - Real competitive intelligence.
 
 Uses Perplexity for real-time competitor research and EODHD for financial data.
+Subscribes to COMPETITOR_FOUND discoveries from other agents for dynamic analysis.
 """
 
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
 from packages.core.src.types import CompetitorAnalysis
+from packages.core.src.agent_bus import (
+    AgentBus,
+    AgentMessage,
+    DiscoveryType,
+    get_agent_bus,
+)
 from packages.integrations.eodhd.src import get_eodhd_client
 from packages.llm.src import get_llm_manager
 
@@ -44,9 +52,18 @@ class CompetitorAnalystAgent(BaseGTMAgent[CompetitorIntelOutput]):
     - Perplexity for real-time company research
     - EODHD for public company financials
     - Web research for product/pricing info
+
+    A2A Integration:
+    - Subscribes to COMPETITOR_FOUND discoveries from CompanyEnricher
+    - Dynamically adds discovered competitors to analysis
+    - Publishes COMPETITOR_WEAKNESS discoveries for other agents
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        agent_bus: AgentBus | None = None,
+        analysis_id: UUID | None = None,
+    ) -> None:
         super().__init__(
             name="competitor-analyst",
             description=(
@@ -71,11 +88,67 @@ class CompetitorAnalystAgent(BaseGTMAgent[CompetitorIntelOutput]):
                     name="positioning-analysis",
                     description="Analyze market positioning",
                 ),
+                AgentCapability(
+                    name="a2a-discovery",
+                    description="React to competitor discoveries from other agents",
+                ),
             ],
         )
 
         self._perplexity = get_llm_manager().perplexity
         self._eodhd = get_eodhd_client()
+        self._agent_bus = agent_bus or get_agent_bus()
+        self._analysis_id = analysis_id
+        self._discovered_competitors: list[str] = []
+
+        # Subscribe to competitor discoveries
+        self._subscribe_to_discoveries()
+
+    def _subscribe_to_discoveries(self) -> None:
+        """Subscribe to relevant discovery types from other agents."""
+        self._agent_bus.subscribe(
+            agent_id=self.name,
+            discovery_type=DiscoveryType.COMPETITOR_FOUND,
+            handler=self._on_competitor_discovered,
+        )
+
+        # Also subscribe to company profile for context
+        self._agent_bus.subscribe(
+            agent_id=self.name,
+            discovery_type=DiscoveryType.COMPANY_PROFILE,
+            handler=self._on_company_profile,
+        )
+
+    async def _on_competitor_discovered(self, message: AgentMessage) -> None:
+        """Handle competitor discovery from another agent."""
+        competitor_name = message.content.get("competitor_name")
+        if competitor_name and competitor_name not in self._discovered_competitors:
+            self._discovered_competitors.append(competitor_name)
+            self._logger.info(
+                "competitor_discovered_via_a2a",
+                competitor=competitor_name,
+                from_agent=message.from_agent,
+            )
+
+    async def _on_company_profile(self, message: AgentMessage) -> None:
+        """Handle company profile discovery for context enrichment."""
+        self._logger.debug(
+            "company_profile_received",
+            company=message.content.get("company_name"),
+            from_agent=message.from_agent,
+        )
+
+    def set_analysis_id(self, analysis_id: UUID) -> None:
+        """Set the current analysis ID."""
+        self._analysis_id = analysis_id
+
+    def get_discovered_competitors(self) -> list[str]:
+        """Get competitors discovered via A2A communication."""
+        return self._discovered_competitors.copy()
+
+    def clear_discovered_competitors(self) -> None:
+        """Clear discovered competitors (call between analyses)."""
+        self._discovered_competitors.clear()
 
     def get_system_prompt(self) -> str:
         return """You are the Competitor Analyst, specializing in competitive intelligence for Singapore/APAC markets.
@@ -99,13 +172,24 @@ Focus on Singapore/APAC competitors when relevant."""
         competitors = context.get("known_competitors", [])
         industry = context.get("industry", "technology")
 
+        # Merge in competitors discovered via A2A communication
+        all_competitors = list(set(competitors + self._discovered_competitors))
+
+        self._logger.info(
+            "planning_competitor_analysis",
+            known_competitors=len(competitors),
+            discovered_competitors=len(self._discovered_competitors),
+            total_competitors=len(all_competitors),
+        )
+
         return {
-            "known_competitors": competitors,
+            "known_competitors": all_competitors,
             "industry": industry,
             "research_queries": [
-                f"{comp} company analysis products pricing" for comp in competitors[:3]
+                f"{comp} company analysis products pricing" for comp in all_competitors[:5]
             ]
             + [f"top {industry} competitors Singapore"],
+            "discovered_via_a2a": self._discovered_competitors.copy(),
         }
 
     async def _do(
@@ -189,3 +273,26 @@ Create a complete CompetitorIntelOutput with:
         if result.market_landscape:
             score += 0.1
         return min(score, 1.0)
+
+    async def _act(self, result: CompetitorIntelOutput, confidence: float) -> CompetitorIntelOutput:
+        """Publish discovered weaknesses to the AgentBus."""
+        result.confidence = confidence
+
+        # Publish competitor weaknesses for Campaign Architect to exploit
+        if self._agent_bus and result.competitors:
+            for competitor in result.competitors:
+                if competitor.weaknesses:
+                    await self._agent_bus.publish(
+                        from_agent=self.name,
+                        discovery_type=DiscoveryType.COMPETITOR_WEAKNESS,
+                        title=f"Weaknesses: {competitor.competitor_name}",
+                        content={
+                            "competitor_name": competitor.competitor_name,
+                            "weaknesses": competitor.weaknesses,
+                            "opportunities": competitor.opportunities,
+                        },
+                        confidence=confidence,
+                        analysis_id=self._analysis_id,
+                    )
+
+        return result

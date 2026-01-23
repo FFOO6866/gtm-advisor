@@ -11,6 +11,7 @@ const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
 // Types matching backend Pydantic models
 export interface AnalysisRequest {
   company_name: string;
+  website?: string;  // Company website for A2A company enrichment
   description: string;
   industry: string;
   goals: string[];
@@ -139,7 +140,7 @@ export interface AgentCard {
 }
 
 export interface WebSocketMessage {
-  type: 'analysis_started' | 'agent_started' | 'agent_completed' | 'analysis_completed' | 'error';
+  type: 'analysis_started' | 'agent_started' | 'agent_completed' | 'analysis_completed' | 'error' | 'a2a_message';
   agentId: string | null;
   agentName: string | null;
   status: string | null;

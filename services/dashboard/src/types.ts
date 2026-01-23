@@ -6,6 +6,7 @@
 
 export interface CompanyInfo {
   name: string;
+  website?: string;  // Company website for enrichment
   description: string;
   industry: string;
   goals: string[];
@@ -31,6 +32,17 @@ export interface AgentActivity {
   progress: number;
   currentTask?: string;
   message?: string;
+}
+
+// A2A (Agent-to-Agent) message for dynamic collaboration
+export interface A2AMessage {
+  id: string;
+  timestamp: Date;
+  fromAgent: string;
+  toAgent?: string;  // null for broadcasts
+  discoveryType: string;
+  title: string;
+  confidence: number;
 }
 
 // Lead from backend
@@ -178,6 +190,14 @@ export const AGENTS: Agent[] = [
     color: '139, 92, 246', // Purple
     avatar: '🎯',
     capabilities: ['Discovery', 'Strategy', 'Coordination'],
+  },
+  {
+    id: 'company-enricher',
+    name: 'Company Enricher',
+    description: 'Analyzes your website to enrich company profile and discover competitors',
+    color: '99, 102, 241', // Indigo
+    avatar: '🔬',
+    capabilities: ['Website Analysis', 'Company Profile', 'A2A Discovery'],
   },
   {
     id: 'market-intelligence',

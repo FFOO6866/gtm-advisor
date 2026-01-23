@@ -19,6 +19,7 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
   const [step, setStep] = useState(0);
   const [formData, setFormData] = useState<Partial<CompanyInfo>>({
     name: '',
+    website: '',
     description: '',
     industry: '',
     goals: [],
@@ -31,6 +32,7 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
   const handleSubmit = () => {
     onSubmit({
       name: formData.name || '',
+      website: formData.website || undefined,
       description: formData.description || '',
       industry: formData.industry || 'other',
       goals: formData.goals || [],
@@ -149,6 +151,23 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
                     className="input-glass"
                     autoFocus
                   />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-white/70 mb-2">
+                    <Globe className="w-4 h-4 inline mr-2" />
+                    Company Website
+                  </label>
+                  <input
+                    type="url"
+                    value={formData.website}
+                    onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+                    placeholder="e.g., https://yourcompany.com"
+                    className="input-glass"
+                  />
+                  <p className="text-xs text-white/40 mt-1">
+                    We'll analyze your website to auto-enrich company information
+                  </p>
                 </div>
 
                 <div>

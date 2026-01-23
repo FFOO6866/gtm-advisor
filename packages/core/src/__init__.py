@@ -37,6 +37,13 @@ from .protocols import (
     TaskProtocol,
     IntegrationProtocol,
 )
+from .agent_bus import (
+    AgentBus,
+    AgentMessage,
+    DiscoveryType,
+    get_agent_bus,
+    reset_agent_bus,
+)
 
 __all__ = [
     # Config
@@ -74,4 +81,10 @@ __all__ = [
     "AgentProtocol",
     "TaskProtocol",
     "IntegrationProtocol",
+    # A2A Communication
+    "AgentBus",
+    "AgentMessage",
+    "DiscoveryType",
+    "get_agent_bus",
+    "reset_agent_bus",
 ]

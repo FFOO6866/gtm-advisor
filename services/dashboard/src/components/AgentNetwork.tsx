@@ -9,13 +9,15 @@ interface AgentNetworkProps {
 }
 
 // Position agents in a hexagonal pattern around the center strategist
+// Company Enricher is positioned at top center as the first agent in the flow
 const AGENT_POSITIONS: Record<string, { x: number; y: number }> = {
   'gtm-strategist': { x: 50, y: 50 },
-  'market-intelligence': { x: 25, y: 25 },
-  'competitor-analyst': { x: 75, y: 25 },
-  'customer-profiler': { x: 85, y: 55 },
-  'lead-hunter': { x: 65, y: 80 },
-  'campaign-architect': { x: 25, y: 70 },
+  'company-enricher': { x: 50, y: 15 },  // Top center - first in A2A flow
+  'market-intelligence': { x: 20, y: 30 },
+  'competitor-analyst': { x: 80, y: 30 },
+  'customer-profiler': { x: 85, y: 60 },
+  'lead-hunter': { x: 65, y: 85 },
+  'campaign-architect': { x: 20, y: 70 },
 };
 
 export function AgentNetwork({ activities, activeConnections, isAnalyzing }: AgentNetworkProps) {

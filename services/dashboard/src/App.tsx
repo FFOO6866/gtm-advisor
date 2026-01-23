@@ -208,8 +208,62 @@ function App() {
           },
         ]);
         break;
+
+      case 'a2a_message':
+        // A2A (Agent-to-Agent) discovery message
+        if (message.agentId && message.result) {
+          const a2aResult = message.result as {
+            discovery_type?: string;
+            to_agent?: string;
+            confidence?: number;
+          };
+
+          // Show A2A connection in the network
+          if (a2aResult.to_agent) {
+            setActiveConnections((prev) => {
+              const newConnection: [string, string] = [message.agentId!, a2aResult.to_agent!];
+              // Avoid duplicates
+              if (!prev.some(([from, to]) => from === newConnection[0] && to === newConnection[1])) {
+                return [...prev, newConnection];
+              }
+              return prev;
+            });
+          }
+
+          // Add A2A message to conversation
+          const discoveryEmoji = getDiscoveryEmoji(a2aResult.discovery_type);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now().toString(),
+              role: 'agent',
+              agentId: message.agentId!,
+              agentName: AGENTS.find(a => a.id === message.agentId)?.name,
+              content: `${discoveryEmoji} ${message.message || 'Published discovery'}${a2aResult.to_agent ? ` → ${AGENTS.find(a => a.id === a2aResult.to_agent)?.name || a2aResult.to_agent}` : ' (broadcast)'}`,
+              timestamp: new Date(),
+            },
+          ]);
+        }
+        break;
     }
   }, []);
+
+  // Helper function to get emoji for discovery type
+  const getDiscoveryEmoji = (discoveryType?: string): string => {
+    const emojiMap: Record<string, string> = {
+      company_profile: '🏢',
+      company_products: '📦',
+      company_tech_stack: '⚙️',
+      competitor_found: '🔍',
+      competitor_weakness: '🎯',
+      market_trend: '📈',
+      market_opportunity: '💡',
+      icp_segment: '👥',
+      lead_found: '🎣',
+      insight: '💭',
+    };
+    return emojiMap[discoveryType || ''] || '📡';
+  };
 
   // Start real analysis via API
   const runAnalysis = useCallback(
@@ -234,6 +288,7 @@ function App() {
         // Build analysis request
         const request: AnalysisRequest = {
           company_name: company.name,
+          website: company.website,  // Website for A2A company enrichment
           description: company.description,
           industry: company.industry,
           goals: company.goals,
@@ -242,7 +297,7 @@ function App() {
           target_markets: company.targetMarkets || ['Singapore'],
           value_proposition: company.valueProposition,
           include_market_research: true,
-          include_competitor_analysis: company.competitors.length > 0,
+          include_competitor_analysis: true,  // Always include - A2A may discover competitors
           include_customer_profiling: true,
           include_lead_generation: true,
           include_campaign_planning: true,

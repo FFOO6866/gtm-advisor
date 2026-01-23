@@ -1,4 +1,11 @@
-"""Analysis orchestration endpoints."""
+"""Analysis orchestration endpoints.
+
+Features A2A (Agent-to-Agent) communication for dynamic collaboration:
+1. CompanyEnricherAgent runs FIRST to analyze user's company website
+2. It publishes discoveries to the AgentBus
+3. Other agents subscribe and react to these discoveries
+4. Agents can publish their own discoveries for cross-agent insights
+"""
 
 from __future__ import annotations
 
@@ -19,9 +26,16 @@ from packages.core.src.types import (
     LeadProfile,
     MarketInsight,
 )
+from packages.core.src.agent_bus import (
+    AgentBus,
+    AgentMessage,
+    get_agent_bus,
+    reset_agent_bus,
+)
 
 # Import agents
 from agents.campaign_architect.src import CampaignArchitectAgent
+from agents.company_enricher.src import CompanyEnricherAgent
 from agents.competitor_analyst.src import CompetitorAnalystAgent
 from agents.customer_profiler.src import CustomerProfilerAgent
 from agents.gtm_strategist.src import GTMStrategistAgent
@@ -41,6 +55,7 @@ class AnalysisRequest(BaseModel):
     """Request for GTM analysis."""
 
     company_name: str = Field(..., min_length=1)
+    website: str | None = Field(default=None, description="Company website URL for enrichment")
     description: str = Field(default="")
     industry: IndustryVertical = Field(default=IndustryVertical.OTHER)
     goals: list[str] = Field(default_factory=list)
@@ -168,15 +183,45 @@ async def quick_analysis(request: AnalysisRequest) -> AnalysisResponse:
 
 
 async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
-    """Run the full GTM analysis (background task) with real-time WebSocket updates."""
+    """Run the full GTM analysis (background task) with real-time WebSocket updates.
+
+    A2A Flow:
+    1. CompanyEnricherAgent runs first (if website provided) to enrich company data
+    2. Discoveries are published to AgentBus
+    3. Other agents subscribe and use these discoveries
+    4. Cross-agent collaboration happens via the bus
+    """
     data = _analyses[analysis_id]
     data["status"] = "running"
     start_time = time.time()
+
+    # Initialize AgentBus for this analysis
+    agent_bus = get_agent_bus()
+    agent_bus.clear_history(analysis_id)
+
+    # Set up WebSocket broadcast for A2A messages
+    async def broadcast_a2a_message(message: AgentMessage) -> None:
+        """Broadcast A2A messages to frontend."""
+        await send_agent_update(
+            analysis_id=analysis_id,
+            update_type="a2a_message",
+            agent_id=message.from_agent,
+            message=message.title,
+            result={
+                "discovery_type": message.discovery_type.value,
+                "to_agent": message.to_agent,
+                "content_keys": list(message.content.keys()),
+                "confidence": message.confidence,
+            },
+        )
+
+    agent_bus.set_ws_broadcast(broadcast_a2a_message)
 
     try:
         # Build context
         context = {
             "company_name": request.company_name,
+            "website": request.website,
             "description": request.description,
             "industry": request.industry.value,
             "goals": request.goals,
@@ -199,7 +244,10 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
             "breakdown": [],
         }
 
+        # Calculate total steps (including company enrichment if website provided)
+        include_company_enrichment = bool(request.website)
         total_steps = sum([
+            include_company_enrichment,
             request.include_market_research,
             request.include_competitor_analysis,
             request.include_customer_profiling,
@@ -214,6 +262,69 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
             update_type="analysis_started",
             message=f"Starting GTM analysis for {request.company_name}",
         )
+
+        # =====================================================================
+        # STEP 0: Company Enrichment (A2A First Step)
+        # This runs FIRST to provide context for other agents
+        # =====================================================================
+        if include_company_enrichment:
+            agent_id = "company-enricher"
+            data["current_agent"] = agent_id
+
+            await send_agent_update(
+                analysis_id=analysis_id,
+                update_type="agent_started",
+                agent_id=agent_id,
+                agent_name="Company Enricher",
+                status="thinking",
+                message=f"Analyzing company website: {request.website}...",
+            )
+
+            enricher = CompanyEnricherAgent(agent_bus=agent_bus, analysis_id=analysis_id)
+            enrichment_result = await enricher.enrich_company(
+                company_name=request.company_name,
+                website=request.website,
+                industry=request.industry,
+                description=request.description,
+                analysis_id=analysis_id,
+            )
+
+            # Update context with enriched data
+            if enrichment_result:
+                if enrichment_result.description:
+                    context["description"] = enrichment_result.description
+                if enrichment_result.value_propositions:
+                    context["value_proposition"] = "; ".join(enrichment_result.value_propositions)
+                if enrichment_result.mentioned_competitors:
+                    # Add discovered competitors to the list
+                    existing = set(context.get("known_competitors", []))
+                    existing.update(enrichment_result.mentioned_competitors)
+                    context["known_competitors"] = list(existing)
+                if enrichment_result.target_markets:
+                    context["target_markets"] = enrichment_result.target_markets
+
+            data["completed_agents"] = data.get("completed_agents", [])
+            data["completed_agents"].append(agent_id)
+            step += 1
+            data["progress"] = step / total_steps
+
+            await send_agent_update(
+                analysis_id=analysis_id,
+                update_type="agent_completed",
+                agent_id=agent_id,
+                agent_name="Company Enricher",
+                status="complete",
+                progress=data["progress"],
+                message=f"Enriched profile with {len(enrichment_result.products)} products, {len(enrichment_result.mentioned_competitors)} competitors discovered",
+                result={
+                    "products_count": len(enrichment_result.products),
+                    "competitors_discovered": len(enrichment_result.mentioned_competitors),
+                    "tech_stack": len(enrichment_result.tech_stack),
+                },
+            )
+
+            # Small delay to allow A2A messages to propagate
+            await asyncio.sleep(0.1)
 
         # 1. Market Intelligence
         if request.include_market_research:
@@ -294,12 +405,14 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
 
             decision_attribution["llm_decisions"] += 1
 
-        # 2. Competitor Analysis
+        # 2. Competitor Analysis (A2A-enabled)
         if request.include_competitor_analysis:
             agent_id = "competitor-analyst"
             data["current_agent"] = agent_id
 
-            competitors_to_analyze = request.competitors[:3] if request.competitors else ["market leaders"]
+            # Competitors may include A2A-discovered ones from CompanyEnricher
+            all_competitors = context.get("known_competitors", [])
+            competitors_to_analyze = all_competitors[:5] if all_competitors else ["market leaders"]
 
             await send_agent_update(
                 analysis_id=analysis_id,
@@ -307,10 +420,11 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 agent_id=agent_id,
                 agent_name="Competitor Analyst",
                 status="thinking",
-                message=f"Analyzing competitors: {', '.join(competitors_to_analyze)}...",
+                message=f"Analyzing {len(competitors_to_analyze)} competitors (incl. A2A discoveries)...",
             )
 
-            agent = CompetitorAnalystAgent()
+            # Use A2A-enabled agent with bus subscription
+            agent = CompetitorAnalystAgent(agent_bus=agent_bus, analysis_id=analysis_id)
             competitor_result = await agent.run(
                 f"Analyze competitors for {request.company_name} in {request.industry.value}: {', '.join(competitors_to_analyze)}",
                 context=context,
@@ -582,6 +696,7 @@ async def run_analysis_sync(request: AnalysisRequest) -> GTMAnalysisResult:
     # Build context
     context = {
         "company_name": request.company_name,
+        "website": request.website,
         "description": request.description,
         "industry": request.industry.value,
         "goals": request.goals,
