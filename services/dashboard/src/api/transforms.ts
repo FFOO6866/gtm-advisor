@@ -150,7 +150,6 @@ export function transformAnalysisResult(
   // Build decision attribution if provided
   let decisionAttribution: DecisionAttribution | undefined;
   if (decisionData) {
-    const totalDecisions = decisionData.algorithmDecisions + decisionData.llmDecisions;
     decisionAttribution = {
       algorithmDecisions: decisionData.algorithmDecisions,
       llmDecisions: decisionData.llmDecisions,
@@ -158,7 +157,7 @@ export function transformAnalysisResult(
       determinismRatio: decisionData.determinismRatio,
       breakdown: [
         // Generate breakdown based on actual decisions
-        ...leads.map((lead, i) => ({
+        ...leads.map((lead) => ({
           layer: 'analytical' as const,
           component: 'ICP Scorer',
           decision: `Fit score: ${lead.fitScore.toFixed(2)}`,

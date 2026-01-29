@@ -72,7 +72,7 @@ export function ConversationPanel({
         )}
 
         <AnimatePresence initial={false}>
-          {messages.map((message, index) => {
+          {messages.map((message) => {
             const agent = getAgentInfo(message.agentId);
 
             return (

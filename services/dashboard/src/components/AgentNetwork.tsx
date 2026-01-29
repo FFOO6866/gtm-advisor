@@ -6,6 +6,7 @@ interface AgentNetworkProps {
   activities: AgentActivity[];
   activeConnections: [string, string][];
   isAnalyzing: boolean;
+  onAgentClick?: (agentId: string) => void;
 }
 
 // Position agents in a hexagonal pattern around the center strategist
@@ -20,7 +21,7 @@ const AGENT_POSITIONS: Record<string, { x: number; y: number }> = {
   'campaign-architect': { x: 20, y: 70 },
 };
 
-export function AgentNetwork({ activities, activeConnections, isAnalyzing }: AgentNetworkProps) {
+export function AgentNetwork({ activities, activeConnections, isAnalyzing, onAgentClick }: AgentNetworkProps) {
   const getAgentActivity = (agentId: string) => {
     return activities.find(a => a.agentId === agentId) || { status: 'idle', progress: 0 };
   };
@@ -210,6 +211,7 @@ export function AgentNetwork({ activities, activeConnections, isAnalyzing }: Age
                 agent={agent}
                 activity={activity}
                 isCenter={isCenter}
+                onClick={() => onAgentClick?.(agent.id)}
               />
             </motion.div>
           );
@@ -239,19 +241,24 @@ interface AgentNodeProps {
   agent: typeof AGENTS[0];
   activity: { status: string; progress: number };
   isCenter: boolean;
+  onClick?: () => void;
 }
 
-function AgentNode({ agent, activity, isCenter }: AgentNodeProps) {
+function AgentNode({ agent, activity, isCenter, onClick }: AgentNodeProps) {
   const isActive = activity.status === 'thinking' || activity.status === 'active';
   const isComplete = activity.status === 'complete';
 
   return (
     <motion.div
       className={`
-        relative flex flex-col items-center gap-2
+        relative flex flex-col items-center gap-2 cursor-pointer
         ${isCenter ? 'scale-125' : ''}
       `}
       whileHover={{ scale: isCenter ? 1.3 : 1.1 }}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === 'Enter' && onClick?.()}
     >
       {/* Outer glow ring (when active) */}
       <AnimatePresence>

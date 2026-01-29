@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuroraBackground } from './components/AuroraBackground';
 import { AgentNetwork } from './components/AgentNetwork';
@@ -24,7 +25,29 @@ import {
 } from './api/client';
 import { transformAnalysisResult } from './api/transforms';
 
+// Import agent workspace pages
+import {
+  IntelligenceWorkspace,
+  CampaignWorkspace,
+  DemandWorkspace,
+  GenericAgentWorkspace,
+} from './pages';
+
 function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Dashboard />} />
+      <Route path="/agent/market-intelligence" element={<IntelligenceWorkspace />} />
+      <Route path="/agent/campaign-architect" element={<CampaignWorkspace />} />
+      <Route path="/agent/lead-hunter" element={<DemandWorkspace />} />
+      <Route path="/agent/:agentId" element={<GenericAgentWorkspace />} />
+    </Routes>
+  );
+}
+
+function Dashboard() {
+  const navigate = useNavigate();
+
   // State
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
@@ -62,6 +85,11 @@ function App() {
       }
     };
   }, []);
+
+  // Handle agent click - navigate to workspace
+  const handleAgentClick = useCallback((agentId: string) => {
+    navigate(`/agent/${agentId}`);
+  }, [navigate]);
 
   // Handle WebSocket messages for real-time updates
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
@@ -447,7 +475,19 @@ function App() {
               activities={agentActivities}
               activeConnections={activeConnections}
               isAnalyzing={isAnalyzing}
+              onAgentClick={handleAgentClick}
             />
+            {/* Click hint */}
+            {!isAnalyzing && !showOnboarding && (
+              <motion.div
+                className="absolute bottom-20 left-1/2 -translate-x-1/2 text-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 1 }}
+              >
+                <p className="text-white/40 text-sm">Click any agent to explore its workspace</p>
+              </motion.div>
+            )}
           </div>
 
           {/* Right: Results Panel */}

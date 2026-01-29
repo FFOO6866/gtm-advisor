@@ -256,3 +256,42 @@ export const INDUSTRIES = [
 ] as const;
 
 export type IndustryValue = typeof INDUSTRIES[number]['value'];
+
+// Insight type for agent workspaces
+export interface Insight {
+  id: string;
+  title: string;
+  summary: string;
+  priority: 'high' | 'medium' | 'low' | 'opportunity';
+  category: string;
+  agentId: string;
+  isNew?: boolean;
+  createdAt: Date;
+  evidence?: string;
+  implication?: string;
+  recommendedAction?: string;
+  sources?: string[];
+  confidence?: number;
+}
+
+// Alert type for agent workspaces
+export interface Alert {
+  id: string;
+  title: string;
+  description: string;
+  severity: 'critical' | 'warning' | 'info';
+  agentId: string;
+  createdAt: Date;
+  acknowledged?: boolean;
+}
+
+// Agent workspace data
+export interface AgentWorkspaceData {
+  agentId: string;
+  status: 'active' | 'idle' | 'processing';
+  lastRun?: Date;
+  nextScheduledRun?: Date;
+  insights: Insight[];
+  alerts: Alert[];
+  metrics?: Record<string, number>;
+}

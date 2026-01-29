@@ -5,6 +5,8 @@
  * NO mock data, NO fallbacks - real API calls only.
  */
 
+/// <reference types="vite/client" />
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000';
 
