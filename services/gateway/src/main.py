@@ -33,7 +33,7 @@ from fastapi.responses import JSONResponse
 
 from packages.core.src.config import get_config
 
-from .routers import agents, analysis, companies, health, websocket
+from .routers import agents, analysis, auth, companies, health, websocket
 
 logger = structlog.get_logger()
 
@@ -98,6 +98,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 # Include routers
 app.include_router(health.router, tags=["Health"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 app.include_router(agents.router, prefix="/api/v1/agents", tags=["Agents"])
 app.include_router(companies.router, prefix="/api/v1/companies", tags=["Companies"])
 app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["Analysis"])

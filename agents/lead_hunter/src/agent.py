@@ -502,13 +502,14 @@ Focus on Singapore/APAC market context."""
                     except Exception:
                         pass
 
-        # Also add some mock Singapore companies for demo
+        # Return empty list if no real companies found - no mock data fallback
+        # The caller should handle empty results appropriately
         if not companies:
-            companies = [
-                {"name": "TechStartup Pte Ltd", "domain": "techstartup.sg"},
-                {"name": "Finnovate Solutions", "domain": "finnovate.sg"},
-                {"name": "DataDriven AI", "domain": "datadriven.ai"},
-            ]
+            self._logger.warning(
+                "no_companies_found",
+                industries=industries,
+                search_queries_tried=len(industries) * 2,  # tech news + hiring signals per industry
+            )
 
         return companies
 

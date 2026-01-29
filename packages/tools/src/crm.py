@@ -158,10 +158,21 @@ class HubSpotTool(BaseTool):
     ):
         super().__init__(agent_id, allowed_access)
         self.api_key = api_key or os.getenv("HUBSPOT_API_KEY")
-        self.use_mock = use_mock or not self.api_key
+        # Only use mock if explicitly requested - no silent fallback
+        self.use_mock = use_mock
+        self._configured = bool(self.api_key) or use_mock
 
     async def _execute(self, **kwargs: Any) -> ToolResult:
         """Execute HubSpot operation."""
+        # Check if tool is configured
+        if not self._configured:
+            return ToolResult(
+                success=False,
+                data=None,
+                error="HubSpot integration not configured. Set HUBSPOT_API_KEY environment variable.",
+                metadata={"integration_status": "not_configured"},
+            )
+
         operation = kwargs.get("operation", "get_contacts")
 
         operations = {
@@ -626,10 +637,21 @@ class PipedriveTool(BaseTool):
     ):
         super().__init__(agent_id, allowed_access)
         self.api_token = api_token or os.getenv("PIPEDRIVE_API_TOKEN")
-        self.use_mock = use_mock or not self.api_token
+        # Only use mock if explicitly requested - no silent fallback
+        self.use_mock = use_mock
+        self._configured = bool(self.api_token) or use_mock
 
     async def _execute(self, **kwargs: Any) -> ToolResult:
         """Execute Pipedrive operation."""
+        # Check if tool is configured
+        if not self._configured:
+            return ToolResult(
+                success=False,
+                data=None,
+                error="Pipedrive integration not configured. Set PIPEDRIVE_API_TOKEN environment variable.",
+                metadata={"integration_status": "not_configured"},
+            )
+
         operation = kwargs.get("operation", "get_persons")
 
         operations = {

@@ -237,8 +237,9 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
             WebScraperTool(agent_id=self.name, allowed_access=self.tool_access),
             LinkedInScraperTool(agent_id=self.name, allowed_access=self.tool_access),
             NewsScraperTool(agent_id=self.name, allowed_access=self.tool_access),
-            HubSpotTool(agent_id=self.name, allowed_access=self.tool_access, use_mock=True),
-            PipedriveTool(agent_id=self.name, allowed_access=self.tool_access, use_mock=True),
+            # CRM tools - use real APIs when configured, fail gracefully if not
+            HubSpotTool(agent_id=self.name, allowed_access=self.tool_access, use_mock=False),
+            PipedriveTool(agent_id=self.name, allowed_access=self.tool_access, use_mock=False),
         ]
 
         for tool in tools:
