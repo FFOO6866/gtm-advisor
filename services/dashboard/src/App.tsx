@@ -31,6 +31,10 @@ import {
   CampaignWorkspace,
   DemandWorkspace,
   GenericAgentWorkspace,
+  StrategyWorkspace,
+  CompetitorWorkspace,
+  CustomerWorkspace,
+  EnricherWorkspace,
 } from './pages';
 
 function App() {
@@ -40,6 +44,10 @@ function App() {
       <Route path="/agent/market-intelligence" element={<IntelligenceWorkspace />} />
       <Route path="/agent/campaign-architect" element={<CampaignWorkspace />} />
       <Route path="/agent/lead-hunter" element={<DemandWorkspace />} />
+      <Route path="/agent/gtm-strategist" element={<StrategyWorkspace />} />
+      <Route path="/agent/competitor-analyst" element={<CompetitorWorkspace />} />
+      <Route path="/agent/customer-profiler" element={<CustomerWorkspace />} />
+      <Route path="/agent/company-enricher" element={<EnricherWorkspace />} />
       <Route path="/agent/:agentId" element={<GenericAgentWorkspace />} />
     </Routes>
   );
