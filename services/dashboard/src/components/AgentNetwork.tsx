@@ -21,15 +21,16 @@ const AGENT_POSITIONS: Record<string, { x: number; y: number }> = {
   'campaign-architect': { x: 20, y: 70 },
 };
 
+// Node radius in viewBox units (accounts for node size ~48-64px in a ~500px container)
+const NODE_RADIUS = 6;
+
 export function AgentNetwork({ activities, activeConnections, isAnalyzing, onAgentClick }: AgentNetworkProps) {
   const getAgentActivity = (agentId: string) => {
     return activities.find(a => a.agentId === agentId) || { status: 'idle', progress: 0 };
   };
 
-  // Calculate connection paths with offset to avoid overlaying nodes
-  const connectionPaths = useMemo(() => {
-    const nodeRadius = 8; // Radius to stop before nodes (in viewBox units)
-
+  // Calculate straight line connections with proper offsets
+  const connectionLines = useMemo(() => {
     return activeConnections.map(([from, to]) => {
       const fromPos = AGENT_POSITIONS[from];
       const toPos = AGENT_POSITIONS[to];
@@ -44,22 +45,20 @@ export function AgentNetwork({ activities, activeConnections, isAnalyzing, onAge
       const ny = dy / distance;
 
       // Offset start and end points to stop before node circles
-      const startX = fromPos.x + nx * nodeRadius;
-      const startY = fromPos.y + ny * nodeRadius;
-      const endX = toPos.x - nx * nodeRadius;
-      const endY = toPos.y - ny * nodeRadius;
+      const x1 = fromPos.x + nx * NODE_RADIUS;
+      const y1 = fromPos.y + ny * NODE_RADIUS;
+      const x2 = toPos.x - nx * NODE_RADIUS;
+      const y2 = toPos.y - ny * NODE_RADIUS;
 
-      // Create curved path with larger curve offset
-      const midX = (startX + endX) / 2;
-      const midY = (startY + endY) / 2;
-      // Perpendicular offset for curve - increased for better arcing
-      const curveOffset = Math.sqrt(dx * dx + dy * dy) * 0.35;
-      const perpX = -ny * curveOffset;
-      const perpY = nx * curveOffset;
+      // Calculate line length for dash animation
+      const lineLength = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 
       return {
         id: `${from}-${to}`,
-        d: `M ${startX} ${startY} Q ${midX + perpX} ${midY + perpY} ${endX} ${endY}`,
+        x1, y1, x2, y2,
+        lineLength,
+        // Path for particle animation
+        d: `M ${x1} ${y1} L ${x2} ${y2}`,
         from,
         to,
       };
@@ -85,28 +84,36 @@ export function AgentNetwork({ activities, activeConnections, isAnalyzing, onAge
           preserveAspectRatio="xMidYMid meet"
         >
           <defs>
-            {/* Gradient for connections */}
-            <linearGradient id="connection-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="rgba(139, 92, 246, 0.8)" />
-              <stop offset="50%" stopColor="rgba(59, 130, 246, 0.8)" />
-              <stop offset="100%" stopColor="rgba(139, 92, 246, 0.8)" />
+            {/* Gradient for active connections */}
+            <linearGradient id="active-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="rgba(139, 92, 246, 0.9)" />
+              <stop offset="50%" stopColor="rgba(99, 102, 241, 0.9)" />
+              <stop offset="100%" stopColor="rgba(59, 130, 246, 0.9)" />
             </linearGradient>
 
-            {/* Glow filter */}
-            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-              <feGaussianBlur stdDeviation="1" result="coloredBlur" />
+            {/* Subtle glow filter for particle */}
+            <filter id="particle-glow" x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="0.8" result="blur" />
               <feMerge>
-                <feMergeNode in="coloredBlur" />
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+
+            {/* Soft glow for active lines */}
+            <filter id="line-glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="0.5" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
                 <feMergeNode in="SourceGraphic" />
               </feMerge>
             </filter>
           </defs>
 
-          {/* Static connection lines (subtle) - offset from node centers */}
+          {/* Static connection lines (subtle dotted) */}
           {AGENTS.slice(1).map(agent => {
             const strategist = AGENT_POSITIONS['gtm-strategist'];
             const agentPos = AGENT_POSITIONS[agent.id];
-            const nodeRadius = 8;
 
             const dx = agentPos.x - strategist.x;
             const dy = agentPos.y - strategist.y;
@@ -115,10 +122,17 @@ export function AgentNetwork({ activities, activeConnections, isAnalyzing, onAge
             const ny = dy / distance;
 
             // Offset to stop before node circles
-            const x1 = strategist.x + nx * nodeRadius;
-            const y1 = strategist.y + ny * nodeRadius;
-            const x2 = agentPos.x - nx * nodeRadius;
-            const y2 = agentPos.y - ny * nodeRadius;
+            const x1 = strategist.x + nx * NODE_RADIUS;
+            const y1 = strategist.y + ny * NODE_RADIUS;
+            const x2 = agentPos.x - nx * NODE_RADIUS;
+            const y2 = agentPos.y - ny * NODE_RADIUS;
+
+            // Check if this connection is currently active
+            const isActive = activeConnections.some(
+              ([from, to]) =>
+                (from === 'gtm-strategist' && to === agent.id) ||
+                (from === agent.id && to === 'gtm-strategist')
+            );
 
             return (
               <line
@@ -127,59 +141,74 @@ export function AgentNetwork({ activities, activeConnections, isAnalyzing, onAge
                 y1={y1}
                 x2={x2}
                 y2={y2}
-                stroke="rgba(255, 255, 255, 0.08)"
+                stroke={isActive ? 'transparent' : 'rgba(255, 255, 255, 0.1)'}
                 strokeWidth="0.5"
-                strokeDasharray="2 2"
+                strokeDasharray="1.5 1.5"
               />
             );
           })}
 
-          {/* Active connections */}
+          {/* Active connections - straight lines with flowing animation */}
           <AnimatePresence>
-            {connectionPaths.map(path => path && (
-              <motion.g key={path.id}>
-                {/* Glow layer */}
-                <motion.path
-                  d={path.d}
-                  fill="none"
-                  stroke="url(#connection-gradient)"
-                  strokeWidth="3"
+            {connectionLines.map(line => line && (
+              <motion.g key={line.id}>
+                {/* Background glow line */}
+                <motion.line
+                  x1={line.x1}
+                  y1={line.y1}
+                  x2={line.x2}
+                  y2={line.y2}
+                  stroke="url(#active-gradient)"
+                  strokeWidth="2"
                   strokeLinecap="round"
-                  filter="url(#glow)"
-                  initial={{ pathLength: 0, opacity: 0 }}
-                  animate={{ pathLength: 1, opacity: 0.6 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.5 }}
-                />
-                {/* Main line */}
-                <motion.path
-                  d={path.d}
-                  fill="none"
-                  stroke="url(#connection-gradient)"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  initial={{ pathLength: 0, opacity: 0 }}
-                  animate={{ pathLength: 1, opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.5 }}
-                />
-                {/* Animated particle */}
-                <motion.circle
-                  r="1.5"
-                  fill="white"
-                  filter="url(#glow)"
+                  filter="url(#line-glow)"
                   initial={{ opacity: 0 }}
-                  animate={{ opacity: [0, 1, 1, 0] }}
-                  transition={{
-                    duration: 1.5,
-                    repeat: Infinity,
-                    ease: 'linear',
+                  animate={{ opacity: 0.4 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                />
+
+                {/* Main active line with flowing dash animation */}
+                <motion.line
+                  x1={line.x1}
+                  y1={line.y1}
+                  x2={line.x2}
+                  y2={line.y2}
+                  stroke="url(#active-gradient)"
+                  strokeWidth="1"
+                  strokeLinecap="round"
+                  strokeDasharray="3 2"
+                  initial={{ opacity: 0, strokeDashoffset: 0 }}
+                  animate={{
+                    opacity: 1,
+                    strokeDashoffset: [0, -10],
                   }}
+                  exit={{ opacity: 0 }}
+                  transition={{
+                    opacity: { duration: 0.3 },
+                    strokeDashoffset: {
+                      duration: 0.8,
+                      repeat: Infinity,
+                      ease: 'linear'
+                    }
+                  }}
+                />
+
+                {/* Traveling particle */}
+                <motion.circle
+                  r="1.2"
+                  fill="white"
+                  filter="url(#particle-glow)"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.2 }}
                 >
                   <animateMotion
-                    dur="1.5s"
+                    dur="1.2s"
                     repeatCount="indefinite"
-                    path={path.d}
+                    path={line.d}
+                    calcMode="linear"
                   />
                 </motion.circle>
               </motion.g>

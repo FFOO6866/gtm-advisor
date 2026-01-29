@@ -45,12 +45,23 @@ function App() {
   );
 }
 
+// Session storage keys
+const STORAGE_KEYS = {
+  companyInfo: 'gtm_company_info',
+  hasOnboarded: 'gtm_has_onboarded',
+};
+
 function Dashboard() {
   const navigate = useNavigate();
 
-  // State
-  const [showOnboarding, setShowOnboarding] = useState(true);
-  const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
+  // Initialize state from sessionStorage to persist across navigation
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    return sessionStorage.getItem(STORAGE_KEYS.hasOnboarded) !== 'true';
+  });
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(() => {
+    const stored = sessionStorage.getItem(STORAGE_KEYS.companyInfo);
+    return stored ? JSON.parse(stored) : null;
+  });
   const [messages, setMessages] = useState<Message[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [agentActivities, setAgentActivities] = useState<AgentActivity[]>([]);
@@ -364,6 +375,10 @@ function Dashboard() {
     (company: CompanyInfo) => {
       setCompanyInfo(company);
       setShowOnboarding(false);
+
+      // Persist to sessionStorage so we can restore after navigation
+      sessionStorage.setItem(STORAGE_KEYS.companyInfo, JSON.stringify(company));
+      sessionStorage.setItem(STORAGE_KEYS.hasOnboarded, 'true');
 
       // Add user message
       setMessages([
