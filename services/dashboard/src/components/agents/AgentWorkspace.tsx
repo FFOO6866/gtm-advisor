@@ -13,7 +13,7 @@ import type { Agent } from '../../types';
 
 interface AgentWorkspaceProps {
   agent: Agent;
-  status: 'active' | 'idle' | 'processing';
+  status: 'active' | 'idle' | 'processing' | 'error';
   lastRun?: Date;
   nextScheduledRun?: Date;
   tabs: TabItem[];
@@ -53,6 +53,7 @@ export function AgentWorkspace({
     active: { color: 'bg-green-500', label: 'Active', pulse: true },
     processing: { color: 'bg-amber-500', label: 'Processing', pulse: true },
     idle: { color: 'bg-gray-500', label: 'Idle', pulse: false },
+    error: { color: 'bg-red-500', label: 'Error', pulse: false },
   };
 
   const currentStatus = statusConfig[status];

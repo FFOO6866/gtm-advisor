@@ -2,6 +2,7 @@
  * Qualified Demand Agent Workspace
  *
  * Lead management, intent signals, and pipeline analysis.
+ * Connected to real backend API.
  */
 
 import { useState, useMemo } from 'react';
@@ -18,105 +19,138 @@ import {
   Filter,
 } from 'lucide-react';
 import { AgentWorkspace } from '../components/agents/AgentWorkspace';
-import { Card, Badge, Button, EmptyState } from '../components/common';
-import { AGENTS, type Lead } from '../types';
-
-// Mock leads data
-const MOCK_LEADS: (Lead & { intentSignals: string[]; fitReasons: string[]; pdpaStatus: string })[] = [
-  {
-    id: '1',
-    companyName: 'TechVentures Pte Ltd',
-    contactName: 'Sarah Chen',
-    contactTitle: 'Chief Technology Officer',
-    contactEmail: 's.chen@techventures.sg',
-    industry: 'fintech',
-    employeeCount: 75,
-    location: 'Singapore',
-    website: 'techventures.sg',
-    fitScore: 0.92,
-    intentScore: 0.88,
-    overallScore: 0.92,
-    painPoints: ['Scaling marketing without headcount', 'Competitive pressure', 'Manual campaign execution'],
-    triggerEvents: ['Series A raised ($5M)', 'Job posting: Head of Marketing'],
-    recommendedApproach: 'Reference their Series A and growth trajectory. Offer a 15-min demo focused on scaling marketing without headcount.',
-    source: 'LinkedIn + News',
-    intentSignals: ['Visited pricing page 3x this week', 'Downloaded enterprise whitepaper', 'CTO engaged with 2 LinkedIn posts'],
-    fitReasons: ['Matches ICP: Fintech, growth stage, Singapore HQ', 'Recently raised Series A ($5M)', 'Building marketing team'],
-    pdpaStatus: 'Consent verified',
-  },
-  {
-    id: '2',
-    companyName: 'DataFlow Analytics',
-    contactName: 'Michael Tan',
-    contactTitle: 'VP of Marketing',
-    contactEmail: 'm.tan@dataflow.io',
-    industry: 'saas',
-    employeeCount: 45,
-    location: 'Singapore',
-    website: 'dataflow.io',
-    fitScore: 0.85,
-    intentScore: 0.82,
-    overallScore: 0.87,
-    painPoints: ['Agency costs too high', 'Slow campaign turnaround'],
-    triggerEvents: ['New VP Marketing hired', 'Expanding to Malaysia'],
-    recommendedApproach: 'Focus on agency replacement value prop. Mention Malaysia expansion capabilities.',
-    source: 'Perplexity Research',
-    intentSignals: ['Visited competitor comparison page', 'Signed up for newsletter'],
-    fitReasons: ['SaaS company in growth phase', 'Marketing leadership change'],
-    pdpaStatus: 'Consent verified',
-  },
-  {
-    id: '3',
-    companyName: 'GreenTech Solutions',
-    contactName: 'Amanda Lee',
-    contactTitle: 'Marketing Director',
-    contactEmail: null,
-    industry: 'other',
-    employeeCount: 120,
-    location: 'Singapore',
-    website: 'greentech.com.sg',
-    fitScore: 0.72,
-    intentScore: 0.68,
-    overallScore: 0.74,
-    painPoints: ['Limited marketing budget', 'Need to prove ROI'],
-    triggerEvents: ['PSG grant application'],
-    recommendedApproach: 'Lead with PSG grant eligibility and ROI tracking capabilities.',
-    source: 'News',
-    intentSignals: ['General website traffic from company IP'],
-    fitReasons: ['Singapore-based', 'Applying for government grants'],
-    pdpaStatus: 'Consent pending',
-  },
-];
+import {
+  Card,
+  Badge,
+  Button,
+  EmptyState,
+  LeadListLoading,
+  ErrorState,
+} from '../components/common';
+import { AGENTS } from '../types';
+import { useCompanyId } from '../context/CompanyContext';
+import { useLeads, useMutation } from '../hooks/useApi';
+import * as api from '../api/workspaces';
+import type { Lead, LeadUpdate } from '../api/workspaces';
 
 export function DemandWorkspace() {
+  const companyId = useCompanyId();
   const [activeTab, setActiveTab] = useState('sales-ready');
   const [isRunning, setIsRunning] = useState(false);
   const [selectedLead, setSelectedLead] = useState<string | null>(null);
   const [filter, setFilter] = useState<'all' | 'high' | 'medium'>('all');
 
+  // Fetch leads from API
+  const { data: leadData, isLoading, error, refresh } = useLeads(companyId);
+
   const agent = AGENTS.find((a) => a.id === 'lead-hunter')!;
 
+  // Mutations
+  const qualifyMutation = useMutation(
+    (leadId: string) => api.qualifyLead(companyId!, leadId),
+    {
+      invalidateKeys: ['leads'],
+      onSuccess: () => refresh(),
+    }
+  );
+
+  const updateMutation = useMutation(
+    ({ leadId, data }: { leadId: string; data: LeadUpdate }) =>
+      api.updateLead(companyId!, leadId, data),
+    {
+      invalidateKeys: ['leads'],
+      onSuccess: () => refresh(),
+    }
+  );
+
+  const leads = leadData?.leads || [];
+
   const filteredLeads = useMemo(() => {
-    if (filter === 'all') return MOCK_LEADS;
-    if (filter === 'high') return MOCK_LEADS.filter((l) => l.overallScore >= 0.85);
-    return MOCK_LEADS.filter((l) => l.overallScore >= 0.7 && l.overallScore < 0.85);
-  }, [filter]);
+    if (filter === 'all') return leads;
+    if (filter === 'high') return leads.filter((l) => l.overall_score >= 85);
+    return leads.filter((l) => l.overall_score >= 70 && l.overall_score < 85);
+  }, [filter, leads]);
 
   const handleRun = async () => {
     setIsRunning(true);
     await new Promise((resolve) => setTimeout(resolve, 2000));
+    refresh();
     setIsRunning(false);
   };
 
-  const totalPipelineValue = MOCK_LEADS.reduce((sum, lead) => sum + lead.overallScore * 50000, 0);
+  const totalPipelineValue = leads.reduce((sum, lead) => sum + (lead.overall_score / 100) * 50000, 0);
+  const salesReadyCount = leads.filter((l) => l.overall_score >= 85).length;
+  const pdpaVerifiedCount = leads.filter((l) => l.pdpa_consent_status === 'verified').length;
 
   const tabs = [
-    { id: 'sales-ready', label: 'Sales Ready', badge: MOCK_LEADS.filter((l) => l.overallScore >= 0.85).length, icon: '🎯' },
-    { id: 'all-accounts', label: 'All Accounts', badge: MOCK_LEADS.length, icon: '📋' },
+    { id: 'sales-ready', label: 'Sales Ready', badge: salesReadyCount, icon: '🎯' },
+    { id: 'all-accounts', label: 'All Accounts', badge: leads.length, icon: '📋' },
     { id: 'intent-signals', label: 'Intent Signals', icon: '📡' },
     { id: 'pipeline', label: 'Pipeline Analysis', icon: '📊' },
     { id: 'scoring', label: 'Configure Scoring', icon: '⚙️' },
   ];
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <AgentWorkspace
+        agent={agent}
+        status="active"
+        lastRun={new Date()}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRun={handleRun}
+        isRunning={isRunning}
+      >
+        <LeadListLoading />
+      </AgentWorkspace>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <AgentWorkspace
+        agent={agent}
+        status="error"
+        lastRun={new Date()}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRun={handleRun}
+        isRunning={isRunning}
+      >
+        <ErrorState
+          title="Failed to load leads"
+          message={error.message}
+          onRetry={refresh}
+        />
+      </AgentWorkspace>
+    );
+  }
+
+  // No company selected
+  if (!companyId) {
+    return (
+      <AgentWorkspace
+        agent={agent}
+        status="idle"
+        lastRun={new Date()}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRun={handleRun}
+        isRunning={isRunning}
+      >
+        <EmptyState
+          icon="🏢"
+          title="No Company Selected"
+          description="Please complete onboarding to start finding qualified leads."
+        />
+      </AgentWorkspace>
+    );
+  }
 
   return (
     <AgentWorkspace
@@ -136,17 +170,17 @@ export function DemandWorkspace() {
           <div className="grid grid-cols-4 gap-4">
             <StatCard
               icon={<Users className="w-5 h-5 text-blue-400" />}
-              value={MOCK_LEADS.length}
+              value={leads.length}
               label="Total Accounts"
             />
             <StatCard
               icon={<TrendingUp className="w-5 h-5 text-green-400" />}
-              value={MOCK_LEADS.filter((l) => l.overallScore >= 0.85).length}
+              value={salesReadyCount}
               label="Sales Ready"
             />
             <StatCard
               icon={<Shield className="w-5 h-5 text-purple-400" />}
-              value={MOCK_LEADS.filter((l) => l.pdpaStatus === 'Consent verified').length}
+              value={pdpaVerifiedCount}
               label="PDPA Verified"
             />
             <StatCard
@@ -178,6 +212,10 @@ export function DemandWorkspace() {
                 lead={lead}
                 isExpanded={selectedLead === lead.id}
                 onToggle={() => setSelectedLead(selectedLead === lead.id ? null : lead.id)}
+                onQualify={() => qualifyMutation.execute(lead.id)}
+                onUpdateStatus={(status) =>
+                  updateMutation.execute({ leadId: lead.id, data: { status } })
+                }
               />
             ))}
           </div>
@@ -198,22 +236,35 @@ export function DemandWorkspace() {
         <div className="space-y-4">
           <Card>
             <h3 className="text-lg font-semibold text-white mb-4">Recent Intent Signals</h3>
-            <div className="space-y-3">
-              {MOCK_LEADS.flatMap((lead) =>
-                lead.intentSignals.map((signal, idx) => (
-                  <div key={`${lead.id}-${idx}`} className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
-                    <span className="text-lg">📡</span>
-                    <div className="flex-1">
-                      <p className="text-white">{signal}</p>
-                      <p className="text-sm text-white/50">{lead.companyName}</p>
+            {leads.length === 0 ? (
+              <EmptyState
+                icon="📡"
+                title="No Intent Signals"
+                description="Run the lead hunter to gather intent signals."
+                action={{ label: 'Run Agent', onClick: handleRun }}
+              />
+            ) : (
+              <div className="space-y-3">
+                {leads.flatMap((lead) =>
+                  (lead.intent_signals || []).map((signal, idx) => (
+                    <div key={`${lead.id}-${idx}`} className="flex items-center gap-3 p-3 bg-white/5 rounded-lg">
+                      <span className="text-lg">📡</span>
+                      <div className="flex-1">
+                        <p className="text-white">{signal}</p>
+                        <p className="text-sm text-white/50">{lead.company_name}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedLead(lead.id)}
+                      >
+                        View Account
+                      </Button>
                     </div>
-                    <Button variant="ghost" size="sm">
-                      View Account
-                    </Button>
-                  </div>
-                ))
-              )}
-            </div>
+                  ))
+                )}
+              </div>
+            )}
           </Card>
         </div>
       )}
@@ -226,29 +277,29 @@ export function DemandWorkspace() {
             <div className="text-3xl font-bold text-white mb-2">
               SGD {totalPipelineValue.toLocaleString()}
             </div>
-            <p className="text-white/60">Total pipeline value across {MOCK_LEADS.length} accounts</p>
+            <p className="text-white/60">Total pipeline value across {leads.length} accounts</p>
 
             {/* Pipeline Stages */}
             <div className="mt-6 space-y-3">
               <PipelineStage
                 label="Sales Ready"
-                count={MOCK_LEADS.filter((l) => l.overallScore >= 0.85).length}
-                value={MOCK_LEADS.filter((l) => l.overallScore >= 0.85).reduce((s, l) => s + l.overallScore * 50000, 0)}
-                percentage={45}
+                count={leads.filter((l) => l.overall_score >= 85).length}
+                value={leads.filter((l) => l.overall_score >= 85).reduce((s, l) => s + (l.overall_score / 100) * 50000, 0)}
+                percentage={leads.length > 0 ? (leads.filter((l) => l.overall_score >= 85).length / leads.length) * 100 : 0}
                 color="bg-green-500"
               />
               <PipelineStage
                 label="Nurturing"
-                count={MOCK_LEADS.filter((l) => l.overallScore >= 0.7 && l.overallScore < 0.85).length}
-                value={MOCK_LEADS.filter((l) => l.overallScore >= 0.7 && l.overallScore < 0.85).reduce((s, l) => s + l.overallScore * 50000, 0)}
-                percentage={35}
+                count={leads.filter((l) => l.overall_score >= 70 && l.overall_score < 85).length}
+                value={leads.filter((l) => l.overall_score >= 70 && l.overall_score < 85).reduce((s, l) => s + (l.overall_score / 100) * 50000, 0)}
+                percentage={leads.length > 0 ? (leads.filter((l) => l.overall_score >= 70 && l.overall_score < 85).length / leads.length) * 100 : 0}
                 color="bg-amber-500"
               />
               <PipelineStage
                 label="New"
-                count={MOCK_LEADS.filter((l) => l.overallScore < 0.7).length}
-                value={MOCK_LEADS.filter((l) => l.overallScore < 0.7).reduce((s, l) => s + l.overallScore * 50000, 0)}
-                percentage={20}
+                count={leads.filter((l) => l.overall_score < 70).length}
+                value={leads.filter((l) => l.overall_score < 70).reduce((s, l) => s + (l.overall_score / 100) * 50000, 0)}
+                percentage={leads.length > 0 ? (leads.filter((l) => l.overall_score < 70).length / leads.length) * 100 : 0}
                 color="bg-blue-500"
               />
             </div>
@@ -257,8 +308,8 @@ export function DemandWorkspace() {
           <Card>
             <h3 className="text-lg font-semibold text-white mb-4">Conversion Bottlenecks</h3>
             <p className="text-white/60">
-              Analysis shows 3 accounts stuck in nurturing stage for 30+ days. Recommended action:
-              personalized outreach or content refresh.
+              {leadData?.stuck_leads_count || 0} accounts stuck in nurturing stage for 30+ days.
+              Recommended action: personalized outreach or content refresh.
             </p>
             <Button variant="secondary" className="mt-4">
               View Stuck Accounts
@@ -320,14 +371,18 @@ function StatCard({ icon, value, label }: StatCardProps) {
 }
 
 interface LeadCardProps {
-  lead: Lead & { intentSignals: string[]; fitReasons: string[]; pdpaStatus: string };
+  lead: Lead;
   isExpanded: boolean;
   onToggle: () => void;
+  onQualify: () => void;
+  onUpdateStatus: (status: string) => void;
 }
 
-function LeadCard({ lead, isExpanded, onToggle }: LeadCardProps) {
-  const scoreColor = lead.overallScore >= 0.85 ? 'text-green-400' : lead.overallScore >= 0.7 ? 'text-amber-400' : 'text-blue-400';
-  const scoreBg = lead.overallScore >= 0.85 ? 'bg-green-500/20' : lead.overallScore >= 0.7 ? 'bg-amber-500/20' : 'bg-blue-500/20';
+function LeadCard({ lead, isExpanded, onToggle, onQualify, onUpdateStatus }: LeadCardProps) {
+  const scoreColor = lead.overall_score >= 85 ? 'text-green-400' : lead.overall_score >= 70 ? 'text-amber-400' : 'text-blue-400';
+  const scoreBg = lead.overall_score >= 85 ? 'bg-green-500/20' : lead.overall_score >= 70 ? 'bg-amber-500/20' : 'bg-blue-500/20';
+
+  const pdpaStatus = lead.pdpa_consent_status === 'verified' ? 'Consent verified' : 'Consent pending';
 
   return (
     <Card className={isExpanded ? 'ring-1 ring-purple-500/50' : ''}>
@@ -335,10 +390,10 @@ function LeadCard({ lead, isExpanded, onToggle }: LeadCardProps) {
       <div className="flex items-start justify-between">
         <div className="flex items-start gap-4">
           <div className={`w-12 h-12 rounded-lg ${scoreBg} flex items-center justify-center`}>
-            <span className={`text-lg font-bold ${scoreColor}`}>{Math.round(lead.overallScore * 100)}</span>
+            <span className={`text-lg font-bold ${scoreColor}`}>{Math.round(lead.overall_score)}</span>
           </div>
           <div>
-            <h4 className="font-semibold text-white">{lead.companyName}</h4>
+            <h4 className="font-semibold text-white">{lead.company_name}</h4>
             <div className="flex items-center gap-3 mt-1 text-sm text-white/60">
               <span className="flex items-center gap-1">
                 <Building className="w-3 h-3" />
@@ -346,19 +401,19 @@ function LeadCard({ lead, isExpanded, onToggle }: LeadCardProps) {
               </span>
               <span className="flex items-center gap-1">
                 <Users className="w-3 h-3" />
-                {lead.employeeCount} employees
+                {lead.employee_count} employees
               </span>
               <span className="flex items-center gap-1">
                 <MapPin className="w-3 h-3" />
-                {lead.location}
+                {lead.location || 'Singapore'}
               </span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant={lead.pdpaStatus === 'Consent verified' ? 'success' : 'warning'}>
+          <Badge variant={lead.pdpa_consent_status === 'verified' ? 'success' : 'warning'}>
             <Shield className="w-3 h-3 mr-1" />
-            {lead.pdpaStatus}
+            {pdpaStatus}
           </Badge>
           <Button variant="ghost" size="sm" onClick={onToggle}>
             {isExpanded ? '▲' : '▼'}
@@ -377,68 +432,85 @@ function LeadCard({ lead, isExpanded, onToggle }: LeadCardProps) {
           >
             <div className="mt-4 pt-4 border-t border-white/10">
               {/* Contact Info */}
-              {lead.contactName && (
+              {lead.contact_name && (
                 <div className="mb-4 p-3 bg-white/5 rounded-lg">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium text-white">{lead.contactName}</p>
-                      <p className="text-sm text-white/60">{lead.contactTitle}</p>
+                      <p className="font-medium text-white">{lead.contact_name}</p>
+                      <p className="text-sm text-white/60">{lead.contact_title}</p>
                     </div>
                     <div className="flex gap-2">
-                      {lead.contactEmail && (
+                      {lead.contact_email && (
                         <Button variant="ghost" size="sm" leftIcon={<Mail className="w-3 h-3" />}>
                           Email
                         </Button>
                       )}
-                      <Button variant="ghost" size="sm" leftIcon={<Linkedin className="w-3 h-3" />}>
-                        LinkedIn
-                      </Button>
+                      {lead.contact_linkedin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          leftIcon={<Linkedin className="w-3 h-3" />}
+                          onClick={() => window.open(lead.contact_linkedin!, '_blank')}
+                        >
+                          LinkedIn
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Intent Signals */}
+              {/* Intent Signals & Fit Reasons */}
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <h5 className="text-xs font-medium text-white/50 uppercase mb-2">Intent Signals</h5>
                   <ul className="space-y-1">
-                    {lead.intentSignals.map((signal, idx) => (
+                    {(lead.intent_signals || []).map((signal, idx) => (
                       <li key={idx} className="text-sm text-white/80 flex items-start gap-2">
                         <span className="text-green-400">•</span>
                         {signal}
                       </li>
                     ))}
+                    {(!lead.intent_signals || lead.intent_signals.length === 0) && (
+                      <li className="text-sm text-white/40 italic">No signals yet</li>
+                    )}
                   </ul>
                 </div>
                 <div>
                   <h5 className="text-xs font-medium text-white/50 uppercase mb-2">Fit Reasons</h5>
                   <ul className="space-y-1">
-                    {lead.fitReasons.map((reason, idx) => (
+                    {(lead.fit_reasons || []).map((reason, idx) => (
                       <li key={idx} className="text-sm text-white/80 flex items-start gap-2">
                         <span className="text-blue-400">•</span>
                         {reason}
                       </li>
                     ))}
+                    {(!lead.fit_reasons || lead.fit_reasons.length === 0) && (
+                      <li className="text-sm text-white/40 italic">No fit reasons yet</li>
+                    )}
                   </ul>
                 </div>
               </div>
 
               {/* Recommended Approach */}
-              {lead.recommendedApproach && (
+              {lead.recommended_approach && (
                 <div className="p-3 bg-purple-500/10 rounded-lg border border-purple-500/20 mb-4">
                   <h5 className="text-xs font-medium text-purple-400 uppercase mb-1">Recommended Approach</h5>
-                  <p className="text-sm text-white/80">{lead.recommendedApproach}</p>
+                  <p className="text-sm text-white/80">{lead.recommended_approach}</p>
                 </div>
               )}
 
               {/* Actions */}
               <div className="flex gap-2">
-                <Button variant="primary" size="sm">
+                <Button variant="primary" size="sm" onClick={onQualify}>
                   Generate Outreach Email
                 </Button>
-                <Button variant="secondary" size="sm">
-                  Add to CRM
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onUpdateStatus('contacted')}
+                >
+                  Mark as Contacted
                 </Button>
                 <Button variant="ghost" size="sm" rightIcon={<ExternalLink className="w-3 h-3" />}>
                   View Full Profile

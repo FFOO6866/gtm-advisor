@@ -2,122 +2,65 @@
  * Intelligence Agent Workspace
  *
  * Displays market intelligence, competitive insights, and alerts.
+ * Connected to real backend API.
  */
 
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Filter, TrendingUp, AlertTriangle, Lightbulb } from 'lucide-react';
+import { Filter, TrendingUp, AlertTriangle, Lightbulb, Archive } from 'lucide-react';
 import { AgentWorkspace } from '../components/agents/AgentWorkspace';
-import { Card, Badge, Button, InsightCard, EmptyState } from '../components/common';
-import { AGENTS, type Insight, type Alert } from '../types';
-
-// Mock data - in production this would come from API
-const MOCK_INSIGHTS: Insight[] = [
-  {
-    id: '1',
-    title: 'Competitor Pricing Change Detected',
-    summary: 'TechRival Inc. reduced their SME tier pricing by 20%, positioning directly against your $700/month offering.',
-    priority: 'high',
-    category: 'competitor',
-    agentId: 'market-intelligence',
-    isNew: true,
-    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
-    evidence: 'Pricing page change detected on 2024-01-28. LinkedIn announcement post received 234 engagements.',
-    implication: 'May increase churn risk for price-sensitive customers in the SME segment.',
-    recommendedAction: 'Review value messaging, consider limited-time offer or feature differentiation campaign.',
-    sources: ['TechRival pricing page', 'LinkedIn', 'G2 Reviews'],
-    confidence: 0.92,
-  },
-  {
-    id: '2',
-    title: 'AI Adoption Surge in Singapore SMEs',
-    summary: 'Market research shows 34% YoY growth in AI tool adoption among Singapore SMEs, with marketing automation leading.',
-    priority: 'opportunity',
-    category: 'trend',
-    agentId: 'market-intelligence',
-    isNew: true,
-    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000), // 5 hours ago
-    evidence: 'Multiple industry reports confirm trend. Government PSG grants expanded for AI tools.',
-    implication: 'Favorable market conditions for growth. PSG positioning could accelerate sales.',
-    recommendedAction: 'Develop PSG-focused marketing campaign highlighting grant eligibility.',
-    sources: ['IMDA Report 2024', 'Enterprise Singapore', 'TechInAsia'],
-    confidence: 0.88,
-  },
-  {
-    id: '3',
-    title: 'Regulatory Update: PDPA Amendments',
-    summary: 'Proposed PDPA amendments may require enhanced consent mechanisms for marketing automation tools.',
-    priority: 'medium',
-    category: 'regulatory',
-    agentId: 'market-intelligence',
-    createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000), // 1 day ago
-    evidence: 'PDPC consultation paper released. Industry feedback period ends March 2024.',
-    implication: 'May need to enhance consent workflows. Could be competitive advantage if addressed early.',
-    recommendedAction: 'Review current consent mechanisms. Consider proactive compliance messaging.',
-    sources: ['PDPC.gov.sg', 'Law firm analysis'],
-    confidence: 0.78,
-  },
-  {
-    id: '4',
-    title: 'Competitor InnovateCo Raised Series B',
-    summary: 'InnovateCo announced $15M Series B, planning to expand into Singapore market.',
-    priority: 'medium',
-    category: 'competitor',
-    agentId: 'market-intelligence',
-    createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // 2 days ago
-    evidence: 'Press release and TechCrunch coverage. Job postings for Singapore roles.',
-    implication: 'Increased competition expected in 6-12 months. They may compete on features.',
-    recommendedAction: 'Accelerate roadmap for differentiating features. Strengthen customer relationships.',
-    sources: ['TechCrunch', 'LinkedIn Jobs', 'Crunchbase'],
-    confidence: 0.85,
-  },
-  {
-    id: '5',
-    title: 'White Space: No Local Competitor for Enterprise Segment',
-    summary: 'Analysis shows no local Singapore player adequately serving enterprise marketing teams (200+ employees).',
-    priority: 'opportunity',
-    category: 'market',
-    agentId: 'market-intelligence',
-    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
-    evidence: 'Competitive analysis of 12 players. Enterprise features gap identified.',
-    implication: 'First-mover advantage opportunity in enterprise segment.',
-    recommendedAction: 'Consider enterprise tier development. Target 3-5 enterprise pilots.',
-    sources: ['Internal competitive analysis', 'G2 Grid', 'Customer interviews'],
-    confidence: 0.72,
-  },
-];
-
-const MOCK_ALERTS: Alert[] = [
-  {
-    id: 'a1',
-    title: 'Competitor launched new campaign',
-    description: 'TechRival started aggressive LinkedIn campaign targeting your keywords.',
-    severity: 'warning',
-    agentId: 'market-intelligence',
-    createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000),
-  },
-  {
-    id: 'a2',
-    title: 'Market sentiment shift detected',
-    description: 'Negative sentiment increasing around "AI marketing" terms due to recent industry news.',
-    severity: 'info',
-    agentId: 'market-intelligence',
-    createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000),
-  },
-];
+import {
+  Card,
+  Badge,
+  Button,
+  InsightCard,
+  EmptyState,
+  InsightListLoading,
+  ErrorState,
+} from '../components/common';
+import { AGENTS } from '../types';
+import { useCompanyId } from '../context/CompanyContext';
+import { useInsights, useMutation } from '../hooks/useApi';
+import * as api from '../api/workspaces';
+import type { MarketInsight } from '../api/workspaces';
 
 export function IntelligenceWorkspace() {
   const navigate = useNavigate();
+  const companyId = useCompanyId();
   const [activeTab, setActiveTab] = useState('insights');
   const [isRunning, setIsRunning] = useState(false);
   const [filter, setFilter] = useState<string>('all');
 
+  // Fetch insights from API
+  const { data: insightData, isLoading, error, refresh } = useInsights(companyId);
+
   const agent = AGENTS.find((a) => a.id === 'market-intelligence')!;
 
+  // Mutations
+  const markReadMutation = useMutation(
+    (insightId: string) => api.markInsightRead(companyId!, insightId),
+    {
+      invalidateKeys: ['insights'],
+      onSuccess: () => refresh(),
+    }
+  );
+
+  const archiveMutation = useMutation(
+    (insightId: string) => api.archiveInsight(companyId!, insightId),
+    {
+      invalidateKeys: ['insights'],
+      onSuccess: () => refresh(),
+    }
+  );
+
+  const insights = insightData?.insights || [];
+  const unreadCount = insightData?.unread_count || 0;
+  const alerts = insights.filter((i) => i.priority === 'high' && !i.is_read);
+
   const filteredInsights = useMemo(() => {
-    if (filter === 'all') return MOCK_INSIGHTS;
-    return MOCK_INSIGHTS.filter((i) => i.priority === filter || i.category === filter);
-  }, [filter]);
+    if (filter === 'all') return insights;
+    return insights.filter((i) => i.priority === filter || i.category === filter);
+  }, [filter, insights]);
 
   const groupedInsights = useMemo(() => ({
     high: filteredInsights.filter((i) => i.priority === 'high'),
@@ -127,8 +70,8 @@ export function IntelligenceWorkspace() {
 
   const handleRun = async () => {
     setIsRunning(true);
-    // Simulate agent run
     await new Promise((resolve) => setTimeout(resolve, 2000));
+    refresh();
     setIsRunning(false);
   };
 
@@ -137,12 +80,74 @@ export function IntelligenceWorkspace() {
   };
 
   const tabs = [
-    { id: 'insights', label: 'Insights', badge: MOCK_INSIGHTS.filter((i) => i.isNew).length, icon: '📊' },
-    { id: 'alerts', label: 'Alerts', badge: MOCK_ALERTS.length, icon: '🔔' },
+    { id: 'insights', label: 'Insights', badge: unreadCount, icon: '📊' },
+    { id: 'alerts', label: 'Alerts', badge: alerts.length, icon: '🔔' },
     { id: 'competitors', label: 'Competitors', icon: '🔍' },
     { id: 'trends', label: 'Trends', icon: '📈' },
     { id: 'configure', label: 'Configure', icon: '⚙️' },
   ];
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <AgentWorkspace
+        agent={agent}
+        status="active"
+        lastRun={new Date()}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRun={handleRun}
+        isRunning={isRunning}
+      >
+        <InsightListLoading />
+      </AgentWorkspace>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <AgentWorkspace
+        agent={agent}
+        status="error"
+        lastRun={new Date()}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRun={handleRun}
+        isRunning={isRunning}
+      >
+        <ErrorState
+          title="Failed to load insights"
+          message={error.message}
+          onRetry={refresh}
+        />
+      </AgentWorkspace>
+    );
+  }
+
+  // No company selected
+  if (!companyId) {
+    return (
+      <AgentWorkspace
+        agent={agent}
+        status="idle"
+        lastRun={new Date()}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRun={handleRun}
+        isRunning={isRunning}
+      >
+        <EmptyState
+          icon="🏢"
+          title="No Company Selected"
+          description="Please complete onboarding to start gathering market intelligence."
+        />
+      </AgentWorkspace>
+    );
+  }
 
   return (
     <AgentWorkspace
@@ -184,11 +189,13 @@ export function IntelligenceWorkspace() {
               count={groupedInsights.high.length}
             >
               {groupedInsights.high.map((insight) => (
-                <InsightCard
+                <InsightCardWrapper
                   key={insight.id}
                   insight={insight}
                   expanded
                   onSendToAgent={handleSendToAgent}
+                  onMarkRead={() => markReadMutation.execute(insight.id)}
+                  onArchive={() => archiveMutation.execute(insight.id)}
                 />
               ))}
             </InsightSection>
@@ -203,10 +210,12 @@ export function IntelligenceWorkspace() {
               defaultCollapsed
             >
               {groupedInsights.medium.map((insight) => (
-                <InsightCard
+                <InsightCardWrapper
                   key={insight.id}
                   insight={insight}
                   onSendToAgent={handleSendToAgent}
+                  onMarkRead={() => markReadMutation.execute(insight.id)}
+                  onArchive={() => archiveMutation.execute(insight.id)}
                 />
               ))}
             </InsightSection>
@@ -221,10 +230,12 @@ export function IntelligenceWorkspace() {
               defaultCollapsed
             >
               {groupedInsights.opportunity.map((insight) => (
-                <InsightCard
+                <InsightCardWrapper
                   key={insight.id}
                   insight={insight}
                   onSendToAgent={handleSendToAgent}
+                  onMarkRead={() => markReadMutation.execute(insight.id)}
+                  onArchive={() => archiveMutation.execute(insight.id)}
                 />
               ))}
             </InsightSection>
@@ -244,15 +255,20 @@ export function IntelligenceWorkspace() {
       {/* Alerts Tab */}
       {activeTab === 'alerts' && (
         <div className="space-y-4">
-          {MOCK_ALERTS.map((alert) => (
-            <AlertCard key={alert.id} alert={alert} />
-          ))}
-          {MOCK_ALERTS.length === 0 && (
+          {alerts.length === 0 ? (
             <EmptyState
               icon="✅"
               title="No active alerts"
               description="All caught up! We'll notify you when something needs attention."
             />
+          ) : (
+            alerts.map((alert) => (
+              <AlertCard
+                key={alert.id}
+                insight={alert}
+                onAcknowledge={() => markReadMutation.execute(alert.id)}
+              />
+            ))
           )}
         </div>
       )}
@@ -260,27 +276,29 @@ export function IntelligenceWorkspace() {
       {/* Competitors Tab */}
       {activeTab === 'competitors' && (
         <div className="grid grid-cols-2 gap-4">
-          <CompetitorCard
-            name="TechRival Inc."
-            status="Actively Monitoring"
-            lastActivity="Pricing change detected 2h ago"
-            threatLevel="high"
-          />
-          <CompetitorCard
-            name="InnovateCo"
-            status="Watching"
-            lastActivity="Series B announced 2d ago"
-            threatLevel="medium"
-          />
-          <CompetitorCard
-            name="MarketPro"
-            status="Low Activity"
-            lastActivity="No significant changes in 30d"
-            threatLevel="low"
-          />
-          <Card className="border-dashed border-2 border-white/20 flex items-center justify-center min-h-[150px]">
-            <Button variant="ghost">+ Add Competitor</Button>
-          </Card>
+          {insightData?.competitor_summaries?.map((comp) => (
+            <CompetitorCard
+              key={comp.name}
+              name={comp.name}
+              status={comp.status}
+              lastActivity={comp.last_activity}
+              threatLevel={comp.threat_level}
+            />
+          )) || (
+            <>
+              <CompetitorCard
+                name="TechRival Inc."
+                status="Actively Monitoring"
+                lastActivity="No recent activity"
+                threatLevel="medium"
+              />
+              <Card className="border-dashed border-2 border-white/20 flex items-center justify-center min-h-[150px]">
+                <Button variant="ghost" onClick={() => navigate('/agent/competitor-analyst')}>
+                  + Add Competitor
+                </Button>
+              </Card>
+            </>
+          )}
         </div>
       )}
 
@@ -289,10 +307,23 @@ export function IntelligenceWorkspace() {
         <div className="space-y-4">
           <Card>
             <h3 className="text-lg font-semibold text-white mb-4">Market Trends</h3>
-            <p className="text-white/60">
-              Trend analysis visualization would go here - showing market movements,
-              share of voice changes, and emerging topics over time.
-            </p>
+            {insights.filter((i) => i.category === 'trend').length > 0 ? (
+              <div className="space-y-3">
+                {insights
+                  .filter((i) => i.category === 'trend')
+                  .map((insight) => (
+                    <div key={insight.id} className="p-3 bg-white/5 rounded-lg">
+                      <h4 className="font-medium text-white">{insight.title}</h4>
+                      <p className="text-sm text-white/60 mt-1">{insight.summary}</p>
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <p className="text-white/60">
+                Trend analysis visualization would go here - showing market movements,
+                share of voice changes, and emerging topics over time.
+              </p>
+            )}
           </Card>
         </div>
       )}
@@ -304,7 +335,7 @@ export function IntelligenceWorkspace() {
             <h3 className="text-lg font-semibold text-white mb-4">Monitoring Settings</h3>
             <div className="space-y-4">
               <ConfigItem label="Scan Frequency" value="Every 6 hours" />
-              <ConfigItem label="Competitors Tracked" value="5 companies" />
+              <ConfigItem label="Competitors Tracked" value={`${insightData?.competitors_count || 0} companies`} />
               <ConfigItem label="Keywords Monitored" value="12 terms" />
               <ConfigItem label="News Sources" value="47 sources" />
             </div>
@@ -325,7 +356,7 @@ export function IntelligenceWorkspace() {
         <div className="flex items-center justify-between">
           <div className="text-sm text-white/50">
             <span className="font-medium text-white">Connected Agents:</span> This agent's insights feed into
-            Campaign Agent (12 this month), Strategy Agent (5), GTM Commercial (3)
+            Campaign Agent ({insightData?.a2a_connections?.campaign || 0} this month), Strategy Agent ({insightData?.a2a_connections?.strategy || 0}), GTM Commercial ({insightData?.a2a_connections?.gtm || 0})
           </div>
           <Button variant="ghost" size="sm">
             View A2A Log
@@ -367,28 +398,77 @@ function InsightSection({ title, icon, count, defaultCollapsed, children }: Insi
   );
 }
 
-interface AlertCardProps {
-  alert: Alert;
+interface InsightCardWrapperProps {
+  insight: MarketInsight;
+  expanded?: boolean;
+  onSendToAgent: (agentId: string) => void;
+  onMarkRead: () => void;
+  onArchive: () => void;
 }
 
-function AlertCard({ alert }: AlertCardProps) {
-  const severityConfig = {
-    critical: { color: 'border-l-red-500 bg-red-500/10', icon: '🚨' },
-    warning: { color: 'border-l-amber-500 bg-amber-500/10', icon: '⚠️' },
-    info: { color: 'border-l-blue-500 bg-blue-500/10', icon: 'ℹ️' },
+function InsightCardWrapper({ insight, expanded, onSendToAgent, onMarkRead, onArchive }: InsightCardWrapperProps) {
+  // Transform API insight to the format expected by InsightCard
+  // Map impact_level to priority if priority is not set
+  const priorityFromImpact = insight.impact_level === 'high' ? 'high' :
+                             insight.impact_level === 'medium' ? 'medium' : 'opportunity';
+
+  const transformedInsight = {
+    id: insight.id,
+    title: insight.title,
+    summary: insight.summary || '', // Ensure non-null string
+    priority: (insight.priority || priorityFromImpact) as 'high' | 'medium' | 'low' | 'opportunity',
+    category: insight.category || insight.insight_type || 'market',
+    agentId: 'market-intelligence',
+    isNew: !insight.is_read,
+    createdAt: new Date(insight.created_at),
+    evidence: insight.evidence,
+    implication: insight.implication,
+    recommendedAction: insight.recommended_action || insight.recommended_actions?.[0],
+    sources: insight.sources || [],
+    confidence: insight.confidence,
   };
 
-  const config = severityConfig[alert.severity];
-
   return (
-    <Card className={`border-l-4 ${config.color}`}>
+    <div className="relative">
+      <InsightCard
+        insight={transformedInsight}
+        expanded={expanded}
+        onSendToAgent={onSendToAgent}
+      />
+      <div className="absolute top-4 right-4 flex gap-1">
+        {!insight.is_read && (
+          <Button variant="ghost" size="sm" onClick={onMarkRead}>
+            Mark Read
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onArchive}
+          leftIcon={<Archive className="w-3 h-3" />}
+        >
+          Archive
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+interface AlertCardProps {
+  insight: MarketInsight;
+  onAcknowledge: () => void;
+}
+
+function AlertCard({ insight, onAcknowledge }: AlertCardProps) {
+  return (
+    <Card className="border-l-4 border-l-red-500 bg-red-500/10">
       <div className="flex items-start gap-3">
-        <span className="text-xl">{config.icon}</span>
+        <span className="text-xl">🚨</span>
         <div className="flex-1">
-          <h4 className="font-semibold text-white">{alert.title}</h4>
-          <p className="text-sm text-white/70 mt-1">{alert.description}</p>
+          <h4 className="font-semibold text-white">{insight.title}</h4>
+          <p className="text-sm text-white/70 mt-1">{insight.summary}</p>
         </div>
-        <Button variant="ghost" size="sm">
+        <Button variant="ghost" size="sm" onClick={onAcknowledge}>
           Acknowledge
         </Button>
       </div>

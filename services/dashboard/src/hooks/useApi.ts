@@ -232,6 +232,7 @@ export interface UseMutationOptions<T> {
 
 export interface UseMutationReturn<TData, TVariables> extends UseMutationState<TData> {
   mutate: (variables: TVariables) => Promise<TData | undefined>;
+  execute: (variables: TVariables) => Promise<TData | undefined>; // Alias for mutate
   reset: () => void;
 }
 
@@ -279,6 +280,7 @@ export function useMutation<TData, TVariables>(
   return {
     ...state,
     mutate,
+    execute: mutate, // Alias for mutate
     reset,
   };
 }

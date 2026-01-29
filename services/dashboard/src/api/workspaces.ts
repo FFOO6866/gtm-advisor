@@ -191,6 +191,23 @@ export interface Lead {
   updated_at: string | null;
   contacted_at: string | null;
   converted_at: string | null;
+  // Extended fields for UI
+  company_name?: string; // Alias for lead_company_name
+  industry?: string; // Alias for lead_company_industry
+  employee_count?: string; // Alias for lead_company_size
+  location?: string;
+  intent_signals?: string[];
+  fit_reasons?: string[];
+  recommended_approach?: string;
+  pdpa_consent_status?: 'pending' | 'verified' | 'rejected';
+}
+
+export interface LeadUpdate {
+  status?: string;
+  notes?: string;
+  tags?: string[];
+  fit_score?: number;
+  intent_score?: number;
 }
 
 export interface LeadCreate {
@@ -220,6 +237,7 @@ export interface LeadListResponse {
   avg_fit_score: number;
   avg_intent_score: number;
   high_score_count: number;
+  stuck_leads_count?: number;
 }
 
 // Campaign types
@@ -241,6 +259,14 @@ export interface ContentAsset {
   target_persona?: string;
 }
 
+export interface CampaignPhase {
+  name: string;
+  duration: string;
+  channels: string[];
+  content: string[];
+  kpis: string[];
+}
+
 export interface Campaign {
   id: string;
   company_id: string;
@@ -248,7 +274,7 @@ export interface Campaign {
   name: string;
   description: string | null;
   objective: string;
-  status: 'draft' | 'active' | 'paused' | 'completed';
+  status: 'draft' | 'active' | 'paused' | 'completed' | 'cancelled';
   target_personas: string[];
   target_industries: string[];
   target_company_sizes: string[];
@@ -268,6 +294,20 @@ export interface Campaign {
   metrics: Record<string, unknown>;
   created_at: string;
   updated_at: string | null;
+  // Extended fields for UI
+  phases?: CampaignPhase[];
+  duration?: string;
+  expected_roi?: number;
+}
+
+export interface CampaignUpdate {
+  name?: string;
+  description?: string;
+  objective?: string;
+  status?: string;
+  budget?: number;
+  channels?: string[];
+  phases?: CampaignPhase[];
 }
 
 export interface CampaignCreate {
@@ -294,6 +334,7 @@ export interface CampaignListResponse {
   by_status: Record<string, number>;
   by_objective: Record<string, number>;
   total_budget: number;
+  content_pieces_this_month?: number;
 }
 
 // Market Insight types
@@ -316,6 +357,25 @@ export interface MarketInsight {
   is_archived: boolean;
   created_at: string;
   expires_at: string | null;
+  // Extended fields for UI
+  priority?: 'high' | 'medium' | 'opportunity';
+  evidence?: string;
+  implication?: string;
+  recommended_action?: string; // Single action
+  sources?: string[];
+  confidence?: number;
+}
+
+export interface InsightUpdate {
+  is_read?: boolean;
+  is_archived?: boolean;
+}
+
+export interface CompetitorSummary {
+  name: string;
+  status: string;
+  last_activity: string;
+  threat_level: 'high' | 'medium' | 'low';
 }
 
 export interface MarketInsightListResponse {
@@ -325,6 +385,14 @@ export interface MarketInsightListResponse {
   by_type: Record<string, number>;
   by_impact: Record<string, number>;
   recent_high_impact: MarketInsight[];
+  // Extended fields for UI
+  competitor_summaries?: CompetitorSummary[];
+  competitors_count?: number;
+  a2a_connections?: {
+    campaign?: number;
+    strategy?: number;
+    gtm?: number;
+  };
 }
 
 // User Settings types
@@ -772,6 +840,15 @@ export async function unarchiveInsight(
   });
 }
 
+// Helper functions for single insight operations
+export async function markInsightRead(companyId: string, insightId: string): Promise<void> {
+  return markInsightsRead(companyId, [insightId]);
+}
+
+export async function archiveInsight(companyId: string, insightId: string): Promise<void> {
+  return archiveInsights(companyId, [insightId]);
+}
+
 export async function getInsightsSummary(
   companyId: string
 ): Promise<{
@@ -790,7 +867,7 @@ export async function getInsightsSummary(
 
 export function getExportUrl(
   companyId: string,
-  type: 'analysis' | 'competitors' | 'battlecards' | 'icps' | 'leads' | 'campaign' | 'full-report',
+  type: 'analysis' | 'competitors' | 'battlecards' | 'icps' | 'leads' | 'campaign' | 'campaigns' | 'full-report',
   id?: string,
   options?: { minScore?: number; status?: string }
 ): string {
@@ -817,6 +894,9 @@ export function getExportUrl(
       break;
     case 'campaign':
       path += `/campaigns/${id}/json`;
+      break;
+    case 'campaigns':
+      path += '/campaigns/json';
       break;
     case 'full-report':
       path += '/full-report/json';

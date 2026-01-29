@@ -25,6 +25,10 @@ import {
 } from './api/client';
 import { transformAnalysisResult } from './api/transforms';
 
+// Import context providers
+import { CompanyProvider, useCompany, createCompanyFromForm } from './context/CompanyContext';
+import { ToastProvider } from './components/common';
+
 // Import agent workspace pages
 import {
   IntelligenceWorkspace,
@@ -39,17 +43,21 @@ import {
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Dashboard />} />
-      <Route path="/agent/market-intelligence" element={<IntelligenceWorkspace />} />
-      <Route path="/agent/campaign-architect" element={<CampaignWorkspace />} />
-      <Route path="/agent/lead-hunter" element={<DemandWorkspace />} />
-      <Route path="/agent/gtm-strategist" element={<StrategyWorkspace />} />
-      <Route path="/agent/competitor-analyst" element={<CompetitorWorkspace />} />
-      <Route path="/agent/customer-profiler" element={<CustomerWorkspace />} />
-      <Route path="/agent/company-enricher" element={<EnricherWorkspace />} />
-      <Route path="/agent/:agentId" element={<GenericAgentWorkspace />} />
-    </Routes>
+    <CompanyProvider>
+      <ToastProvider>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/agent/market-intelligence" element={<IntelligenceWorkspace />} />
+          <Route path="/agent/campaign-architect" element={<CampaignWorkspace />} />
+          <Route path="/agent/lead-hunter" element={<DemandWorkspace />} />
+          <Route path="/agent/gtm-strategist" element={<StrategyWorkspace />} />
+          <Route path="/agent/competitor-analyst" element={<CompetitorWorkspace />} />
+          <Route path="/agent/customer-profiler" element={<CustomerWorkspace />} />
+          <Route path="/agent/company-enricher" element={<EnricherWorkspace />} />
+          <Route path="/agent/:agentId" element={<GenericAgentWorkspace />} />
+        </Routes>
+      </ToastProvider>
+    </CompanyProvider>
   );
 }
 
@@ -61,6 +69,7 @@ const STORAGE_KEYS = {
 
 function Dashboard() {
   const navigate = useNavigate();
+  const { setCompany } = useCompany();
 
   // Initialize state from sessionStorage to persist across navigation
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -380,28 +389,44 @@ function Dashboard() {
   );
 
   const handleCompanySubmit = useCallback(
-    (company: CompanyInfo) => {
-      setCompanyInfo(company);
+    (companyData: CompanyInfo) => {
+      setCompanyInfo(companyData);
       setShowOnboarding(false);
 
       // Persist to sessionStorage so we can restore after navigation
-      sessionStorage.setItem(STORAGE_KEYS.companyInfo, JSON.stringify(company));
+      sessionStorage.setItem(STORAGE_KEYS.companyInfo, JSON.stringify(companyData));
       sessionStorage.setItem(STORAGE_KEYS.hasOnboarded, 'true');
+
+      // Set company in context for workspace pages
+      // Generate a company ID for the context (in production this would come from API)
+      const companyId = `company_${Date.now()}`;
+      const contextCompany = createCompanyFromForm({
+        name: companyData.name,
+        website: companyData.website,
+        description: companyData.description,
+        industry: companyData.industry,
+        goals: companyData.goals,
+        challenges: companyData.challenges,
+        competitors: companyData.competitors,
+        targetMarkets: companyData.targetMarkets,
+        valueProposition: companyData.valueProposition,
+      }, companyId);
+      setCompany(contextCompany);
 
       // Add user message
       setMessages([
         {
           id: Date.now().toString(),
           role: 'user',
-          content: `Analyze GTM strategy for ${company.name}: ${company.description}`,
+          content: `Analyze GTM strategy for ${companyData.name}: ${companyData.description}`,
           timestamp: new Date(),
         },
       ]);
 
       // Start real analysis
-      runAnalysis(company);
+      runAnalysis(companyData);
     },
-    [runAnalysis]
+    [runAnalysis, setCompany]
   );
 
   const handleSendMessage = useCallback(

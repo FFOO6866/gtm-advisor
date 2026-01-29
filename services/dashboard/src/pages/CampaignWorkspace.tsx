@@ -2,6 +2,7 @@
  * Campaign Architect Agent Workspace
  *
  * Campaign planning, content generation, and messaging.
+ * Connected to real backend API.
  */
 
 import { useState } from 'react';
@@ -16,63 +17,23 @@ import {
   Calendar,
   Target,
   DollarSign,
+  Play,
+  Pause,
 } from 'lucide-react';
 import { AgentWorkspace } from '../components/agents/AgentWorkspace';
-import { Card, Badge, Button, EmptyState } from '../components/common';
+import {
+  Card,
+  Badge,
+  Button,
+  EmptyState,
+  CampaignListLoading,
+  ErrorState,
+} from '../components/common';
 import { AGENTS } from '../types';
-
-interface CampaignPlan {
-  name: string;
-  objective: string;
-  phases: CampaignPhase[];
-  totalBudget: number;
-  duration: string;
-  expectedROI: number;
-}
-
-interface CampaignPhase {
-  name: string;
-  duration: string;
-  budget: number;
-  channels: string[];
-  content: string[];
-  kpis: string[];
-}
-
-// Mock campaign plan
-const MOCK_CAMPAIGN: CampaignPlan = {
-  name: 'Enterprise AI Transformation',
-  objective: 'Generate qualified leads for enterprise segment',
-  totalBudget: 15000,
-  duration: '3 months',
-  expectedROI: 3.2,
-  phases: [
-    {
-      name: 'Awareness',
-      duration: 'Week 1-4',
-      budget: 5000,
-      channels: ['LinkedIn Ads', 'Blog Content', 'Organic Social'],
-      content: ['3 thought leadership posts', '2 case studies', 'Daily social posts'],
-      kpis: ['5K impressions', '500 engagements', '100 website visits'],
-    },
-    {
-      name: 'Consideration',
-      duration: 'Week 5-8',
-      budget: 6000,
-      channels: ['Webinar', 'Retargeting', 'Email Nurture'],
-      content: ['1 webinar', 'Retargeting ads', '5-email sequence'],
-      kpis: ['100 webinar registrations', '50 MQLs'],
-    },
-    {
-      name: 'Conversion',
-      duration: 'Week 9-12',
-      budget: 4000,
-      channels: ['Direct Outreach', 'Demo Campaigns', 'Sales Enablement'],
-      content: ['Personalized outreach', 'Demo landing page', 'Sales deck'],
-      kpis: ['20 demo requests', '5 SQLs', '2 closed deals'],
-    },
-  ],
-};
+import { useCompanyId } from '../context/CompanyContext';
+import { useCampaigns, useMutation } from '../hooks/useApi';
+import * as api from '../api/workspaces';
+import type { Campaign, CampaignUpdate } from '../api/workspaces';
 
 const CONTENT_TYPES = [
   { id: 'linkedin', label: 'LinkedIn Post', icon: <Linkedin className="w-4 h-4" /> },
@@ -82,19 +43,38 @@ const CONTENT_TYPES = [
 ];
 
 export function CampaignWorkspace() {
+  const companyId = useCompanyId();
   const [activeTab, setActiveTab] = useState('active');
   const [isRunning, setIsRunning] = useState(false);
   const [selectedContentType, setSelectedContentType] = useState('linkedin');
   const [generatedContent, setGeneratedContent] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [contentUsage] = useState({ used: 23, limit: 50 });
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
+  // Fetch campaigns from API
+  const { data: campaignData, isLoading, error, refresh } = useCampaigns(companyId);
+
   const agent = AGENTS.find((a) => a.id === 'campaign-architect')!;
+
+  // Mutations
+  const updateMutation = useMutation(
+    ({ campaignId, data }: { campaignId: string; data: CampaignUpdate }) =>
+      api.updateCampaign(companyId!, campaignId, data),
+    {
+      invalidateKeys: ['campaigns'],
+      onSuccess: () => refresh(),
+    }
+  );
+
+  const campaigns = campaignData?.campaigns || [];
+  const activeCampaigns = campaigns.filter((c) => c.status === 'active');
+  const contentUsed = campaignData?.content_pieces_this_month || 0;
+  const contentLimit = 50;
 
   const handleRun = async () => {
     setIsRunning(true);
     await new Promise((resolve) => setTimeout(resolve, 2000));
+    refresh();
     setIsRunning(false);
   };
 
@@ -102,7 +82,7 @@ export function CampaignWorkspace() {
     setIsGenerating(true);
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
-    // Mock generated content
+    // Mock generated content (in production, this would call the API)
     const mockContent = [
       `📊 34% of Singapore enterprises adopted AI marketing tools this year.
 
@@ -164,16 +144,78 @@ DM me if you want to see how 👇`,
   };
 
   const tabs = [
-    { id: 'active', label: 'Active Campaigns', icon: '📢' },
+    { id: 'active', label: 'Active Campaigns', badge: activeCampaigns.length, icon: '📢' },
     { id: 'builder', label: 'Campaign Builder', icon: '🛠️' },
-    { id: 'content', label: 'Content Generator', badge: contentUsage.limit - contentUsage.used, icon: '✏️' },
+    { id: 'content', label: 'Content Generator', badge: contentLimit - contentUsed, icon: '✏️' },
     { id: 'templates', label: 'Templates', icon: '📋' },
   ];
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <AgentWorkspace
+        agent={agent}
+        status="active"
+        lastRun={new Date()}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRun={handleRun}
+        isRunning={isRunning}
+      >
+        <CampaignListLoading />
+      </AgentWorkspace>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <AgentWorkspace
+        agent={agent}
+        status="error"
+        lastRun={new Date()}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRun={handleRun}
+        isRunning={isRunning}
+      >
+        <ErrorState
+          title="Failed to load campaigns"
+          message={error.message}
+          onRetry={refresh}
+        />
+      </AgentWorkspace>
+    );
+  }
+
+  // No company selected
+  if (!companyId) {
+    return (
+      <AgentWorkspace
+        agent={agent}
+        status="idle"
+        lastRun={new Date()}
+        tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onRun={handleRun}
+        isRunning={isRunning}
+      >
+        <EmptyState
+          icon="🏢"
+          title="No Company Selected"
+          description="Please complete onboarding to start creating campaigns."
+        />
+      </AgentWorkspace>
+    );
+  }
 
   return (
     <AgentWorkspace
       agent={agent}
-      status="idle"
+      status={activeCampaigns.length > 0 ? 'active' : 'idle'}
       lastRun={new Date(Date.now() - 24 * 60 * 60 * 1000)}
       tabs={tabs}
       activeTab={activeTab}
@@ -184,15 +226,41 @@ DM me if you want to see how 👇`,
       {/* Active Campaigns Tab */}
       {activeTab === 'active' && (
         <div className="space-y-6">
-          <CampaignCard campaign={MOCK_CAMPAIGN} />
+          {campaigns.length === 0 ? (
+            <EmptyState
+              icon="📢"
+              title="No Campaigns Yet"
+              description="Create your first campaign to start reaching your target audience."
+              action={{ label: 'Create Campaign', onClick: () => setActiveTab('builder') }}
+            />
+          ) : (
+            <>
+              {campaigns.map((campaign) => (
+                <CampaignCard
+                  key={campaign.id}
+                  campaign={campaign}
+                  onStatusChange={(status) =>
+                    updateMutation.execute({
+                      campaignId: campaign.id,
+                      data: { status },
+                    })
+                  }
+                />
+              ))}
 
-          <Card className="border-dashed border-2 border-white/20">
-            <div className="flex items-center justify-center py-8">
-              <Button variant="ghost" leftIcon={<Sparkles className="w-4 h-4" />}>
-                + Create New Campaign
-              </Button>
-            </div>
-          </Card>
+              <Card className="border-dashed border-2 border-white/20">
+                <div className="flex items-center justify-center py-8">
+                  <Button
+                    variant="ghost"
+                    leftIcon={<Sparkles className="w-4 h-4" />}
+                    onClick={() => setActiveTab('builder')}
+                  >
+                    + Create New Campaign
+                  </Button>
+                </div>
+              </Card>
+            </>
+          )}
         </div>
       )}
 
@@ -232,7 +300,7 @@ DM me if you want to see how 👇`,
                   <label className="block text-sm text-white/70 mb-1">Duration</label>
                   <select className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500">
                     <option value="1">1 month</option>
-                    <option value="3" selected>3 months</option>
+                    <option value="3">3 months</option>
                     <option value="6">6 months</option>
                   </select>
                 </div>
@@ -278,7 +346,7 @@ DM me if you want to see how 👇`,
           <Card className="bg-purple-500/10 border-purple-500/30">
             <div className="flex items-center justify-between">
               <span className="text-white/70">
-                Content this month: {contentUsage.used}/{contentUsage.limit} pieces
+                Content this month: {contentUsed}/{contentLimit} pieces
               </span>
               <Button variant="ghost" size="sm">
                 Upgrade for unlimited
@@ -288,7 +356,7 @@ DM me if you want to see how 👇`,
               <motion.div
                 className="h-full bg-gradient-to-r from-purple-500 to-blue-500"
                 initial={{ width: 0 }}
-                animate={{ width: `${(contentUsage.used / contentUsage.limit) * 100}%` }}
+                animate={{ width: `${(contentUsed / contentLimit) * 100}%` }}
               />
             </div>
           </Card>
@@ -421,8 +489,26 @@ DM me if you want to see how 👇`,
 }
 
 // Campaign Card Component
-function CampaignCard({ campaign }: { campaign: CampaignPlan }) {
+interface CampaignCardProps {
+  campaign: Campaign;
+  onStatusChange: (status: string) => void;
+}
+
+function CampaignCard({ campaign, onStatusChange }: CampaignCardProps) {
   const [expandedPhase, setExpandedPhase] = useState<number | null>(0);
+
+  const phases = campaign.phases || [];
+  const totalBudget = campaign.budget || 0;
+  const duration = campaign.duration || '3 months';
+  const expectedROI = campaign.expected_roi || 0;
+
+  const statusBadge = {
+    draft: 'default',
+    active: 'success',
+    paused: 'warning',
+    completed: 'default',
+    cancelled: 'danger',
+  } as const;
 
   return (
     <Card>
@@ -431,104 +517,134 @@ function CampaignCard({ campaign }: { campaign: CampaignPlan }) {
           <h3 className="text-xl font-semibold text-white">{campaign.name}</h3>
           <p className="text-white/60 mt-1">{campaign.objective}</p>
         </div>
-        <Badge variant="success">Active</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={statusBadge[campaign.status] || 'default'}>
+            {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
+          </Badge>
+          {campaign.status === 'active' ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={<Pause className="w-3 h-3" />}
+              onClick={() => onStatusChange('paused')}
+            >
+              Pause
+            </Button>
+          ) : campaign.status === 'paused' || campaign.status === 'draft' ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={<Play className="w-3 h-3" />}
+              onClick={() => onStatusChange('active')}
+            >
+              {campaign.status === 'draft' ? 'Launch' : 'Resume'}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {/* Campaign Stats */}
       <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="text-center p-3 bg-white/5 rounded-lg">
           <DollarSign className="w-5 h-5 text-green-400 mx-auto mb-1" />
-          <div className="text-lg font-semibold text-white">SGD {campaign.totalBudget.toLocaleString()}</div>
+          <div className="text-lg font-semibold text-white">SGD {totalBudget.toLocaleString()}</div>
           <div className="text-xs text-white/50">Total Budget</div>
         </div>
         <div className="text-center p-3 bg-white/5 rounded-lg">
           <Calendar className="w-5 h-5 text-blue-400 mx-auto mb-1" />
-          <div className="text-lg font-semibold text-white">{campaign.duration}</div>
+          <div className="text-lg font-semibold text-white">{duration}</div>
           <div className="text-xs text-white/50">Duration</div>
         </div>
         <div className="text-center p-3 bg-white/5 rounded-lg">
           <Target className="w-5 h-5 text-purple-400 mx-auto mb-1" />
-          <div className="text-lg font-semibold text-white">{campaign.phases.length}</div>
+          <div className="text-lg font-semibold text-white">{phases.length}</div>
           <div className="text-xs text-white/50">Phases</div>
         </div>
         <div className="text-center p-3 bg-white/5 rounded-lg">
           <Sparkles className="w-5 h-5 text-amber-400 mx-auto mb-1" />
-          <div className="text-lg font-semibold text-white">{campaign.expectedROI}x</div>
+          <div className="text-lg font-semibold text-white">{expectedROI}x</div>
           <div className="text-xs text-white/50">Expected ROI</div>
         </div>
       </div>
 
       {/* Phases */}
-      <div className="space-y-3">
-        {campaign.phases.map((phase, index) => (
-          <div
-            key={phase.name}
-            className="border border-white/10 rounded-lg overflow-hidden"
-          >
-            <button
-              className="w-full px-4 py-3 flex items-center justify-between bg-white/5 hover:bg-white/10 transition-colors"
-              onClick={() => setExpandedPhase(expandedPhase === index ? null : index)}
+      {phases.length > 0 && (
+        <div className="space-y-3">
+          {phases.map((phase, index) => (
+            <div
+              key={phase.name}
+              className="border border-white/10 rounded-lg overflow-hidden"
             >
-              <div className="flex items-center gap-3">
-                <span className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 text-xs flex items-center justify-center">
-                  {index + 1}
-                </span>
-                <span className="font-medium text-white">{phase.name}</span>
-                <span className="text-white/50 text-sm">({phase.duration})</span>
-              </div>
-              <span className="text-white/50">{expandedPhase === index ? '▼' : '▶'}</span>
-            </button>
+              <button
+                className="w-full px-4 py-3 flex items-center justify-between bg-white/5 hover:bg-white/10 transition-colors"
+                onClick={() => setExpandedPhase(expandedPhase === index ? null : index)}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 text-xs flex items-center justify-center">
+                    {index + 1}
+                  </span>
+                  <span className="font-medium text-white">{phase.name}</span>
+                  <span className="text-white/50 text-sm">({phase.duration})</span>
+                </div>
+                <span className="text-white/50">{expandedPhase === index ? '▼' : '▶'}</span>
+              </button>
 
-            <AnimatePresence>
-              {expandedPhase === index && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="px-4 py-3 bg-white/[0.02]"
-                >
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <h5 className="text-xs font-medium text-white/50 uppercase mb-2">Channels</h5>
-                      <ul className="space-y-1">
-                        {phase.channels.map((channel) => (
-                          <li key={channel} className="text-sm text-white/80">• {channel}</li>
-                        ))}
-                      </ul>
+              <AnimatePresence>
+                {expandedPhase === index && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="px-4 py-3 bg-white/[0.02]"
+                  >
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <h5 className="text-xs font-medium text-white/50 uppercase mb-2">Channels</h5>
+                        <ul className="space-y-1">
+                          {(phase.channels || []).map((channel) => (
+                            <li key={channel} className="text-sm text-white/80">• {channel}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-medium text-white/50 uppercase mb-2">Content</h5>
+                        <ul className="space-y-1">
+                          {(phase.content || []).map((item) => (
+                            <li key={item} className="text-sm text-white/80">• {item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <h5 className="text-xs font-medium text-white/50 uppercase mb-2">KPIs</h5>
+                        <ul className="space-y-1">
+                          {(phase.kpis || []).map((kpi) => (
+                            <li key={kpi} className="text-sm text-white/80">• {kpi}</li>
+                          ))}
+                        </ul>
+                      </div>
                     </div>
-                    <div>
-                      <h5 className="text-xs font-medium text-white/50 uppercase mb-2">Content</h5>
-                      <ul className="space-y-1">
-                        {phase.content.map((item) => (
-                          <li key={item} className="text-sm text-white/80">• {item}</li>
-                        ))}
-                      </ul>
+                    <div className="flex justify-end mt-4">
+                      <Button variant="ghost" size="sm">
+                        Generate Content for Phase →
+                      </Button>
                     </div>
-                    <div>
-                      <h5 className="text-xs font-medium text-white/50 uppercase mb-2">KPIs</h5>
-                      <ul className="space-y-1">
-                        {phase.kpis.map((kpi) => (
-                          <li key={kpi} className="text-sm text-white/80">• {kpi}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                  <div className="flex justify-end mt-4">
-                    <Button variant="ghost" size="sm">
-                      Generate Content for Phase →
-                    </Button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        ))}
-      </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-white/10">
         <Button variant="ghost">Edit Campaign</Button>
-        <Button variant="secondary">Export to PDF</Button>
+        <Button
+          variant="secondary"
+          onClick={() => window.open(api.getExportUrl(campaign.company_id, 'campaigns'), '_blank')}
+        >
+          Export to PDF
+        </Button>
       </div>
     </Card>
   );
