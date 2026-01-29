@@ -1,0 +1,14 @@
+[project]
+name = "gtm-advisor-database"
+version = "0.1.0"
+description = "Database layer for GTM Advisor"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
