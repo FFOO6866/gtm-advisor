@@ -33,7 +33,21 @@ from fastapi.responses import JSONResponse
 
 from packages.core.src.config import get_config
 
-from .routers import agents, analysis, auth, companies, health, websocket
+from .routers import (
+    agents,
+    analysis,
+    auth,
+    campaigns,
+    companies,
+    competitors,
+    exports,
+    health,
+    icps,
+    insights,
+    leads,
+    settings,
+    websocket,
+)
 
 logger = structlog.get_logger()
 
@@ -103,6 +117,15 @@ app.include_router(agents.router, prefix="/api/v1/agents", tags=["Agents"])
 app.include_router(companies.router, prefix="/api/v1/companies", tags=["Companies"])
 app.include_router(analysis.router, prefix="/api/v1/analysis", tags=["Analysis"])
 app.include_router(websocket.router, prefix="/ws", tags=["WebSocket"])
+
+# Workspace data routers
+app.include_router(competitors.router, prefix="/api/v1/companies", tags=["Competitors"])
+app.include_router(icps.router, prefix="/api/v1/companies", tags=["ICPs & Personas"])
+app.include_router(leads.router, prefix="/api/v1/companies", tags=["Leads"])
+app.include_router(campaigns.router, prefix="/api/v1/companies", tags=["Campaigns"])
+app.include_router(insights.router, prefix="/api/v1/companies", tags=["Market Insights"])
+app.include_router(exports.router, prefix="/api/v1/exports", tags=["Exports"])
+app.include_router(settings.router, prefix="/api/v1/settings", tags=["Settings"])
 
 
 @app.get("/")
