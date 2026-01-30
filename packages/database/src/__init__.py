@@ -1,28 +1,50 @@
 """Database package for GTM Advisor."""
 
+from .knowledge_web import (
+    CompetitorSignalRepository,
+    EntityRelationRepository,
+    EntityRepository,
+    EvidencedFactRepository,
+    KnowledgeWebService,
+    LeadJustificationRepository,
+    MCPDataSourceRepository,
+)
 from .models import (
-    Base,
-    User,
-    Company,
+    ICP,
     Analysis,
-    Consent,
+    AnalysisStatus,
     AuditLog,
+    Base,
+    Campaign,
+    CampaignStatus,
+    Company,
     Competitor,
     CompetitorAlert,
-    ICP,
-    Persona,
+    CompetitorSignal,
+    Consent,
+    ConsentPurpose,
+    Entity,
+    EntityRelation,
+    # Knowledge Web Models
+    EntityType,
+    EvidencedFact,
+    FactEntityLink,
+    FactRelationLink,
+    FactType,
     Lead,
-    Campaign,
+    LeadJustification,
+    LeadStatus,
     MarketInsight,
+    MCPDataSource,
+    Persona,
+    RelationType,
+    SourceType,
     # Enums
     SubscriptionTier,
-    AnalysisStatus,
-    ConsentPurpose,
     ThreatLevel,
-    LeadStatus,
-    CampaignStatus,
+    User,
 )
-from .session import get_db, get_db_session, init_db, close_db, AsyncSessionLocal
+from .session import AsyncSessionLocal, close_db, get_db, get_db_session, init_db
 
 __all__ = [
     # Models
@@ -39,6 +61,15 @@ __all__ = [
     "Lead",
     "Campaign",
     "MarketInsight",
+    # Knowledge Web Models
+    "EvidencedFact",
+    "Entity",
+    "EntityRelation",
+    "FactEntityLink",
+    "FactRelationLink",
+    "LeadJustification",
+    "CompetitorSignal",
+    "MCPDataSource",
     # Enums
     "SubscriptionTier",
     "AnalysisStatus",
@@ -46,6 +77,18 @@ __all__ = [
     "ThreatLevel",
     "LeadStatus",
     "CampaignStatus",
+    "SourceType",
+    "FactType",
+    "EntityType",
+    "RelationType",
+    # Knowledge Web Repositories
+    "EvidencedFactRepository",
+    "EntityRepository",
+    "EntityRelationRepository",
+    "LeadJustificationRepository",
+    "CompetitorSignalRepository",
+    "MCPDataSourceRepository",
+    "KnowledgeWebService",
     # Session
     "get_db",
     "get_db_session",

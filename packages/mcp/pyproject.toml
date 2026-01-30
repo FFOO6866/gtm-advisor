@@ -1,0 +1,15 @@
+[project]
+name = "gtm-advisor-mcp"
+version = "0.1.0"
+description = "MCP (Model Context Protocol) servers for Knowledge Web data collection"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "httpx>=0.24",
+    "structlog>=24.0",
+    "beautifulsoup4>=4.12",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

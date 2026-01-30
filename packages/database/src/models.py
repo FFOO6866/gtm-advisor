@@ -16,21 +16,20 @@ Tables:
 
 from datetime import datetime
 from enum import Enum as PyEnum
-from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column,
-    String,
-    Text,
+    JSON,
     Boolean,
-    Integer,
-    Float,
+    Column,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
-    JSON,
     Index,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, relationship
@@ -136,7 +135,7 @@ class Company(Base):
     __tablename__ = "companies"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  # Nullable for MVP
 
     # Basic info
     name = Column(String(200), nullable=False)
@@ -188,7 +187,9 @@ class Analysis(Base):
     __tablename__ = "analyses"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )  # Nullable for MVP unauthenticated access
     company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
 
     # Status
@@ -642,3 +643,668 @@ class AuditLog(Base):
 
     def __repr__(self) -> str:
         return f"<AuditLog {self.event_type} at {self.timestamp}>"
+
+
+# ============================================================================
+# Strategy Models
+# ============================================================================
+
+
+class RecommendationStatus(str, PyEnum):
+    """Strategy recommendation status."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    DISMISSED = "dismissed"
+
+
+class RecommendationPriority(str, PyEnum):
+    """Strategy recommendation priority."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class PhaseStatus(str, PyEnum):
+    """Strategy phase status."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+
+
+class StrategyRun(Base):
+    """Strategy analysis run."""
+
+    __tablename__ = "strategy_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+
+    # Status
+    status = Column(String(20), default="running")  # running, completed, failed
+
+    # Metrics
+    agents_active = Column(Integer, default=0)
+    agents_total = Column(Integer, default=6)
+    tasks_completed = Column(Integer, default=0)
+    avg_confidence = Column(Float, default=0.0)
+    execution_time_ms = Column(Float, default=0.0)
+
+    # Timestamps
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime)
+
+    # Relationships
+    phases = relationship(
+        "StrategyPhase", back_populates="strategy_run", cascade="all, delete-orphan"
+    )
+    recommendations = relationship(
+        "StrategyRecommendation", back_populates="strategy_run", cascade="all, delete-orphan"
+    )
+    activities = relationship(
+        "AgentActivity", back_populates="strategy_run", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (Index("ix_strategy_runs_company_id", "company_id"),)
+
+
+class StrategyPhase(Base):
+    """Strategy phase tracking."""
+
+    __tablename__ = "strategy_phases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    strategy_run_id = Column(UUID(as_uuid=True), ForeignKey("strategy_runs.id"), nullable=False)
+
+    # Phase info
+    phase_key = Column(String(50), nullable=False)  # discovery, analysis, strategy, etc.
+    name = Column(String(100), nullable=False)
+    status = Column(Enum(PhaseStatus), default=PhaseStatus.PENDING)
+    icon = Column(String(10))
+
+    # Timestamps
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+
+    # Relationships
+    strategy_run = relationship("StrategyRun", back_populates="phases")
+
+    __table_args__ = (Index("ix_strategy_phases_run_id", "strategy_run_id"),)
+
+
+class StrategyRecommendation(Base):
+    """Strategy recommendation."""
+
+    __tablename__ = "strategy_recommendations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    strategy_run_id = Column(UUID(as_uuid=True), ForeignKey("strategy_runs.id"))
+
+    # Recommendation details
+    priority = Column(Enum(RecommendationPriority), default=RecommendationPriority.MEDIUM)
+    title = Column(String(300), nullable=False)
+    description = Column(Text)
+    source_agents = Column(JSON, default=list)  # List of agent IDs
+    impact = Column(String(200))
+    confidence = Column(Float, default=0.0)
+    status = Column(Enum(RecommendationStatus), default=RecommendationStatus.PENDING)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    strategy_run = relationship("StrategyRun", back_populates="recommendations")
+
+    __table_args__ = (
+        Index("ix_strategy_recommendations_company_id", "company_id"),
+        Index("ix_strategy_recommendations_status", "status"),
+    )
+
+
+class AgentActivity(Base):
+    """Agent activity log."""
+
+    __tablename__ = "agent_activities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    strategy_run_id = Column(UUID(as_uuid=True), ForeignKey("strategy_runs.id"))
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+
+    # Activity details
+    agent_id = Column(String(50), nullable=False)
+    agent_name = Column(String(100), nullable=False)
+    action = Column(String(300), nullable=False)
+    icon = Column(String(10))
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    strategy_run = relationship("StrategyRun", back_populates="activities")
+
+    __table_args__ = (
+        Index("ix_agent_activities_company_id", "company_id"),
+        Index("ix_agent_activities_created_at", "created_at"),
+    )
+
+
+# ============================================================================
+# Agent Run Models
+# ============================================================================
+
+
+class AgentRunStatus(str, PyEnum):
+    """Agent run status."""
+
+    IDLE = "idle"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    ERROR = "error"
+
+
+class AgentRun(Base):
+    """Agent execution run."""
+
+    __tablename__ = "agent_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+
+    # Agent info
+    agent_id = Column(String(50), nullable=False)
+    task_id = Column(UUID(as_uuid=True), default=uuid4, nullable=False)
+
+    # Status
+    status = Column(Enum(AgentRunStatus), default=AgentRunStatus.RUNNING)
+    error_message = Column(Text)
+
+    # Results
+    confidence = Column(Float)
+    result_summary = Column(Text)
+
+    # Timestamps
+    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime)
+
+    __table_args__ = (
+        Index("ix_agent_runs_company_id", "company_id"),
+        Index("ix_agent_runs_agent_id", "agent_id"),
+        Index("ix_agent_runs_company_agent", "company_id", "agent_id"),
+    )
+
+
+# ============================================================================
+# Generated Content Models
+# ============================================================================
+
+
+class GeneratedContent(Base):
+    """AI-generated marketing content."""
+
+    __tablename__ = "generated_content"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    campaign_id = Column(UUID(as_uuid=True), ForeignKey("campaigns.id"))
+
+    # Content details
+    content_type = Column(String(20), nullable=False)  # linkedin, email, blog, ad
+    content = Column(Text, nullable=False)
+    tone = Column(String(20))  # professional, conversational, bold
+    target_persona = Column(String(100))
+    topic = Column(String(300))
+
+    # Metadata
+    key_points = Column(JSON, default=list)
+    include_cta = Column(Boolean, default=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_generated_content_company_id", "company_id"),
+        Index("ix_generated_content_type", "content_type"),
+    )
+
+
+# ============================================================================
+# Knowledge Web Models - Evidence-Backed Intelligence Graph
+# ============================================================================
+
+
+class SourceType(str, PyEnum):
+    """Source types for evidenced facts."""
+
+    ACRA = "acra"  # Singapore company registry
+    EODHD = "eodhd"  # Financial data
+    NEWSAPI = "newsapi"  # News articles
+    PERPLEXITY = "perplexity"  # Web research
+    WEB_SCRAPE = "web_scrape"  # Direct website scraping
+    LINKEDIN = "linkedin"  # LinkedIn public data
+    JOB_BOARD = "job_board"  # Job postings
+    GOVERNMENT = "government"  # Government data (MAS, GeBIZ, etc.)
+    REVIEW_SITE = "review_site"  # G2, Capterra, etc.
+    PRESS_RELEASE = "press_release"  # Company press releases
+    SEC_FILING = "sec_filing"  # Regulatory filings
+    USER_INPUT = "user_input"  # User-provided information
+
+
+class FactType(str, PyEnum):
+    """Types of evidenced facts."""
+
+    COMPANY_INFO = "company_info"  # Basic company data
+    FUNDING = "funding"  # Funding rounds, investors
+    EXECUTIVE = "executive"  # Executive appointments, departures
+    PRODUCT = "product"  # Product launches, updates
+    PARTNERSHIP = "partnership"  # Business partnerships
+    EXPANSION = "expansion"  # Market expansion, new offices
+    HIRING = "hiring"  # Hiring activity, job postings
+    TECHNOLOGY = "technology"  # Tech stack, tools used
+    FINANCIAL = "financial"  # Revenue, growth metrics
+    MARKET_TREND = "market_trend"  # Industry trends
+    COMPETITOR_MOVE = "competitor_move"  # Competitor activities
+    REGULATION = "regulation"  # Regulatory changes
+    ACQUISITION = "acquisition"  # M&A activity
+    SENTIMENT = "sentiment"  # Reviews, public perception
+
+
+class EntityType(str, PyEnum):
+    """Types of entities in the knowledge graph."""
+
+    COMPANY = "company"
+    PERSON = "person"
+    PRODUCT = "product"
+    INVESTOR = "investor"
+    INDUSTRY = "industry"
+    TECHNOLOGY = "technology"
+    LOCATION = "location"
+
+
+class RelationType(str, PyEnum):
+    """Types of relationships between entities."""
+
+    WORKS_AT = "works_at"
+    FOUNDED = "founded"
+    INVESTED_IN = "invested_in"
+    COMPETES_WITH = "competes_with"
+    PARTNERS_WITH = "partners_with"
+    ACQUIRED = "acquired"
+    USES_TECHNOLOGY = "uses_technology"
+    OPERATES_IN = "operates_in"
+    SUPPLIES_TO = "supplies_to"
+    FORMER_EMPLOYEE = "former_employee"
+
+
+class EvidencedFact(Base):
+    """Core fact storage with full provenance tracking.
+
+    Every fact has a source URL, timestamp, and confidence score.
+    This is the foundation of the Knowledge Web - no fact without evidence.
+    """
+
+    __tablename__ = "evidenced_facts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+
+    # The actual claim/fact
+    claim = Column(Text, nullable=False)
+    fact_type = Column(Enum(FactType), nullable=False)
+
+    # Source provenance (REQUIRED - no fact without source)
+    source_type = Column(Enum(SourceType), nullable=False)
+    source_name = Column(String(200), nullable=False)  # e.g., "TechCrunch", "ACRA"
+    source_url = Column(String(1000))  # URL to original source
+    raw_excerpt = Column(Text)  # Original text from source
+
+    # Temporal context
+    published_at = Column(DateTime)  # When the source was published
+    captured_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    valid_from = Column(DateTime)  # When fact became true
+    valid_until = Column(DateTime)  # When fact stopped being true (if known)
+
+    # Confidence scoring
+    confidence = Column(Float, default=0.8, nullable=False)  # 0-1 confidence
+    verification_count = Column(Integer, default=1)  # How many sources confirm this
+
+    # Structured data extraction (optional)
+    extracted_data = Column(JSON, default=dict)  # Key-value pairs from the fact
+
+    # Processing metadata
+    mcp_server = Column(String(50))  # Which MCP server provided this
+    processing_model = Column(String(50))  # LLM used for extraction
+    is_verified = Column(Boolean, default=False)  # Human verified
+    is_stale = Column(Boolean, default=False)  # Marked as outdated
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    entity_links = relationship(
+        "FactEntityLink", back_populates="fact", cascade="all, delete-orphan"
+    )
+    relation_links = relationship(
+        "FactRelationLink", back_populates="fact", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_evidenced_facts_fact_type", "fact_type"),
+        Index("ix_evidenced_facts_source_type", "source_type"),
+        Index("ix_evidenced_facts_captured_at", "captured_at"),
+        Index("ix_evidenced_facts_confidence", "confidence"),
+        Index("ix_evidenced_facts_source_type_captured", "source_type", "captured_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<EvidencedFact {self.fact_type.value}: {self.claim[:50]}...>"
+
+
+class Entity(Base):
+    """Entities in the knowledge graph (companies, people, products, etc.)."""
+
+    __tablename__ = "entities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+
+    # Entity identification
+    entity_type = Column(Enum(EntityType), nullable=False)
+    name = Column(String(300), nullable=False)
+    canonical_name = Column(String(300))  # Normalized version for matching
+
+    # External identifiers
+    acra_uen = Column(String(20), unique=True)  # Singapore UEN
+    linkedin_url = Column(String(500))
+    website = Column(String(500))
+    external_ids = Column(JSON, default=dict)  # Other IDs (crunchbase, etc.)
+
+    # Entity metadata
+    description = Column(Text)
+    attributes = Column(JSON, default=dict)  # Flexible key-value attributes
+
+    # Confidence and freshness
+    confidence = Column(Float, default=0.8)
+    last_updated = Column(DateTime, default=datetime.utcnow)
+    fact_count = Column(Integer, default=0)  # Number of facts about this entity
+
+    # Status
+    is_active = Column(Boolean, default=True)
+    merged_into_id = Column(UUID(as_uuid=True))  # If entity was merged/deduplicated
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    fact_links = relationship(
+        "FactEntityLink", back_populates="entity", cascade="all, delete-orphan"
+    )
+    outgoing_relations = relationship(
+        "EntityRelation",
+        foreign_keys="EntityRelation.source_entity_id",
+        back_populates="source_entity",
+        cascade="all, delete-orphan",
+    )
+    incoming_relations = relationship(
+        "EntityRelation",
+        foreign_keys="EntityRelation.target_entity_id",
+        back_populates="target_entity",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_entities_entity_type", "entity_type"),
+        Index("ix_entities_name", "name"),
+        Index("ix_entities_canonical_name", "canonical_name"),
+        Index("ix_entities_acra_uen", "acra_uen"),
+        Index("ix_entities_type_name", "entity_type", "name"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Entity {self.entity_type.value}: {self.name}>"
+
+
+class EntityRelation(Base):
+    """Relationships between entities in the knowledge graph."""
+
+    __tablename__ = "entity_relations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+
+    # Relationship endpoints
+    source_entity_id = Column(
+        UUID(as_uuid=True), ForeignKey("entities.id"), nullable=False
+    )
+    target_entity_id = Column(
+        UUID(as_uuid=True), ForeignKey("entities.id"), nullable=False
+    )
+    relation_type = Column(Enum(RelationType), nullable=False)
+
+    # Relationship metadata
+    attributes = Column(JSON, default=dict)  # Role, title, dates, etc.
+    confidence = Column(Float, default=0.8)
+
+    # Temporal validity
+    valid_from = Column(DateTime)
+    valid_until = Column(DateTime)
+    is_current = Column(Boolean, default=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    source_entity = relationship(
+        "Entity", foreign_keys=[source_entity_id], back_populates="outgoing_relations"
+    )
+    target_entity = relationship(
+        "Entity", foreign_keys=[target_entity_id], back_populates="incoming_relations"
+    )
+    fact_links = relationship(
+        "FactRelationLink", back_populates="relation", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_entity_relations_source", "source_entity_id"),
+        Index("ix_entity_relations_target", "target_entity_id"),
+        Index("ix_entity_relations_type", "relation_type"),
+        Index(
+            "ix_entity_relations_source_target",
+            "source_entity_id",
+            "target_entity_id",
+            "relation_type",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<EntityRelation {self.relation_type.value}>"
+
+
+class FactEntityLink(Base):
+    """Links facts to entities they describe."""
+
+    __tablename__ = "fact_entity_links"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    fact_id = Column(UUID(as_uuid=True), ForeignKey("evidenced_facts.id"), nullable=False)
+    entity_id = Column(UUID(as_uuid=True), ForeignKey("entities.id"), nullable=False)
+
+    # Link metadata
+    role = Column(String(50))  # e.g., "subject", "object", "mentioned"
+    relevance = Column(Float, default=1.0)  # How relevant the fact is to the entity
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    fact = relationship("EvidencedFact", back_populates="entity_links")
+    entity = relationship("Entity", back_populates="fact_links")
+
+    __table_args__ = (
+        Index("ix_fact_entity_links_fact", "fact_id"),
+        Index("ix_fact_entity_links_entity", "entity_id"),
+        Index("ix_fact_entity_links_fact_entity", "fact_id", "entity_id", unique=True),
+    )
+
+
+class FactRelationLink(Base):
+    """Links facts to entity relations they describe."""
+
+    __tablename__ = "fact_relation_links"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    fact_id = Column(UUID(as_uuid=True), ForeignKey("evidenced_facts.id"), nullable=False)
+    relation_id = Column(
+        UUID(as_uuid=True), ForeignKey("entity_relations.id"), nullable=False
+    )
+
+    # Link metadata
+    is_primary_evidence = Column(Boolean, default=False)  # Is this the main evidence?
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    # Relationships
+    fact = relationship("EvidencedFact", back_populates="relation_links")
+    relation = relationship("EntityRelation", back_populates="fact_links")
+
+    __table_args__ = (
+        Index("ix_fact_relation_links_fact", "fact_id"),
+        Index("ix_fact_relation_links_relation", "relation_id"),
+        Index(
+            "ix_fact_relation_links_fact_relation", "fact_id", "relation_id", unique=True
+        ),
+    )
+
+
+class LeadJustification(Base):
+    """Evidence chain for why a lead is qualified.
+
+    This provides the "why" behind every lead recommendation,
+    backed by specific facts from the knowledge web.
+    """
+
+    __tablename__ = "lead_justifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id"), nullable=False)
+
+    # Signal category
+    signal_category = Column(String(50), nullable=False)  # fit, intent, timing
+
+    # The justification
+    signal_type = Column(String(100), nullable=False)  # e.g., "hiring_sales_team"
+    signal_description = Column(Text, nullable=False)
+    impact_score = Column(Float, default=0.5)  # How much this affects qualification
+
+    # Evidence links (fact IDs that support this justification)
+    evidence_fact_ids = Column(JSON, default=list)  # List of EvidencedFact UUIDs
+    evidence_summary = Column(Text)  # Human-readable summary of evidence
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    detected_at = Column(DateTime, default=datetime.utcnow)  # When signal was detected
+
+    __table_args__ = (
+        Index("ix_lead_justifications_lead", "lead_id"),
+        Index("ix_lead_justifications_category", "signal_category"),
+        Index("ix_lead_justifications_type", "signal_type"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<LeadJustification {self.signal_category}: {self.signal_type}>"
+
+
+class CompetitorSignal(Base):
+    """Tracked signals about competitor activities.
+
+    Links to evidenced facts for full provenance.
+    """
+
+    __tablename__ = "competitor_signals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    competitor_id = Column(UUID(as_uuid=True), ForeignKey("competitors.id"), nullable=False)
+
+    # Signal details
+    signal_type = Column(String(50), nullable=False)  # product, pricing, hiring, funding
+    title = Column(String(300), nullable=False)
+    description = Column(Text)
+    severity = Column(String(20), default="medium")  # low, medium, high, critical
+
+    # Evidence (links to fact IDs)
+    primary_fact_id = Column(UUID(as_uuid=True), ForeignKey("evidenced_facts.id"))
+    supporting_fact_ids = Column(JSON, default=list)  # Additional fact UUIDs
+
+    # Analysis
+    our_response_options = Column(JSON, default=list)
+    recommended_action = Column(Text)
+
+    # Status
+    is_acknowledged = Column(Boolean, default=False)
+    acknowledged_at = Column(DateTime)
+    response_status = Column(String(20))  # pending, in_progress, addressed, ignored
+
+    # Timestamps
+    detected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("ix_competitor_signals_competitor", "competitor_id"),
+        Index("ix_competitor_signals_type", "signal_type"),
+        Index("ix_competitor_signals_severity", "severity"),
+        Index("ix_competitor_signals_detected", "detected_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CompetitorSignal {self.signal_type}: {self.title[:50]}>"
+
+
+class MCPDataSource(Base):
+    """Registry of MCP data sources and their status."""
+
+    __tablename__ = "mcp_data_sources"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+
+    # Source identification
+    name = Column(String(100), nullable=False, unique=True)
+    source_type = Column(Enum(SourceType), nullable=False)
+    description = Column(Text)
+
+    # Configuration
+    endpoint_url = Column(String(500))
+    config = Column(JSON, default=dict)  # API keys, settings, etc.
+
+    # Status
+    is_enabled = Column(Boolean, default=True)
+    is_healthy = Column(Boolean, default=True)
+    last_health_check = Column(DateTime)
+    last_sync = Column(DateTime)
+
+    # Usage tracking
+    total_facts_produced = Column(Integer, default=0)
+    facts_today = Column(Integer, default=0)
+    avg_confidence = Column(Float, default=0.0)
+
+    # Rate limiting
+    rate_limit_per_hour = Column(Integer)
+    requests_this_hour = Column(Integer, default=0)
+    rate_limit_reset_at = Column(DateTime)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_mcp_data_sources_name", "name"),
+        Index("ix_mcp_data_sources_type", "source_type"),
+        Index("ix_mcp_data_sources_enabled", "is_enabled"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<MCPDataSource {self.name}>"

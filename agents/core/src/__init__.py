@@ -1,7 +1,8 @@
 """GTM Advisor Agent Core - Base agent with PDCA pattern."""
 
-from .base_agent import BaseGTMAgent, AgentCapability
-from .tool_empowered_agent import ToolEmpoweredAgent, LayerUsage, AgentDecisionLog
+from .base_agent import AgentCapability, BaseGTMAgent
+from .mcp_integration import AgentMCPClient
+from .tool_empowered_agent import AgentDecisionLog, LayerUsage, ToolEmpoweredAgent
 
 __all__ = [
     "BaseGTMAgent",
@@ -9,4 +10,5 @@ __all__ = [
     "ToolEmpoweredAgent",
     "LayerUsage",
     "AgentDecisionLog",
+    "AgentMCPClient",
 ]
