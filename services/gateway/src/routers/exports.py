@@ -1,28 +1,28 @@
 """Export API endpoints for PDF and JSON reports."""
 
-import io
-import json
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from packages.database.src.models import (
+    ICP,
     Analysis,
+    Campaign,
     Company,
     Competitor,
-    ICP,
     Lead,
-    Campaign,
     MarketInsight,
 )
 from packages.database.src.session import get_db_session
+
+from ..auth.dependencies import get_optional_user, validate_company_access
+from ..auth.models import User
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -32,9 +32,11 @@ router = APIRouter()
 async def export_analysis_json(
     company_id: UUID,
     analysis_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
     """Export analysis results as JSON."""
+    await validate_company_access(company_id, current_user, db)
     analysis = await db.get(Analysis, analysis_id)
     if not analysis or analysis.company_id != company_id:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -76,18 +78,18 @@ async def export_analysis_json(
 
     return JSONResponse(
         content=export_data,
-        headers={
-            "Content-Disposition": f'attachment; filename="gtm_analysis_{analysis_id}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="gtm_analysis_{analysis_id}.json"'},
     )
 
 
 @router.get("/{company_id}/competitors/json")
 async def export_competitors_json(
     company_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
     """Export all competitors as JSON."""
+    await validate_company_access(company_id, current_user, db)
     query = (
         select(Competitor)
         .where(Competitor.company_id == company_id, Competitor.is_active == True)
@@ -129,18 +131,18 @@ async def export_competitors_json(
 
     return JSONResponse(
         content=export_data,
-        headers={
-            "Content-Disposition": f'attachment; filename="competitors_{company_id}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="competitors_{company_id}.json"'},
     )
 
 
 @router.get("/{company_id}/battlecards/json")
 async def export_battlecards_json(
     company_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
     """Export all battle cards as JSON."""
+    await validate_company_access(company_id, current_user, db)
     query = (
         select(Competitor)
         .where(Competitor.company_id == company_id, Competitor.is_active == True)
@@ -159,17 +161,17 @@ async def export_battlecards_json(
         for advantage in (c.our_advantages or [])[:2]:
             win_strategies.append(f"Leverage strength: {advantage}")
 
-        battle_cards.append({
-            "competitor": c.name,
-            "threat_level": c.threat_level.value if c.threat_level else "medium",
-            "our_advantages": c.our_advantages or [],
-            "their_advantages": c.their_advantages or [],
-            "objection_handlers": c.key_objection_handlers or [],
-            "win_strategies": win_strategies,
-            "key_differentiators": [
-                adv for adv in (c.our_advantages or [])[:3]
-            ],
-        })
+        battle_cards.append(
+            {
+                "competitor": c.name,
+                "threat_level": c.threat_level.value if c.threat_level else "medium",
+                "our_advantages": c.our_advantages or [],
+                "their_advantages": c.their_advantages or [],
+                "objection_handlers": c.key_objection_handlers or [],
+                "win_strategies": win_strategies,
+                "key_differentiators": [adv for adv in (c.our_advantages or [])[:3]],
+            }
+        )
 
     export_data = {
         "export_type": "battle_cards",
@@ -180,18 +182,18 @@ async def export_battlecards_json(
 
     return JSONResponse(
         content=export_data,
-        headers={
-            "Content-Disposition": f'attachment; filename="battlecards_{company_id}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="battlecards_{company_id}.json"'},
     )
 
 
 @router.get("/{company_id}/icps/json")
 async def export_icps_json(
     company_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
     """Export ICPs and personas as JSON."""
+    await validate_company_access(company_id, current_user, db)
     query = (
         select(ICP)
         .options(selectinload(ICP.personas))
@@ -247,9 +249,7 @@ async def export_icps_json(
 
     return JSONResponse(
         content=export_data,
-        headers={
-            "Content-Disposition": f'attachment; filename="icps_{company_id}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="icps_{company_id}.json"'},
     )
 
 
@@ -257,10 +257,12 @@ async def export_icps_json(
 async def export_leads_json(
     company_id: UUID,
     min_score: int = Query(default=0, ge=0, le=100),
-    status: Optional[str] = Query(default=None),
+    status: str | None = Query(default=None),
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
     """Export leads as JSON."""
+    await validate_company_access(company_id, current_user, db)
     from packages.database.src.models import LeadStatus
 
     query = select(Lead).where(Lead.company_id == company_id)
@@ -316,9 +318,7 @@ async def export_leads_json(
 
     return JSONResponse(
         content=export_data,
-        headers={
-            "Content-Disposition": f'attachment; filename="leads_{company_id}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="leads_{company_id}.json"'},
     )
 
 
@@ -326,9 +326,11 @@ async def export_leads_json(
 async def export_campaign_json(
     company_id: UUID,
     campaign_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
     """Export a campaign with all content assets as JSON."""
+    await validate_company_access(company_id, current_user, db)
     campaign = await db.get(Campaign, campaign_id)
     if not campaign or campaign.company_id != company_id:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -376,18 +378,18 @@ async def export_campaign_json(
 
     return JSONResponse(
         content=export_data,
-        headers={
-            "Content-Disposition": f'attachment; filename="campaign_{campaign_id}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="campaign_{campaign_id}.json"'},
     )
 
 
 @router.get("/{company_id}/full-report/json")
 async def export_full_report_json(
     company_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> JSONResponse:
     """Export a complete GTM report with all data."""
+    await validate_company_access(company_id, current_user, db)
     company = await db.get(Company, company_id)
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
@@ -459,11 +461,17 @@ async def export_full_report_json(
             "executive_summary": analysis.executive_summary if analysis else None,
             "key_recommendations": analysis.key_recommendations if analysis else [],
             "confidence_score": analysis.total_confidence if analysis else 0,
-            "completed_at": analysis.completed_at.isoformat() if analysis and analysis.completed_at else None,
-        } if analysis else None,
+            "completed_at": analysis.completed_at.isoformat()
+            if analysis and analysis.completed_at
+            else None,
+        }
+        if analysis
+        else None,
         "competitive_landscape": {
             "total_competitors": len(competitors),
-            "high_threat": sum(1 for c in competitors if c.threat_level and c.threat_level.value == "high"),
+            "high_threat": sum(
+                1 for c in competitors if c.threat_level and c.threat_level.value == "high"
+            ),
             "competitors": [
                 {
                     "name": c.name,
@@ -493,14 +501,16 @@ async def export_full_report_json(
         },
         "lead_pipeline": {
             "total_leads": len(leads),
-            "high_score_leads": sum(1 for l in leads if l.overall_score and l.overall_score > 80),
+            "high_score_leads": sum(
+                1 for lead in leads if lead.overall_score and lead.overall_score > 80
+            ),
             "top_leads": [
                 {
-                    "company": l.lead_company_name,
-                    "score": l.overall_score,
-                    "status": l.status.value if l.status else "new",
+                    "company": lead.lead_company_name,
+                    "score": lead.overall_score,
+                    "status": lead.status.value if lead.status else "new",
                 }
-                for l in leads[:10]
+                for lead in leads[:10]
             ],
         },
         "campaigns": {
@@ -531,7 +541,5 @@ async def export_full_report_json(
 
     return JSONResponse(
         content=export_data,
-        headers={
-            "Content-Disposition": f'attachment; filename="gtm_report_{company_id}.json"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="gtm_report_{company_id}.json"'},
     )

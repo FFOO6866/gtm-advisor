@@ -12,6 +12,8 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
+# Import SubscriptionTier from the single source of truth
+from packages.database.src.models import SubscriptionTier
 
 # =============================================================================
 # Enums
@@ -57,14 +59,9 @@ class ConfidenceLevel(str, Enum):
     VERY_HIGH = "very_high"  # > 0.85
 
 
-class SubscriptionTier(str, Enum):
-    """User subscription tiers."""
-
-    FREE = "free"
-    STARTER = "starter"
-    GROWTH = "growth"
-    SCALE = "scale"
-    ENTERPRISE = "enterprise"
+# NOTE: SubscriptionTier is defined in packages/database/src/models.py (single source of truth)
+# Import with: from packages.database.src.models import SubscriptionTier
+# Values: FREE, TIER1, TIER2
 
 
 class PDCAPhase(str, Enum):

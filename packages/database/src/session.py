@@ -3,8 +3,8 @@
 Provides async database connections using SQLAlchemy 2.0 async API.
 """
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -108,6 +108,27 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         @router.get("/users/{user_id}")
         async def get_user(user_id: UUID, db: AsyncSession = Depends(get_db_session)):
             ...
+    """
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+@asynccontextmanager
+async def async_session_factory() -> AsyncGenerator[AsyncSession, None]:
+    """Get a database session for use in background tasks.
+
+    This is an async context manager for use outside of FastAPI's dependency injection.
+
+    Usage:
+        async with async_session_factory() as db:
+            user = await db.get(User, user_id)
+            await db.commit()
     """
     session_factory = get_session_factory()
     async with session_factory() as session:

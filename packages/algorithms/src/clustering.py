@@ -11,15 +11,16 @@ This implementation provides interpretable, dependency-light clustering.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
 import math
 from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
 class Cluster:
     """A cluster of similar items."""
+
     id: str
     name: str
     centroid: dict[str, float]
@@ -40,6 +41,7 @@ class Cluster:
 @dataclass
 class ClusteringResult:
     """Result of clustering operation."""
+
     clusters: list[Cluster]
     unclustered: list[dict[str, Any]]
     quality_score: float  # 0-1, based on cluster cohesion
@@ -150,7 +152,7 @@ class FirmographicClusterer:
         # Group by industry + size bucket
         groups: dict[str, list[tuple[dict, dict]]] = defaultdict(list)
 
-        for company, norm in zip(companies, normalized):
+        for company, norm in zip(companies, normalized, strict=False):
             industry = company.get("industry", "other").lower()
             size_bucket = self._get_size_bucket(company.get("employee_count", 0))
             key = f"{industry}_{size_bucket}"
@@ -215,7 +217,7 @@ class FirmographicClusterer:
                 continue
 
             # Find nearest cluster by centroid distance
-            min_dist = float('inf')
+            min_dist = float("inf")
             nearest = large_enough[0]
             for large in large_enough:
                 dist = self._centroid_distance(small.centroid, large.centroid)
@@ -334,7 +336,7 @@ class PersonaClusterer:
 
                 cluster = Cluster(
                     id=f"persona_{i}",
-                    name=persona_names.get(key, f"Persona {i+1}"),
+                    name=persona_names.get(key, f"Persona {i + 1}"),
                     centroid={},  # Not applicable for categorical
                     members=members,
                     characteristics=[
@@ -357,12 +359,26 @@ class PersonaClusterer:
         title_lower = title.lower()
 
         technical_keywords = [
-            "engineer", "developer", "architect", "tech", "data",
-            "devops", "infrastructure", "security", "product"
+            "engineer",
+            "developer",
+            "architect",
+            "tech",
+            "data",
+            "devops",
+            "infrastructure",
+            "security",
+            "product",
         ]
         business_keywords = [
-            "sales", "marketing", "finance", "hr", "operations",
-            "business", "strategy", "growth", "revenue"
+            "sales",
+            "marketing",
+            "finance",
+            "hr",
+            "operations",
+            "business",
+            "strategy",
+            "growth",
+            "revenue",
         ]
 
         if any(k in title_lower for k in technical_keywords):
@@ -443,20 +459,22 @@ class MarketSegmenter:
             if len(members) >= self.min_segment_size:
                 avg_score = sum(s[1] for s in scored[start:end]) / len(members)
 
-                segments.append(Cluster(
-                    id=seg_id,
-                    name=name,
-                    centroid={"opportunity_score": avg_score},
-                    members=members,
-                    characteristics=[
-                        f"Avg opportunity score: {avg_score:.2f}",
-                        f"Count: {len(members)}",
-                    ],
-                    size=len(members),
-                ))
+                segments.append(
+                    Cluster(
+                        id=seg_id,
+                        name=name,
+                        centroid={"opportunity_score": avg_score},
+                        members=members,
+                        characteristics=[
+                            f"Avg opportunity score: {avg_score:.2f}",
+                            f"Count: {len(members)}",
+                        ],
+                        size=len(members),
+                    )
+                )
 
         return ClusteringResult(
-            clusters=segments[:self.max_segments],
+            clusters=segments[: self.max_segments],
             unclustered=[],
             quality_score=0.75,
             method="opportunity_segmentation",
@@ -472,7 +490,9 @@ class MarketSegmenter:
 
         # Pain point alignment
         company_pains = company.get("pain_points", [])
-        pain_match = sum(1 for vp in value_props if any(vp.lower() in p.lower() for p in company_pains))
+        pain_match = sum(
+            1 for vp in value_props if any(vp.lower() in p.lower() for p in company_pains)
+        )
         score += min(pain_match * 0.15, 0.30)
 
         # Budget signals
@@ -488,7 +508,7 @@ class MarketSegmenter:
         if isinstance(emp, str):
             try:
                 emp = int(emp.split("-")[0])
-            except:
+            except (ValueError, IndexError):
                 emp = 50
         if 20 <= emp <= 500:
             score += 0.15

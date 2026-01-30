@@ -1,0 +1,153 @@
+version: '3.8'
+
+# Production Docker Compose Configuration
+# WARNING: This is a reference configuration. For production:
+# - Use managed database services (AWS RDS, Cloud SQL, etc.)
+# - Use managed Redis (ElastiCache, Redis Cloud, etc.)
+# - Use container orchestration (Kubernetes, ECS, etc.)
+# - Use secrets management (AWS Secrets Manager, HashiCorp Vault, etc.)
+
+services:
+  # =============================================================================
+  # Gateway Service (FastAPI Backend)
+  # =============================================================================
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - GATEWAY_HOST=0.0.0.0
+      - GATEWAY_PORT=8000
+      - GATEWAY_ENVIRONMENT=production
+      - GTM_ENVIRONMENT=production
+      - GTM_ENABLE_GOVERNANCE=true
+      - GTM_ENABLE_OBSERVABILITY=true
+      - GTM_ENABLE_PDPA_COMPLIANCE=true
+      # Security
+      - GTM_JWT_SECRET=${GTM_JWT_SECRET}
+      - GATEWAY_JWT_SECRET_KEY=${GATEWAY_JWT_SECRET_KEY}
+      - GTM_CORS_ORIGINS=${GTM_CORS_ORIGINS}
+      # Infrastructure (use managed services in real production)
+      - GTM_REDIS_URL=${GTM_REDIS_URL}
+      - GTM_POSTGRES_URL=${GTM_POSTGRES_URL}
+      # LLM API Keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - NEWSAPI_API_KEY=${NEWSAPI_API_KEY}
+      - EODHD_API_KEY=${EODHD_API_KEY}
+      # Rate Limiting
+      - GTM_RATE_LIMIT_FREE_REQUESTS=${GTM_RATE_LIMIT_FREE_REQUESTS:-10}
+      - GTM_RATE_LIMIT_TIER1_REQUESTS=${GTM_RATE_LIMIT_TIER1_REQUESTS:-100}
+      - GTM_RATE_LIMIT_TIER2_REQUESTS=${GTM_RATE_LIMIT_TIER2_REQUESTS:-1000}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: always
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # =============================================================================
+  # Dashboard (React Frontend)
+  # =============================================================================
+  dashboard:
+    build:
+      context: ../../services/dashboard
+      dockerfile: ../../deployment/docker/Dockerfile.dashboard
+      args:
+        - REACT_APP_API_URL=${REACT_APP_API_URL:-/api}
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - gateway
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  # =============================================================================
+  # Nginx Reverse Proxy (Optional - for SSL termination)
+  # =============================================================================
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - gateway
+      - dashboard
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    profiles:
+      - with-nginx
+
+networks:
+  default:
+    name: gtm-advisor-production
+    driver: bridge
+
+# =============================================================================
+# PRODUCTION DEPLOYMENT CHECKLIST
+# =============================================================================
+# [ ] All secrets loaded from secure secrets manager
+# [ ] SSL certificates configured
+# [ ] Database migrations applied
+# [ ] Health checks verified
+# [ ] Logging and monitoring configured
+# [ ] Backup strategy in place
+# [ ] Rate limiting verified
+# [ ] CORS origins set to production domains
+# [ ] Resource limits configured
+# [ ] Security options enabled

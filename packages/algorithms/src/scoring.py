@@ -10,11 +10,10 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-import math
-
 
 class ScoreComponent(Enum):
     """Components that contribute to a score."""
+
     FIRMOGRAPHIC_FIT = "firmographic_fit"
     TECHNOGRAPHIC_FIT = "technographic_fit"
     BEHAVIORAL_SIGNAL = "behavioral_signal"
@@ -28,6 +27,7 @@ class ScoreComponent(Enum):
 @dataclass
 class ScoreExplanation:
     """Explainable score breakdown."""
+
     total_score: float
     confidence: float
     components: dict[str, float] = field(default_factory=dict)
@@ -49,6 +49,7 @@ class ScoreExplanation:
 @dataclass
 class ICPCriteria:
     """Ideal Customer Profile criteria with weights."""
+
     # Firmographics
     target_industries: list[str] = field(default_factory=list)
     target_company_sizes: list[str] = field(default_factory=list)  # "1-10", "11-50", etc.
@@ -94,12 +95,12 @@ class ICPScorer:
     def _validate_weights(self) -> None:
         """Ensure weights sum to 1.0."""
         total = (
-            self.criteria.weight_industry +
-            self.criteria.weight_size +
-            self.criteria.weight_location +
-            self.criteria.weight_stage +
-            self.criteria.weight_technology +
-            self.criteria.weight_signals
+            self.criteria.weight_industry
+            + self.criteria.weight_size
+            + self.criteria.weight_location
+            + self.criteria.weight_stage
+            + self.criteria.weight_technology
+            + self.criteria.weight_signals
         )
         if not (0.99 <= total <= 1.01):
             raise ValueError(f"ICP weights must sum to 1.0, got {total}")
@@ -138,7 +139,9 @@ class ICPScorer:
                 components["industry"] = 0.0
                 penalties.append(f"Industry '{industry}' not in target list")
         else:
-            components["industry"] = self.criteria.weight_industry * 0.5  # Partial score for unknown
+            components["industry"] = (
+                self.criteria.weight_industry * 0.5
+            )  # Partial score for unknown
 
         # 2. Company size fit
         available_points += 1
@@ -194,13 +197,25 @@ class ICPScorer:
         if technologies:
             data_points += 1
             # Check for exclusions first
-            excluded = [t for t in technologies if any(e.lower() in t for e in self.criteria.excluded_technologies)]
+            excluded = [
+                t
+                for t in technologies
+                if any(e.lower() in t for e in self.criteria.excluded_technologies)
+            ]
             if excluded:
                 components["technology"] = 0.0
                 penalties.append(f"Uses excluded technology: {excluded}")
             else:
-                required_match = sum(1 for r in self.criteria.required_technologies if any(r.lower() in t for t in technologies))
-                preferred_match = sum(1 for p in self.criteria.preferred_technologies if any(p.lower() in t for t in technologies))
+                required_match = sum(
+                    1
+                    for r in self.criteria.required_technologies
+                    if any(r.lower() in t for t in technologies)
+                )
+                preferred_match = sum(
+                    1
+                    for p in self.criteria.preferred_technologies
+                    if any(p.lower() in t for t in technologies)
+                )
 
                 if self.criteria.required_technologies:
                     tech_score = (required_match / len(self.criteria.required_technologies)) * 0.7
@@ -208,7 +223,9 @@ class ICPScorer:
                     tech_score = 0.5
 
                 if self.criteria.preferred_technologies and preferred_match > 0:
-                    tech_score += 0.3 * (preferred_match / len(self.criteria.preferred_technologies))
+                    tech_score += 0.3 * (
+                        preferred_match / len(self.criteria.preferred_technologies)
+                    )
 
                 components["technology"] = self.criteria.weight_technology * tech_score
                 if required_match > 0:
@@ -221,8 +238,12 @@ class ICPScorer:
         signals = [s.lower() for s in company.get("signals", [])]
         if signals:
             data_points += 1
-            required_signals = sum(1 for r in self.criteria.required_signals if r.lower() in signals)
-            preferred_signals = sum(1 for p in self.criteria.preferred_signals if p.lower() in signals)
+            required_signals = sum(
+                1 for r in self.criteria.required_signals if r.lower() in signals
+            )
+            preferred_signals = sum(
+                1 for p in self.criteria.preferred_signals if p.lower() in signals
+            )
 
             signal_score = 0.0
             if self.criteria.required_signals:
@@ -444,7 +465,9 @@ class LeadScorer:
         title_lower = title.lower()
 
         # C-level and founders
-        if any(t in title_lower for t in ["ceo", "cto", "cfo", "coo", "founder", "owner", "president"]):
+        if any(
+            t in title_lower for t in ["ceo", "cto", "cfo", "coo", "founder", "owner", "president"]
+        ):
             return 1.0
 
         # VP/Director level
@@ -488,7 +511,10 @@ class LeadScorer:
 
         # Timeline keywords
         timeline_lower = timeline.lower()
-        if any(t in timeline_lower for t in ["immediate", "this month", "this quarter", "q1", "q2", "q3", "q4"]):
+        if any(
+            t in timeline_lower
+            for t in ["immediate", "this month", "this quarter", "q1", "q2", "q3", "q4"]
+        ):
             score += 0.4
         elif any(t in timeline_lower for t in ["next quarter", "6 months", "this year"]):
             score += 0.2

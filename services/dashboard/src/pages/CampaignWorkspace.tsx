@@ -5,7 +5,7 @@
  * Connected to real backend API.
  */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Sparkles,
@@ -28,6 +28,7 @@ import {
   EmptyState,
   CampaignListLoading,
   ErrorState,
+  useToast,
 } from '../components/common';
 import { AGENTS } from '../types';
 import { useCompanyId } from '../context/CompanyContext';
@@ -42,100 +43,131 @@ const CONTENT_TYPES = [
   { id: 'ad', label: 'Ad Copy', icon: <Target className="w-4 h-4" /> },
 ];
 
+// Default content generation limits per tier
+// TODO: These should come from user settings API (tier_limits field)
+const DEFAULT_CONTENT_LIMITS = {
+  free: 10,
+  starter: 50,
+  pro: 200,
+  enterprise: Infinity,
+} as const;
+
 export function CampaignWorkspace() {
   const companyId = useCompanyId();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('active');
   const [isRunning, setIsRunning] = useState(false);
-  const [selectedContentType, setSelectedContentType] = useState('linkedin');
+  const [selectedContentType, setSelectedContentType] = useState<'linkedin' | 'email' | 'blog' | 'ad'>('linkedin');
   const [generatedContent, setGeneratedContent] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  // Content generation form state (controlled components)
+  const [contentTopic, setContentTopic] = useState('');
+  const [contentTone, setContentTone] = useState<'professional' | 'conversational' | 'bold'>('professional');
+  const [targetPersona, setTargetPersona] = useState('cto');
+  const [includeCta, setIncludeCta] = useState(true);
+  const [keyPoints, setKeyPoints] = useState('');
 
   // Fetch campaigns from API
   const { data: campaignData, isLoading, error, refresh } = useCampaigns(companyId);
 
   const agent = AGENTS.find((a) => a.id === 'campaign-architect')!;
 
-  // Mutations
-  const updateMutation = useMutation(
-    ({ campaignId, data }: { campaignId: string; data: CampaignUpdate }) =>
-      api.updateCampaign(companyId!, campaignId, data),
-    {
-      invalidateKeys: ['campaigns'],
-      onSuccess: () => refresh(),
-    }
-  );
-
+  // Derived data
   const campaigns = campaignData?.campaigns || [];
   const activeCampaigns = campaigns.filter((c) => c.status === 'active');
   const contentUsed = campaignData?.content_pieces_this_month || 0;
-  const contentLimit = 50;
+  // Content limit - using starter tier default until user settings API provides tier info
+  // TODO: Fetch from useUserSettings once userId is available in context
+  const contentLimit = DEFAULT_CONTENT_LIMITS.starter;
 
-  const handleRun = async () => {
+  // Mutations - only execute when companyId is available
+  const updateMutation = useMutation(
+    ({ campaignId, data }: { campaignId: string; data: CampaignUpdate }) => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.updateCampaign(companyId, campaignId, data);
+    },
+    {
+      invalidateKeys: ['campaigns'],
+      onSuccess: () => refresh(),
+      onError: (err) => {
+        toast.error('Failed to update campaign', err.message);
+      },
+    }
+  );
+
+  // Mutation to trigger agent run
+  const triggerAgentMutation = useMutation(
+    () => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.triggerAgent(companyId, 'campaign-architect');
+    },
+    {
+      invalidateKeys: ['campaigns'],
+      onSuccess: () => {
+        refresh();
+        setIsRunning(false);
+        toast.success('Campaign analysis completed');
+      },
+      onError: (err) => {
+        setIsRunning(false);
+        toast.error('Failed to run campaign agent', err.message);
+      },
+    }
+  );
+
+  // Mutation to generate content
+  const generateContentMutation = useMutation(
+    (request: api.ContentGenerationRequest) => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.generateContent(companyId, request);
+    },
+    {
+      invalidateKeys: ['campaigns'],
+      onError: (err) => {
+        toast.error('Failed to generate content', err.message);
+      },
+    }
+  );
+
+  const handleRun = useCallback(async () => {
+    if (!companyId) {
+      toast.error('Please complete onboarding first', 'No company selected');
+      return;
+    }
     setIsRunning(true);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    refresh();
-    setIsRunning(false);
-  };
+    await triggerAgentMutation.mutate(undefined);
+  }, [companyId, triggerAgentMutation, toast]);
 
-  const handleGenerateContent = async () => {
+  const handleGenerateContent = useCallback(async () => {
+    if (!companyId) {
+      toast.error('Please complete onboarding first', 'No company selected');
+      return;
+    }
+    if (!contentTopic.trim()) {
+      toast.warning('Please enter a topic for the content');
+      return;
+    }
     setIsGenerating(true);
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    // Mock generated content (in production, this would call the API)
-    const mockContent = [
-      `📊 34% of Singapore enterprises adopted AI marketing tools this year.
-
-But here's what the data doesn't tell you:
-
-The 34% who adopted aren't just "using AI" — they're seeing:
-• 3x faster campaign execution
-• 40% reduction in agency spend
-• Real-time competitive intelligence
-
-We just helped a fintech scale their marketing team's output by 5x.
-
-Curious how? Let's chat. 👇
-
-#AIMarketing #Singapore #MarTech`,
-      `Last month, our CMO asked me: "Can AI really replace our marketing agency?"
-
-Here's what we discovered after 90 days:
-
-❌ AI can't replace creativity
-❌ AI can't build relationships
-❌ AI can't understand your brand soul
-
-✅ AI CAN execute 10x faster
-✅ AI CAN analyze competitors 24/7
-✅ AI CAN free your team for strategy
-
-The result? We cut costs 40% AND improved results.
-
-The future isn't AI vs humans. It's AI + humans.
-
-What's your take?`,
-      `What if your marketing team could work 3x faster?
-
-Not by working longer hours.
-Not by hiring more people.
-Not by cutting corners.
-
-By using AI as your execution layer.
-
-Here's what that looks like in practice:
-→ Competitive intel delivered daily (not quarterly)
-→ Campaigns launched in days (not weeks)
-→ Content created in minutes (not hours)
-
-This isn't future tech. It's happening now in Singapore.
-
-DM me if you want to see how 👇`,
-    ];
-
-    setGeneratedContent(mockContent);
-    setIsGenerating(false);
-  };
+    try {
+      const result = await generateContentMutation.mutate({
+        content_type: selectedContentType,
+        topic: contentTopic,
+        tone: contentTone,
+        target_persona: targetPersona,
+        include_cta: includeCta,
+        key_points: keyPoints.trim() ? keyPoints.split('\n').filter(Boolean) : undefined,
+        variations: 3,
+      });
+      if (result) {
+        setGeneratedContent(result.map((item) => item.content));
+        toast.success('Content generated successfully');
+      }
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [companyId, contentTopic, contentTone, targetPersona, includeCta, keyPoints, selectedContentType, generateContentMutation, toast]);
 
   const handleCopy = (index: number, content: string) => {
     navigator.clipboard.writeText(content);
@@ -367,7 +399,7 @@ DM me if you want to see how 👇`,
               <Button
                 key={type.id}
                 variant={selectedContentType === type.id ? 'secondary' : 'ghost'}
-                onClick={() => setSelectedContentType(type.id)}
+                onClick={() => setSelectedContentType(type.id as typeof selectedContentType)}
                 leftIcon={type.icon}
               >
                 {type.label}
@@ -386,14 +418,19 @@ DM me if you want to see how 👇`,
                 <input
                   type="text"
                   placeholder="What should this content be about?"
-                  defaultValue="AI transforming enterprise marketing ROI"
+                  value={contentTopic}
+                  onChange={(e) => setContentTopic(e.target.value)}
                   className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:border-purple-500"
                 />
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm text-white/70 mb-1">Tone</label>
-                  <select className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500">
+                  <select
+                    value={contentTone}
+                    onChange={(e) => setContentTone(e.target.value as typeof contentTone)}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                  >
                     <option value="professional">Professional</option>
                     <option value="conversational">Conversational</option>
                     <option value="bold">Bold</option>
@@ -401,7 +438,11 @@ DM me if you want to see how 👇`,
                 </div>
                 <div>
                   <label className="block text-sm text-white/70 mb-1">Target Persona</label>
-                  <select className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500">
+                  <select
+                    value={targetPersona}
+                    onChange={(e) => setTargetPersona(e.target.value)}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                  >
                     <option value="cto">Enterprise CTO</option>
                     <option value="cmo">CMO</option>
                     <option value="founder">Founder</option>
@@ -409,7 +450,11 @@ DM me if you want to see how 👇`,
                 </div>
                 <div>
                   <label className="block text-sm text-white/70 mb-1">Include CTA?</label>
-                  <select className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500">
+                  <select
+                    value={includeCta ? 'yes' : 'no'}
+                    onChange={(e) => setIncludeCta(e.target.value === 'yes')}
+                    className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:border-purple-500"
+                  >
                     <option value="yes">Yes</option>
                     <option value="no">No</option>
                   </select>
@@ -419,6 +464,8 @@ DM me if you want to see how 👇`,
                 <label className="block text-sm text-white/70 mb-1">Key points to include (optional)</label>
                 <textarea
                   placeholder="• Point 1&#10;• Point 2"
+                  value={keyPoints}
+                  onChange={(e) => setKeyPoints(e.target.value)}
                   rows={3}
                   className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-white/30 focus:outline-none focus:border-purple-500 resize-none"
                 />
@@ -427,6 +474,7 @@ DM me if you want to see how 👇`,
                 variant="primary"
                 onClick={handleGenerateContent}
                 isLoading={isGenerating}
+                disabled={!contentTopic.trim()}
                 leftIcon={<Sparkles className="w-4 h-4" />}
               >
                 Generate 3 Variations

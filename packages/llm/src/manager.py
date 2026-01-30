@@ -152,9 +152,7 @@ class LLMManager:
         else:
             llm = self.default_provider
 
-        return await llm.complete_structured(
-            messages, response_model, model=model, **kwargs
-        )
+        return await llm.complete_structured(messages, response_model, model=model, **kwargs)
 
     async def health_check(self) -> dict[str, bool]:
         """Check health of all configured providers.

@@ -430,35 +430,51 @@ function Dashboard() {
   );
 
   const handleSendMessage = useCallback(
-    (content: string) => {
+    async (content: string) => {
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now().toString(),
+          id: crypto.randomUUID(),
           role: 'user',
           content,
           timestamp: new Date(),
         },
       ]);
 
-      // For now, acknowledge the message
-      // In a full implementation, this would trigger follow-up agent actions
-      setTimeout(() => {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Date.now().toString(),
-            role: 'agent',
-            agentId: 'gtm-strategist',
-            agentName: 'GTM Strategist',
-            content:
-              'I understand your question. Let me coordinate with the team to provide a detailed response.',
-            timestamp: new Date(),
-          },
-        ]);
-      }, 500);
+      // Trigger a new analysis with the follow-up question
+      if (companyInfo) {
+        try {
+          const request: AnalysisRequest = {
+            company_name: companyInfo.name,
+            description: companyInfo.description || '',
+            industry: companyInfo.industry,
+            goals: [content],
+            challenges: companyInfo.challenges || [],
+            competitors: companyInfo.competitors || [],
+            target_markets: companyInfo.targetMarkets || [],
+          };
+
+          const response = await startAnalysis(request);
+          if (response.analysis_id) {
+            // Connect to WebSocket for real-time updates
+            connectToAnalysis(response.analysis_id, handleWebSocketMessage);
+          }
+        } catch {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: crypto.randomUUID(),
+              role: 'agent',
+              agentId: 'gtm-strategist',
+              agentName: 'GTM Strategist',
+              content: 'I apologize, but I encountered an issue processing your request. Please try again.',
+              timestamp: new Date(),
+            },
+          ]);
+        }
+      }
     },
-    []
+    [companyInfo, handleWebSocketMessage]
   );
 
   // Show error banner if backend unavailable

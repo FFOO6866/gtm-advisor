@@ -40,9 +40,7 @@ class OpenAIProvider(LLMProvider):
 
                 self._client = AsyncOpenAI(api_key=self._api_key)
             except ImportError:
-                raise ImportError(
-                    "OpenAI package not installed. Run: pip install openai"
-                )
+                raise ImportError("OpenAI package not installed. Run: pip install openai")
         return self._client
 
     def _get_instructor_client(self) -> Any:
@@ -53,9 +51,7 @@ class OpenAIProvider(LLMProvider):
 
                 self._instructor_client = instructor.from_openai(self._get_client())
             except ImportError:
-                raise ImportError(
-                    "Instructor package not installed. Run: pip install instructor"
-                )
+                raise ImportError("Instructor package not installed. Run: pip install instructor")
         return self._instructor_client
 
     async def complete(

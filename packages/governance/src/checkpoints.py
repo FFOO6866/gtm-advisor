@@ -12,16 +12,18 @@ Principle: Humans approve, agents execute.
 
 from __future__ import annotations
 
+import asyncio
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Callable
-import uuid
-import asyncio
+from typing import Any
 
 
 class CheckpointType(Enum):
     """Types of checkpoints."""
+
     APPROVAL = "approval"  # Yes/No decision
     REVIEW = "review"  # Review before proceeding
     SELECTION = "selection"  # Choose from options
@@ -31,6 +33,7 @@ class CheckpointType(Enum):
 
 class ApprovalStatus(Enum):
     """Status of approval request."""
+
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
@@ -41,6 +44,7 @@ class ApprovalStatus(Enum):
 @dataclass
 class ApprovalRequest:
     """A request for human approval."""
+
     id: str
     checkpoint_id: str
     agent_id: str
@@ -97,6 +101,7 @@ class Checkpoint:
 
     Defines when and how human approval is required.
     """
+
     id: str
     name: str
     description: str

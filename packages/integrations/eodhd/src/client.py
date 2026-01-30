@@ -249,13 +249,9 @@ class EODHDClient:
                             period=item.get("Period", ""),
                             value=float(item.get("Value", 0)),
                             previous_value=(
-                                float(item["PreviousValue"])
-                                if item.get("PreviousValue")
-                                else None
+                                float(item["PreviousValue"]) if item.get("PreviousValue") else None
                             ),
-                            change=(
-                                float(item["Change"]) if item.get("Change") else None
-                            ),
+                            change=(float(item["Change"]) if item.get("Change") else None),
                             date=datetime.strptime(item["Date"], "%Y-%m-%d")
                             if item.get("Date")
                             else datetime.utcnow(),
@@ -304,9 +300,7 @@ class EODHDClient:
                         FinancialNews(
                             title=item.get("title", ""),
                             content=item.get("content"),
-                            date=datetime.strptime(
-                                item["date"], "%Y-%m-%d %H:%M:%S"
-                            )
+                            date=datetime.strptime(item["date"], "%Y-%m-%d %H:%M:%S")
                             if item.get("date")
                             else datetime.utcnow(),
                             symbols=item.get("symbols", []),

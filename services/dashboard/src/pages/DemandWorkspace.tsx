@@ -5,7 +5,7 @@
  * Connected to real backend API.
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users,
@@ -26,6 +26,7 @@ import {
   EmptyState,
   LeadListLoading,
   ErrorState,
+  useToast,
 } from '../components/common';
 import { AGENTS } from '../types';
 import { useCompanyId } from '../context/CompanyContext';
@@ -33,8 +34,16 @@ import { useLeads, useMutation } from '../hooks/useApi';
 import * as api from '../api/workspaces';
 import type { Lead, LeadUpdate } from '../api/workspaces';
 
+// Score thresholds - these should ideally come from user settings API
+const SCORE_THRESHOLDS = {
+  HIGH: 85,
+  MEDIUM: 70,
+  PIPELINE_VALUE_MULTIPLIER: 50000,
+} as const;
+
 export function DemandWorkspace() {
   const companyId = useCompanyId();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('sales-ready');
   const [isRunning, setIsRunning] = useState(false);
   const [selectedLead, setSelectedLead] = useState<string | null>(null);
@@ -45,21 +54,38 @@ export function DemandWorkspace() {
 
   const agent = AGENTS.find((a) => a.id === 'lead-hunter')!;
 
-  // Mutations
+  // Mutations with proper error handling
   const qualifyMutation = useMutation(
-    (leadId: string) => api.qualifyLead(companyId!, leadId),
+    (leadId: string) => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.qualifyLead(companyId, leadId);
+    },
     {
       invalidateKeys: ['leads'],
-      onSuccess: () => refresh(),
+      onSuccess: () => {
+        refresh();
+        toast.success('Lead qualified successfully');
+      },
+      onError: (err) => {
+        toast.error('Failed to qualify lead', err.message);
+      },
     }
   );
 
   const updateMutation = useMutation(
-    ({ leadId, data }: { leadId: string; data: LeadUpdate }) =>
-      api.updateLead(companyId!, leadId, data),
+    ({ leadId, data }: { leadId: string; data: LeadUpdate }) => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.updateLead(companyId, leadId, data);
+    },
     {
       invalidateKeys: ['leads'],
-      onSuccess: () => refresh(),
+      onSuccess: () => {
+        refresh();
+        toast.success('Lead updated successfully');
+      },
+      onError: (err) => {
+        toast.error('Failed to update lead', err.message);
+      },
     }
   );
 
@@ -67,19 +93,41 @@ export function DemandWorkspace() {
 
   const filteredLeads = useMemo(() => {
     if (filter === 'all') return leads;
-    if (filter === 'high') return leads.filter((l) => l.overall_score >= 85);
-    return leads.filter((l) => l.overall_score >= 70 && l.overall_score < 85);
+    if (filter === 'high') return leads.filter((l) => l.overall_score >= SCORE_THRESHOLDS.HIGH);
+    return leads.filter((l) => l.overall_score >= SCORE_THRESHOLDS.MEDIUM && l.overall_score < SCORE_THRESHOLDS.HIGH);
   }, [filter, leads]);
 
-  const handleRun = async () => {
-    setIsRunning(true);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    refresh();
-    setIsRunning(false);
-  };
+  // Mutation to trigger agent run
+  const triggerAgentMutation = useMutation(
+    () => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.triggerAgent(companyId, 'lead-hunter');
+    },
+    {
+      invalidateKeys: ['leads'],
+      onSuccess: () => {
+        refresh();
+        setIsRunning(false);
+        toast.success('Lead hunting completed');
+      },
+      onError: (err) => {
+        setIsRunning(false);
+        toast.error('Failed to run lead hunter', err.message);
+      },
+    }
+  );
 
-  const totalPipelineValue = leads.reduce((sum, lead) => sum + (lead.overall_score / 100) * 50000, 0);
-  const salesReadyCount = leads.filter((l) => l.overall_score >= 85).length;
+  const handleRun = useCallback(async () => {
+    if (!companyId) {
+      toast.error('Please complete onboarding first', 'No company selected');
+      return;
+    }
+    setIsRunning(true);
+    await triggerAgentMutation.mutate(undefined);
+  }, [companyId, triggerAgentMutation, toast]);
+
+  const totalPipelineValue = leads.reduce((sum, lead) => sum + (lead.overall_score / 100) * SCORE_THRESHOLDS.PIPELINE_VALUE_MULTIPLIER, 0);
+  const salesReadyCount = leads.filter((l) => l.overall_score >= SCORE_THRESHOLDS.HIGH).length;
   const pdpaVerifiedCount = leads.filter((l) => l.pdpa_consent_status === 'verified').length;
 
   const tabs = [
@@ -199,7 +247,7 @@ export function DemandWorkspace() {
                 size="sm"
                 onClick={() => setFilter(f)}
               >
-                {f === 'all' ? 'All' : f === 'high' ? 'High Score (85%+)' : 'Medium Score'}
+                {f === 'all' ? 'All' : f === 'high' ? `High Score (${SCORE_THRESHOLDS.HIGH}%+)` : 'Medium Score'}
               </Button>
             ))}
           </div>
@@ -283,23 +331,23 @@ export function DemandWorkspace() {
             <div className="mt-6 space-y-3">
               <PipelineStage
                 label="Sales Ready"
-                count={leads.filter((l) => l.overall_score >= 85).length}
-                value={leads.filter((l) => l.overall_score >= 85).reduce((s, l) => s + (l.overall_score / 100) * 50000, 0)}
-                percentage={leads.length > 0 ? (leads.filter((l) => l.overall_score >= 85).length / leads.length) * 100 : 0}
+                count={leads.filter((l) => l.overall_score >= SCORE_THRESHOLDS.HIGH).length}
+                value={leads.filter((l) => l.overall_score >= SCORE_THRESHOLDS.HIGH).reduce((s, l) => s + (l.overall_score / 100) * SCORE_THRESHOLDS.PIPELINE_VALUE_MULTIPLIER, 0)}
+                percentage={leads.length > 0 ? (leads.filter((l) => l.overall_score >= SCORE_THRESHOLDS.HIGH).length / leads.length) * 100 : 0}
                 color="bg-green-500"
               />
               <PipelineStage
                 label="Nurturing"
-                count={leads.filter((l) => l.overall_score >= 70 && l.overall_score < 85).length}
-                value={leads.filter((l) => l.overall_score >= 70 && l.overall_score < 85).reduce((s, l) => s + (l.overall_score / 100) * 50000, 0)}
-                percentage={leads.length > 0 ? (leads.filter((l) => l.overall_score >= 70 && l.overall_score < 85).length / leads.length) * 100 : 0}
+                count={leads.filter((l) => l.overall_score >= SCORE_THRESHOLDS.MEDIUM && l.overall_score < SCORE_THRESHOLDS.HIGH).length}
+                value={leads.filter((l) => l.overall_score >= SCORE_THRESHOLDS.MEDIUM && l.overall_score < SCORE_THRESHOLDS.HIGH).reduce((s, l) => s + (l.overall_score / 100) * SCORE_THRESHOLDS.PIPELINE_VALUE_MULTIPLIER, 0)}
+                percentage={leads.length > 0 ? (leads.filter((l) => l.overall_score >= SCORE_THRESHOLDS.MEDIUM && l.overall_score < SCORE_THRESHOLDS.HIGH).length / leads.length) * 100 : 0}
                 color="bg-amber-500"
               />
               <PipelineStage
                 label="New"
-                count={leads.filter((l) => l.overall_score < 70).length}
-                value={leads.filter((l) => l.overall_score < 70).reduce((s, l) => s + (l.overall_score / 100) * 50000, 0)}
-                percentage={leads.length > 0 ? (leads.filter((l) => l.overall_score < 70).length / leads.length) * 100 : 0}
+                count={leads.filter((l) => l.overall_score < SCORE_THRESHOLDS.MEDIUM).length}
+                value={leads.filter((l) => l.overall_score < SCORE_THRESHOLDS.MEDIUM).reduce((s, l) => s + (l.overall_score / 100) * SCORE_THRESHOLDS.PIPELINE_VALUE_MULTIPLIER, 0)}
+                percentage={leads.length > 0 ? (leads.filter((l) => l.overall_score < SCORE_THRESHOLDS.MEDIUM).length / leads.length) * 100 : 0}
                 color="bg-blue-500"
               />
             </div>
@@ -379,8 +427,8 @@ interface LeadCardProps {
 }
 
 function LeadCard({ lead, isExpanded, onToggle, onQualify, onUpdateStatus }: LeadCardProps) {
-  const scoreColor = lead.overall_score >= 85 ? 'text-green-400' : lead.overall_score >= 70 ? 'text-amber-400' : 'text-blue-400';
-  const scoreBg = lead.overall_score >= 85 ? 'bg-green-500/20' : lead.overall_score >= 70 ? 'bg-amber-500/20' : 'bg-blue-500/20';
+  const scoreColor = lead.overall_score >= SCORE_THRESHOLDS.HIGH ? 'text-green-400' : lead.overall_score >= SCORE_THRESHOLDS.MEDIUM ? 'text-amber-400' : 'text-blue-400';
+  const scoreBg = lead.overall_score >= SCORE_THRESHOLDS.HIGH ? 'bg-green-500/20' : lead.overall_score >= SCORE_THRESHOLDS.MEDIUM ? 'bg-amber-500/20' : 'bg-blue-500/20';
 
   const pdpaStatus = lead.pdpa_consent_status === 'verified' ? 'Consent verified' : 'Consent pending';
 
@@ -397,16 +445,18 @@ function LeadCard({ lead, isExpanded, onToggle, onQualify, onUpdateStatus }: Lea
             <div className="flex items-center gap-3 mt-1 text-sm text-white/60">
               <span className="flex items-center gap-1">
                 <Building className="w-3 h-3" />
-                {lead.industry}
+                {lead.industry || 'Not specified'}
               </span>
               <span className="flex items-center gap-1">
                 <Users className="w-3 h-3" />
-                {lead.employee_count} employees
+                {lead.employee_count || 'N/A'} employees
               </span>
-              <span className="flex items-center gap-1">
-                <MapPin className="w-3 h-3" />
-                {lead.location || 'Singapore'}
-              </span>
+              {lead.location && (
+                <span className="flex items-center gap-1">
+                  <MapPin className="w-3 h-3" />
+                  {lead.location}
+                </span>
+              )}
             </div>
           </div>
         </div>

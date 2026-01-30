@@ -939,4 +939,139 @@ export async function getUsageStats(
   return fetchAPI(`/api/v1/settings/usage?user_id=${userId}`);
 }
 
+// ============================================================================
+// Strategy API
+// ============================================================================
+
+export interface StrategyRecommendation {
+  id: string;
+  company_id: string;
+  priority: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  source_agents: string[];
+  impact: string;
+  confidence: number;
+  status: 'pending' | 'in_progress' | 'completed' | 'dismissed';
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface StrategyPhase {
+  id: string;
+  name: string;
+  status: 'pending' | 'in_progress' | 'complete';
+  icon: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface AgentActivity {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  action: string;
+  icon: string;
+  created_at: string;
+}
+
+export interface StrategyMetrics {
+  agents_active: number;
+  agents_total: number;
+  tasks_completed: number;
+  avg_confidence: number;
+  avg_execution_time_ms: number;
+}
+
+export interface StrategyDashboard {
+  phases: StrategyPhase[];
+  recommendations: StrategyRecommendation[];
+  recent_activity: AgentActivity[];
+  metrics: StrategyMetrics;
+  last_run_at: string | null;
+}
+
+export async function getStrategyDashboard(companyId: string): Promise<StrategyDashboard> {
+  return fetchAPI(`/api/v1/companies/${companyId}/strategy/dashboard`);
+}
+
+export async function getStrategyRecommendations(companyId: string): Promise<StrategyRecommendation[]> {
+  return fetchAPI(`/api/v1/companies/${companyId}/strategy/recommendations`);
+}
+
+export async function runStrategyAnalysis(companyId: string): Promise<{ analysis_id: string }> {
+  return fetchAPI(`/api/v1/companies/${companyId}/strategy/run`, {
+    method: 'POST',
+  });
+}
+
+export async function updateRecommendationStatus(
+  companyId: string,
+  recommendationId: string,
+  status: 'in_progress' | 'completed' | 'dismissed'
+): Promise<StrategyRecommendation> {
+  return fetchAPI(`/api/v1/companies/${companyId}/strategy/recommendations/${recommendationId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
+// ============================================================================
+// Content Generation API
+// ============================================================================
+
+export interface GeneratedContent {
+  id: string;
+  content_type: 'linkedin' | 'email' | 'blog' | 'ad';
+  content: string;
+  tone: string;
+  target_persona: string;
+  created_at: string;
+}
+
+export interface ContentGenerationRequest {
+  content_type: 'linkedin' | 'email' | 'blog' | 'ad';
+  topic: string;
+  tone?: 'professional' | 'conversational' | 'bold';
+  target_persona?: string;
+  include_cta?: boolean;
+  key_points?: string[];
+  variations?: number;
+}
+
+export async function generateContent(
+  companyId: string,
+  request: ContentGenerationRequest
+): Promise<GeneratedContent[]> {
+  return fetchAPI(`/api/v1/companies/${companyId}/campaigns/generate-content`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// ============================================================================
+// Agent Trigger API
+// ============================================================================
+
+export async function triggerAgent(
+  companyId: string,
+  agentId: string
+): Promise<{ task_id: string; status: string }> {
+  return fetchAPI(`/api/v1/companies/${companyId}/agents/${agentId}/run`, {
+    method: 'POST',
+  });
+}
+
+export async function getAgentStatus(
+  companyId: string,
+  agentId: string
+): Promise<{
+  status: 'idle' | 'running' | 'completed' | 'error';
+  last_run_at: string | null;
+  current_task_id: string | null;
+  error_message: string | null;
+}> {
+  return fetchAPI(`/api/v1/companies/${companyId}/agents/${agentId}/status`);
+}
+
 export { APIError };

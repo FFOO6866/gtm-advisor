@@ -12,13 +12,13 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
-from packages.core.src.types import CompetitorAnalysis
 from packages.core.src.agent_bus import (
     AgentBus,
     AgentMessage,
     DiscoveryType,
     get_agent_bus,
 )
+from packages.core.src.types import CompetitorAnalysis
 from packages.integrations.eodhd.src import get_eodhd_client
 from packages.llm.src import get_llm_manager
 
@@ -37,9 +37,7 @@ class CompetitorIntelOutput(BaseModel):
 
     competitors: list[CompetitorAnalysis] = Field(default_factory=list)
     market_landscape: str = Field(default="")
-    competitive_positioning: CompetitivePositioning = Field(
-        default_factory=CompetitivePositioning
-    )
+    competitive_positioning: CompetitivePositioning = Field(default_factory=CompetitivePositioning)
     strategic_recommendations: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -209,7 +207,9 @@ Focus on Singapore/APAC competitors when relevant."""
                 if analysis:
                     competitors_data.append(analysis)
             except Exception as e:
-                self._logger.warning("competitor_research_failed", competitor=competitor, error=str(e))
+                self._logger.warning(
+                    "competitor_research_failed", competitor=competitor, error=str(e)
+                )
 
         # Synthesize positioning
         messages = [
@@ -219,8 +219,8 @@ Focus on Singapore/APAC competitors when relevant."""
                 "content": f"""Based on competitor research:
 {[c.model_dump() for c in competitors_data]}
 
-Your company: {context.get('company_name', 'Not specified')}
-Industry: {plan.get('industry')}
+Your company: {context.get("company_name", "Not specified")}
+Industry: {plan.get("industry")}
 
 Create a complete CompetitorIntelOutput with:
 1. Market landscape summary

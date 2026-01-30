@@ -47,8 +47,6 @@ async def detailed_health_check() -> dict[str, Any]:
 @router.get("/health/ready")
 async def readiness_check() -> dict[str, Any]:
     """Readiness check for Kubernetes."""
-    config = get_config()
-
     # Check if at least one LLM provider is configured
     llm_manager = get_llm_manager()
     providers = llm_manager.list_configured_providers()

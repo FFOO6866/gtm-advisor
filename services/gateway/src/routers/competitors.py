@@ -1,25 +1,25 @@
 """Competitor management API endpoints."""
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from packages.database.src.models import Competitor, CompetitorAlert, Company, ThreatLevel
+from packages.database.src.models import Competitor, CompetitorAlert, ThreatLevel
 from packages.database.src.session import get_db_session
 
+from ..auth.dependencies import get_optional_user, validate_company_access
+from ..auth.models import User
 from ..schemas.competitors import (
-    CompetitorCreate,
-    CompetitorUpdate,
-    CompetitorResponse,
-    CompetitorAlertResponse,
-    CompetitorListResponse,
     BattleCardResponse,
+    CompetitorAlertResponse,
+    CompetitorCreate,
+    CompetitorListResponse,
+    CompetitorResponse,
+    CompetitorUpdate,
 )
 
 logger = structlog.get_logger()
@@ -55,11 +55,14 @@ def competitor_to_response(competitor: Competitor, alert_count: int = 0) -> Comp
 @router.get("/{company_id}/competitors", response_model=CompetitorListResponse)
 async def list_competitors(
     company_id: UUID,
-    threat_level: Optional[str] = Query(default=None, pattern="^(low|medium|high)$"),
+    threat_level: str | None = Query(default=None, pattern="^(low|medium|high)$"),
     is_active: bool = Query(default=True),
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> CompetitorListResponse:
     """List all competitors for a company."""
+    await validate_company_access(company_id, current_user, db)
+
     # Build query
     query = select(Competitor).where(
         Competitor.company_id == company_id,
@@ -79,8 +82,8 @@ async def list_competitors(
         select(CompetitorAlert.competitor_id, func.count(CompetitorAlert.id).label("count"))
         .where(
             CompetitorAlert.competitor_id.in_([c.id for c in competitors]),
-            CompetitorAlert.is_read == False,
-            CompetitorAlert.is_dismissed == False,
+            CompetitorAlert.is_read == False,  # noqa: E712
+            CompetitorAlert.is_dismissed == False,  # noqa: E712
         )
         .group_by(CompetitorAlert.competitor_id)
     )
@@ -107,13 +110,11 @@ async def list_competitors(
 async def create_competitor(
     company_id: UUID,
     data: CompetitorCreate,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> CompetitorResponse:
     """Create a new competitor."""
-    # Verify company exists
-    company = await db.get(Company, company_id)
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found")
+    await validate_company_access(company_id, current_user, db)
 
     competitor = Competitor(
         company_id=company_id,
@@ -143,9 +144,12 @@ async def create_competitor(
 async def get_competitor(
     company_id: UUID,
     competitor_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> CompetitorResponse:
     """Get a specific competitor."""
+    await validate_company_access(company_id, current_user, db)
+
     competitor = await db.get(Competitor, competitor_id)
     if not competitor or competitor.company_id != company_id:
         raise HTTPException(status_code=404, detail="Competitor not found")
@@ -153,8 +157,8 @@ async def get_competitor(
     # Get alert count
     alert_query = select(func.count(CompetitorAlert.id)).where(
         CompetitorAlert.competitor_id == competitor_id,
-        CompetitorAlert.is_read == False,
-        CompetitorAlert.is_dismissed == False,
+        CompetitorAlert.is_read == False,  # noqa: E712
+        CompetitorAlert.is_dismissed == False,  # noqa: E712
     )
     alert_count = (await db.execute(alert_query)).scalar() or 0
 
@@ -166,9 +170,12 @@ async def update_competitor(
     company_id: UUID,
     competitor_id: UUID,
     data: CompetitorUpdate,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> CompetitorResponse:
     """Update a competitor."""
+    await validate_company_access(company_id, current_user, db)
+
     competitor = await db.get(Competitor, competitor_id)
     if not competitor or competitor.company_id != company_id:
         raise HTTPException(status_code=404, detail="Competitor not found")
@@ -191,9 +198,12 @@ async def update_competitor(
 async def delete_competitor(
     company_id: UUID,
     competitor_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Delete a competitor (soft delete by setting is_active=False)."""
+    await validate_company_access(company_id, current_user, db)
+
     competitor = await db.get(Competitor, competitor_id)
     if not competitor or competitor.company_id != company_id:
         raise HTTPException(status_code=404, detail="Competitor not found")
@@ -204,26 +214,33 @@ async def delete_competitor(
     logger.info("competitor_deleted", competitor_id=str(competitor_id))
 
 
-@router.get("/{company_id}/competitors/{competitor_id}/alerts", response_model=list[CompetitorAlertResponse])
+@router.get(
+    "/{company_id}/competitors/{competitor_id}/alerts", response_model=list[CompetitorAlertResponse]
+)
 async def list_competitor_alerts(
     company_id: UUID,
     competitor_id: UUID,
     unread_only: bool = Query(default=False),
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> list[CompetitorAlertResponse]:
     """List alerts for a competitor."""
+    await validate_company_access(company_id, current_user, db)
+
     competitor = await db.get(Competitor, competitor_id)
     if not competitor or competitor.company_id != company_id:
         raise HTTPException(status_code=404, detail="Competitor not found")
 
     query = (
         select(CompetitorAlert)
-        .where(CompetitorAlert.competitor_id == competitor_id, CompetitorAlert.is_dismissed == False)
+        .where(
+            CompetitorAlert.competitor_id == competitor_id, CompetitorAlert.is_dismissed == False
+        )  # noqa: E712
         .order_by(CompetitorAlert.detected_at.desc())
     )
 
     if unread_only:
-        query = query.where(CompetitorAlert.is_read == False)
+        query = query.where(CompetitorAlert.is_read == False)  # noqa: E712
 
     result = await db.execute(query)
     alerts = result.scalars().all()
@@ -236,9 +253,12 @@ async def mark_alert_read(
     company_id: UUID,
     competitor_id: UUID,
     alert_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Mark an alert as read."""
+    await validate_company_access(company_id, current_user, db)
+
     alert = await db.get(CompetitorAlert, alert_id)
     if not alert or alert.competitor_id != competitor_id:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -248,13 +268,18 @@ async def mark_alert_read(
     await db.flush()
 
 
-@router.get("/{company_id}/competitors/{competitor_id}/battlecard", response_model=BattleCardResponse)
+@router.get(
+    "/{company_id}/competitors/{competitor_id}/battlecard", response_model=BattleCardResponse
+)
 async def get_battle_card(
     company_id: UUID,
     competitor_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> BattleCardResponse:
     """Get battle card for a competitor."""
+    await validate_company_access(company_id, current_user, db)
+
     competitor = await db.get(Competitor, competitor_id)
     if not competitor or competitor.company_id != company_id:
         raise HTTPException(status_code=404, detail="Competitor not found")

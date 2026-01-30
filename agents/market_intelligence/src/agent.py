@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
-from packages.core.src.types import IndustryVertical, MarketInsight
+from packages.core.src.types import IndustryVertical
 from packages.integrations.eodhd.src import get_eodhd_client
 from packages.integrations.newsapi.src import get_newsapi_client
 from packages.llm.src import get_llm_manager
@@ -245,15 +245,6 @@ Be specific and data-driven. Generic statements like "the market is growing" are
         # 3. Get real-time research from Perplexity
         if "perplexity" in plan.get("data_sources", []):
             try:
-                research_query = f"""
-                Provide detailed market analysis for {industry} in {region}:
-                1. Current market size and growth rate
-                2. Key trends driving the market
-                3. Major opportunities for new entrants
-                4. Challenges and threats
-                5. Regulatory environment
-                Include specific data points, statistics, and sources.
-                """
                 research = await self._perplexity.research_market(
                     topic=f"{industry} market",
                     region=region,
@@ -305,10 +296,10 @@ Be specific and data-driven. Generic statements like "the market is growing" are
 
 Industry: {industry}
 Region: {region}
-Company Context: {context.get('company_name', 'Not specified')}
+Company Context: {context.get("company_name", "Not specified")}
 
 GATHERED DATA:
-{chr(10).join(data_summary) if data_summary else 'Limited data available - provide analysis based on general knowledge.'}
+{chr(10).join(data_summary) if data_summary else "Limited data available - provide analysis based on general knowledge."}
 
 Create a MarketIntelligenceOutput with:
 1. Market summary with specific data points
@@ -364,9 +355,7 @@ Be specific and cite the data provided. Confidence should reflect data quality."
         if result.opportunities:
             score += 0.15
             # Quality check - opportunities should have recommendations
-            with_recs = sum(
-                1 for o in result.opportunities if o.recommended_action
-            )
+            with_recs = sum(1 for o in result.opportunities if o.recommended_action)
             if with_recs >= 2:
                 score += 0.1
 

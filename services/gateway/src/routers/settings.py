@@ -1,27 +1,25 @@
 """User settings API endpoints."""
 
-from datetime import datetime
-from typing import Optional
-from uuid import UUID
-
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.src.models import User, SubscriptionTier
+from packages.database.src.models import SubscriptionTier
+from packages.database.src.models import User as DBUser
 from packages.database.src.session import get_db_session
 
+from ..auth.dependencies import get_current_active_user
+from ..auth.models import User
 from ..schemas.settings import (
-    UserPreferences,
-    UserSettingsUpdate,
-    UserSettingsResponse,
-    SubscriptionInfo,
-    SubscriptionTiersResponse,
-    NotificationPreferences,
-    DisplayPreferences,
     AgentPreferences,
     APIKeySettings,
+    DisplayPreferences,
+    NotificationPreferences,
+    SubscriptionInfo,
+    SubscriptionTiersResponse,
+    UserPreferences,
+    UserSettingsResponse,
+    UserSettingsUpdate,
 )
 
 logger = structlog.get_logger()
@@ -96,8 +94,8 @@ def get_tier_limits(tier: SubscriptionTier) -> dict:
     return TIER_DETAILS.get(tier, TIER_DETAILS[SubscriptionTier.FREE])["limits"]
 
 
-def user_to_settings_response(user: User) -> UserSettingsResponse:
-    """Convert user model to settings response."""
+def db_user_to_settings_response(user: DBUser) -> UserSettingsResponse:
+    """Convert database user model to settings response."""
     tier = user.tier or SubscriptionTier.FREE
     tier_details = TIER_DETAILS.get(tier, TIER_DETAILS[SubscriptionTier.FREE])
     tier_limits = tier_details["limits"]
@@ -141,26 +139,26 @@ def user_to_settings_response(user: User) -> UserSettingsResponse:
 
 @router.get("/me", response_model=UserSettingsResponse)
 async def get_current_user_settings(
-    # In a real app, this would come from auth dependency
-    user_id: UUID,  # Placeholder - should use get_current_user dependency
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> UserSettingsResponse:
     """Get current user's settings."""
-    user = await db.get(User, user_id)
+    # Fetch fresh user data from database
+    user = await db.get(DBUser, current_user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    return user_to_settings_response(user)
+    return db_user_to_settings_response(user)
 
 
 @router.patch("/me", response_model=UserSettingsResponse)
 async def update_current_user_settings(
-    user_id: UUID,  # Placeholder
     data: UserSettingsUpdate,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> UserSettingsResponse:
     """Update current user's settings."""
-    user = await db.get(User, user_id)
+    user = await db.get(DBUser, current_user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -173,11 +171,12 @@ async def update_current_user_settings(
     # Update preferences
     if data.preferences is not None:
         current_prefs = user.preferences or {}
-        pref_data = data.preferences.model_dump()
+        pref_data = data.preferences.model_dump(exclude_none=True)
 
         # Merge preferences
         for key, value in pref_data.items():
-            current_prefs[key] = value
+            if value is not None:
+                current_prefs[key] = value
 
         user.preferences = current_prefs
 
@@ -201,18 +200,16 @@ async def update_current_user_settings(
 
     await db.flush()
 
-    logger.info("user_settings_updated", user_id=str(user_id))
-    return user_to_settings_response(user)
+    logger.info("user_settings_updated", user_id=str(current_user.id)[:8])
+    return db_user_to_settings_response(user)
 
 
 @router.get("/tiers", response_model=SubscriptionTiersResponse)
 async def get_subscription_tiers(
-    user_id: UUID,  # Placeholder
-    db: AsyncSession = Depends(get_db_session),
+    current_user: User = Depends(get_current_active_user),
 ) -> SubscriptionTiersResponse:
     """Get all available subscription tiers."""
-    user = await db.get(User, user_id)
-    current_tier = user.tier if user else SubscriptionTier.FREE
+    current_tier = current_user.tier or SubscriptionTier.FREE
 
     tiers = []
     for tier, details in TIER_DETAILS.items():
@@ -236,11 +233,11 @@ async def get_subscription_tiers(
 
 @router.get("/usage")
 async def get_usage_stats(
-    user_id: UUID,  # Placeholder
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Get current usage statistics for the user."""
-    user = await db.get(User, user_id)
+    user = await db.get(DBUser, current_user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -261,15 +258,15 @@ async def get_usage_stats(
 
 @router.post("/reset-api-key/{provider}")
 async def reset_api_key(
-    user_id: UUID,
     provider: str,
+    current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Reset (remove) an API key configuration."""
     if provider not in ["openai", "perplexity", "newsapi", "eodhd"]:
         raise HTTPException(status_code=400, detail="Invalid provider")
 
-    user = await db.get(User, user_id)
+    user = await db.get(DBUser, current_user.id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -281,5 +278,5 @@ async def reset_api_key(
 
     await db.flush()
 
-    logger.info("api_key_reset", user_id=str(user_id), provider=provider)
+    logger.info("api_key_reset", user_id=str(current_user.id)[:8], provider=provider)
     return {"message": f"{provider} API key configuration removed"}

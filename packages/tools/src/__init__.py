@@ -13,9 +13,14 @@ Tool Categories:
 from .base import (
     BaseTool,
     ToolAccess,
-    ToolResult,
     ToolError,
     ToolRegistry,
+    ToolResult,
+)
+from .crm import (
+    CRMSyncTool,
+    HubSpotTool,
+    PipedriveTool,
 )
 from .enrichment import (
     CompanyEnrichmentTool,
@@ -23,14 +28,9 @@ from .enrichment import (
     EmailFinderTool,
 )
 from .scraping import (
-    WebScraperTool,
     LinkedInScraperTool,
     NewsScraperTool,
-)
-from .crm import (
-    HubSpotTool,
-    PipedriveTool,
-    CRMSyncTool,
+    WebScraperTool,
 )
 
 __all__ = [

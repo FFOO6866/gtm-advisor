@@ -1,25 +1,26 @@
 """ICP and Persona management API endpoints."""
 
-from typing import Optional
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from packages.database.src.models import ICP, Persona, Company
+from packages.database.src.models import ICP, Company, Persona
 from packages.database.src.session import get_db_session
 
+from ..auth.dependencies import get_optional_user, validate_company_access
+from ..auth.models import User
 from ..schemas.icps import (
     ICPCreate,
-    ICPUpdate,
-    ICPResponse,
     ICPListResponse,
+    ICPResponse,
+    ICPUpdate,
     PersonaCreate,
-    PersonaUpdate,
     PersonaResponse,
+    PersonaUpdate,
 )
 
 logger = structlog.get_logger()
@@ -76,9 +77,12 @@ def icp_to_response(icp: ICP, personas: list[Persona] = None) -> ICPResponse:
 async def list_icps(
     company_id: UUID,
     is_active: bool = Query(default=True),
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ICPListResponse:
     """List all ICPs for a company."""
+    await validate_company_access(company_id, current_user, db)
+
     query = (
         select(ICP)
         .options(selectinload(ICP.personas))
@@ -104,9 +108,12 @@ async def list_icps(
 async def create_icp(
     company_id: UUID,
     data: ICPCreate,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ICPResponse:
     """Create a new ICP."""
+    await validate_company_access(company_id, current_user, db)
+
     # Verify company exists
     company = await db.get(Company, company_id)
     if not company:
@@ -137,9 +144,12 @@ async def create_icp(
 async def get_icp(
     company_id: UUID,
     icp_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ICPResponse:
     """Get a specific ICP."""
+    await validate_company_access(company_id, current_user, db)
+
     query = select(ICP).options(selectinload(ICP.personas)).where(ICP.id == icp_id)
     result = await db.execute(query)
     icp = result.scalars().first()
@@ -155,9 +165,12 @@ async def update_icp(
     company_id: UUID,
     icp_id: UUID,
     data: ICPUpdate,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> ICPResponse:
     """Update an ICP."""
+    await validate_company_access(company_id, current_user, db)
+
     query = select(ICP).options(selectinload(ICP.personas)).where(ICP.id == icp_id)
     result = await db.execute(query)
     icp = result.scalars().first()
@@ -179,9 +192,12 @@ async def update_icp(
 async def delete_icp(
     company_id: UUID,
     icp_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Delete an ICP (soft delete)."""
+    await validate_company_access(company_id, current_user, db)
+
     icp = await db.get(ICP, icp_id)
     if not icp or icp.company_id != company_id:
         raise HTTPException(status_code=404, detail="ICP not found")
@@ -195,14 +211,19 @@ async def delete_icp(
 # Persona endpoints (nested under ICPs)
 
 
-@router.post("/{company_id}/icps/{icp_id}/personas", response_model=PersonaResponse, status_code=201)
+@router.post(
+    "/{company_id}/icps/{icp_id}/personas", response_model=PersonaResponse, status_code=201
+)
 async def create_persona(
     company_id: UUID,
     icp_id: UUID,
     data: PersonaCreate,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> PersonaResponse:
     """Create a new persona for an ICP."""
+    await validate_company_access(company_id, current_user, db)
+
     icp = await db.get(ICP, icp_id)
     if not icp or icp.company_id != company_id:
         raise HTTPException(status_code=404, detail="ICP not found")
@@ -235,9 +256,12 @@ async def get_persona(
     company_id: UUID,
     icp_id: UUID,
     persona_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> PersonaResponse:
     """Get a specific persona."""
+    await validate_company_access(company_id, current_user, db)
+
     persona = await db.get(Persona, persona_id)
     if not persona or persona.icp_id != icp_id:
         raise HTTPException(status_code=404, detail="Persona not found")
@@ -256,9 +280,12 @@ async def update_persona(
     icp_id: UUID,
     persona_id: UUID,
     data: PersonaUpdate,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> PersonaResponse:
     """Update a persona."""
+    await validate_company_access(company_id, current_user, db)
+
     persona = await db.get(Persona, persona_id)
     if not persona or persona.icp_id != icp_id:
         raise HTTPException(status_code=404, detail="Persona not found")
@@ -283,9 +310,12 @@ async def delete_persona(
     company_id: UUID,
     icp_id: UUID,
     persona_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Delete a persona (soft delete)."""
+    await validate_company_access(company_id, current_user, db)
+
     persona = await db.get(Persona, persona_id)
     if not persona or persona.icp_id != icp_id:
         raise HTTPException(status_code=404, detail="Persona not found")

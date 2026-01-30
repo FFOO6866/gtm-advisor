@@ -1,52 +1,114 @@
-"""FastAPI dependencies for authentication and authorization."""
+"""FastAPI dependencies for authentication and authorization.
 
-from typing import Callable, Optional
+Uses database for user storage instead of in-memory dict.
+"""
+
+from collections.abc import Callable
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import SubscriptionTier, TokenData, User, UserInDB
-from .utils import decode_token
+from packages.database.src.models import SubscriptionTier
+from packages.database.src.models import User as DBUser
+from packages.database.src.session import get_db_session
+
+from .models import User
+from .utils import decode_token, get_password_hash, is_token_blacklisted
 
 # HTTP Bearer token security scheme
 security = HTTPBearer(auto_error=False)
 
-# In-memory user store (will be replaced with database)
-# This is a temporary solution for MVP
-_users_db: dict[str, UserInDB] = {}
 
-
-def get_user_by_email(email: str) -> Optional[UserInDB]:
+async def get_user_by_email(
+    email: str,
+    db: AsyncSession,
+) -> DBUser | None:
     """Get user by email from database."""
-    return _users_db.get(email)
+    result = await db.execute(select(DBUser).where(DBUser.email == email))
+    return result.scalar_one_or_none()
 
 
-def get_user_by_id(user_id: str) -> Optional[UserInDB]:
+async def get_user_by_id(
+    user_id: str | UUID,
+    db: AsyncSession,
+) -> DBUser | None:
     """Get user by ID from database."""
-    for user in _users_db.values():
-        if str(user.id) == user_id:
-            return user
-    return None
+    if isinstance(user_id, str):
+        user_id = UUID(user_id)
+    return await db.get(DBUser, user_id)
 
 
-def save_user(user: UserInDB) -> None:
+async def save_user(user: DBUser, db: AsyncSession) -> None:
     """Save user to database."""
-    _users_db[user.email] = user
+    db.add(user)
+    await db.flush()
+
+
+async def create_user(
+    email: str,
+    full_name: str,
+    company_name: str | None,
+    password: str,
+    db: AsyncSession,
+    tier: SubscriptionTier = SubscriptionTier.FREE,
+) -> DBUser:
+    """Create a new user in the database."""
+    user = DBUser(
+        email=email,
+        full_name=full_name,
+        company_name=company_name,
+        hashed_password=get_password_hash(password),
+        tier=tier,
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    await db.refresh(user)
+    return user
+
+
+def db_user_to_api_user(db_user: DBUser) -> User:
+    """Convert database user model to API user model."""
+    return User(
+        id=db_user.id,
+        email=db_user.email,
+        full_name=db_user.full_name,
+        company_name=db_user.company_name,
+        tier=db_user.tier,
+        is_active=db_user.is_active,
+        created_at=db_user.created_at,
+        daily_requests=db_user.daily_requests or 0,
+        last_request_date=db_user.last_request_date,
+    )
 
 
 async def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> Optional[User]:
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db_session),
+) -> User | None:
     """
     Get the current user from the JWT token.
 
     Returns None if no token provided (for optional auth).
-    Raises 401 if token is invalid.
+    Raises 401 if token is invalid or blacklisted.
     """
     if credentials is None:
         return None
 
-    token_data = decode_token(credentials.credentials, token_type="access")
+    token = credentials.credentials
+
+    # Check if token is blacklisted (logged out)
+    if await is_token_blacklisted(token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token_data = decode_token(token, token_type="access")
 
     if token_data is None:
         raise HTTPException(
@@ -55,30 +117,20 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user = get_user_by_id(str(token_data.user_id))
+    db_user = await get_user_by_id(str(token_data.user_id), db)
 
-    if user is None:
+    if db_user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    return User(
-        id=user.id,
-        email=user.email,
-        full_name=user.full_name,
-        company_name=user.company_name,
-        tier=user.tier,
-        is_active=user.is_active,
-        created_at=user.created_at,
-        daily_requests=user.daily_requests,
-        last_request_date=user.last_request_date,
-    )
+    return db_user_to_api_user(db_user)
 
 
 async def get_current_active_user(
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user),
 ) -> User:
     """
     Get current user and verify they are authenticated and active.
@@ -100,6 +152,89 @@ async def get_current_active_user(
         )
 
     return current_user
+
+
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: AsyncSession = Depends(get_db_session),
+) -> User | None:
+    """
+    Get the current user if authenticated, None otherwise.
+
+    Unlike get_current_active_user, this doesn't raise if not authenticated.
+    Use this for endpoints that work for both authenticated and unauthenticated users.
+    Blacklisted tokens are treated as unauthenticated.
+    """
+    if credentials is None:
+        return None
+
+    try:
+        token = credentials.credentials
+
+        # Check if token is blacklisted (logged out)
+        if await is_token_blacklisted(token):
+            return None
+
+        token_data = decode_token(token, token_type="access")
+
+        if token_data is None:
+            return None
+
+        db_user = await get_user_by_id(str(token_data.user_id), db)
+
+        if db_user is None or not db_user.is_active:
+            return None
+
+        return db_user_to_api_user(db_user)
+    except Exception:
+        return None
+
+
+async def validate_company_access(
+    company_id: UUID,
+    user: User | None,
+    db: AsyncSession,
+) -> None:
+    """Validate user has access to a company.
+
+    Access rules:
+    - Unowned companies (owner_id=None) are accessible by anyone (MVP mode)
+    - Owned companies require authentication and ownership
+
+    Args:
+        company_id: The company to check access for
+        user: The current user (may be None for unauthenticated)
+        db: Database session
+
+    Raises:
+        HTTPException: If company not found or access denied
+    """
+    from packages.database.src.models import Company
+
+    company = await db.get(Company, company_id)
+    if company is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Company not found",
+        )
+
+    # Unowned companies are public (MVP mode) - anyone can access
+    if company.owner_id is None:
+        return
+
+    # Company has owner - require authentication
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to access this company",
+        )
+
+    # Check ownership
+    if company.owner_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this company",
+        )
 
 
 def require_tier(minimum_tier: SubscriptionTier) -> Callable:

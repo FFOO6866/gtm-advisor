@@ -11,15 +11,16 @@ Rules execute in priority order and can chain together.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable
-from enum import Enum
 import operator
 import re
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
 
 class Operator(Enum):
     """Comparison operators for rule conditions."""
+
     EQ = "eq"  # equals
     NE = "ne"  # not equals
     GT = "gt"  # greater than
@@ -36,6 +37,7 @@ class Operator(Enum):
 
 class Action(Enum):
     """Actions that rules can trigger."""
+
     ASSIGN = "assign"  # Assign a value
     INCREMENT = "increment"  # Increment a counter
     NOTIFY = "notify"  # Trigger notification
@@ -49,6 +51,7 @@ class Action(Enum):
 @dataclass
 class Condition:
     """A single condition in a rule."""
+
     field: str
     operator: Operator
     value: Any
@@ -120,6 +123,7 @@ class Condition:
 @dataclass
 class RuleAction:
     """An action to execute when rule matches."""
+
     action: Action
     target: str  # What to act on
     value: Any = None  # Value for the action
@@ -137,6 +141,7 @@ class RuleAction:
 @dataclass
 class RuleResult:
     """Result of rule evaluation."""
+
     rule_id: str
     rule_name: str
     matched: bool
@@ -158,6 +163,7 @@ class RuleResult:
 @dataclass
 class Rule:
     """A business rule with conditions and actions."""
+
     id: str
     name: str
     description: str
@@ -319,11 +325,13 @@ class RuleEngine:
                     break
 
         # Log execution
-        self._execution_log.append({
-            "input_context": context,
-            "results": [r.to_dict() for r in results],
-            "final_context": working_context,
-        })
+        self._execution_log.append(
+            {
+                "input_context": context,
+                "results": [r.to_dict() for r in results],
+                "final_context": working_context,
+            }
+        )
 
         return results
 
@@ -377,6 +385,7 @@ class RuleEngine:
 
 
 # Pre-built rule sets for common GTM scenarios
+
 
 def create_lead_routing_rules() -> list[Rule]:
     """Create standard lead routing rules."""

@@ -11,61 +11,52 @@ Principle: Algorithms decide where possible, LLMs explain.
 
 from __future__ import annotations
 
-from abc import abstractmethod
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Generic, TypeVar
-import time
 
 import structlog
 
-from .base_agent import BaseGTMAgent, AgentCapability
-
 # Algorithms
 from packages.algorithms.src import (
+    CampaignROICalculator,
+    FirmographicClusterer,
     ICPScorer,
     LeadScorer,
-    MessageAlignmentScorer,
-    CompetitorThreatScorer,
-    FirmographicClusterer,
-    PersonaClusterer,
+    LeadValueCalculator,
     MarketSegmenter,
     MarketSizeCalculator,
-    LeadValueCalculator,
-    CampaignROICalculator,
-    RuleEngine,
-)
-
-# Tools
-from packages.tools.src import (
-    BaseTool,
-    ToolAccess,
-    ToolResult,
-    ToolRegistry,
-    CompanyEnrichmentTool,
-    ContactEnrichmentTool,
-    EmailFinderTool,
-    WebScraperTool,
-    LinkedInScraperTool,
-    NewsScraperTool,
-    HubSpotTool,
-    PipedriveTool,
 )
 
 # Governance
 from packages.governance.src import (
     AccessControl,
-    Permission,
-    AgentPermissions,
-    CheckpointManager,
-    CheckpointType,
     ApprovalStatus,
-    AuditLogger,
     AuditEventType,
+    AuditLogger,
     BudgetManager,
+    CheckpointManager,
     PDPAChecker,
+    Permission,
 )
 
+# Tools
+from packages.tools.src import (
+    CompanyEnrichmentTool,
+    ContactEnrichmentTool,
+    EmailFinderTool,
+    HubSpotTool,
+    LinkedInScraperTool,
+    NewsScraperTool,
+    PipedriveTool,
+    ToolAccess,
+    ToolRegistry,
+    ToolResult,
+    WebScraperTool,
+)
+
+from .base_agent import BaseGTMAgent
 
 T = TypeVar("T")
 logger = structlog.get_logger()
@@ -74,6 +65,7 @@ logger = structlog.get_logger()
 @dataclass
 class LayerUsage:
     """Tracks which layer handled each decision."""
+
     layer: str  # cognitive, analytical, operational, governance
     component: str  # specific component used
     decision: str
@@ -85,6 +77,7 @@ class LayerUsage:
 @dataclass
 class AgentDecisionLog:
     """Complete log of decisions made during execution."""
+
     task_id: str
     agent_id: str
     started_at: datetime
@@ -333,13 +326,15 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
         # Log decision
         if self._current_decision_log:
             self._current_decision_log.tool_calls += 1
-            self._current_decision_log.decisions.append(LayerUsage(
-                layer="operational",
-                component=tool_name,
-                decision=f"Tool call: {tool_name}",
-                confidence=1.0 if result.success else 0.0,
-                execution_time_ms=execution_time,
-            ))
+            self._current_decision_log.decisions.append(
+                LayerUsage(
+                    layer="operational",
+                    component=tool_name,
+                    decision=f"Tool call: {tool_name}",
+                    confidence=1.0 if result.success else 0.0,
+                    execution_time_ms=execution_time,
+                )
+            )
 
         return result
 
@@ -368,14 +363,16 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
         # Log decision
         if self._current_decision_log:
             self._current_decision_log.algorithm_calls += 1
-            self._current_decision_log.decisions.append(LayerUsage(
-                layer="analytical",
-                component="icp_scorer",
-                decision=f"ICP score: {result.total_score:.2f}",
-                confidence=result.confidence,
-                execution_time_ms=execution_time,
-                metadata={"score": result.total_score, "components": result.components},
-            ))
+            self._current_decision_log.decisions.append(
+                LayerUsage(
+                    layer="analytical",
+                    component="icp_scorer",
+                    decision=f"ICP score: {result.total_score:.2f}",
+                    confidence=result.confidence,
+                    execution_time_ms=execution_time,
+                    metadata={"score": result.total_score, "components": result.components},
+                )
+            )
 
         return result.to_dict()
 
@@ -393,13 +390,15 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
 
         if self._current_decision_log:
             self._current_decision_log.algorithm_calls += 1
-            self._current_decision_log.decisions.append(LayerUsage(
-                layer="analytical",
-                component="lead_scorer",
-                decision=f"Lead score: {result.total_score:.2f}",
-                confidence=result.confidence,
-                execution_time_ms=execution_time,
-            ))
+            self._current_decision_log.decisions.append(
+                LayerUsage(
+                    layer="analytical",
+                    component="lead_scorer",
+                    decision=f"Lead score: {result.total_score:.2f}",
+                    confidence=result.confidence,
+                    execution_time_ms=execution_time,
+                )
+            )
 
         return result.to_dict()
 
@@ -417,13 +416,15 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
 
         if self._current_decision_log:
             self._current_decision_log.algorithm_calls += 1
-            self._current_decision_log.decisions.append(LayerUsage(
-                layer="analytical",
-                component="firmographic_clusterer",
-                decision=f"Created {len(result.clusters)} clusters",
-                confidence=result.quality_score,
-                execution_time_ms=execution_time,
-            ))
+            self._current_decision_log.decisions.append(
+                LayerUsage(
+                    layer="analytical",
+                    component="firmographic_clusterer",
+                    decision=f"Created {len(result.clusters)} clusters",
+                    confidence=result.quality_score,
+                    execution_time_ms=execution_time,
+                )
+            )
 
         return result.to_dict()
 
@@ -442,13 +443,15 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
 
         if self._current_decision_log:
             self._current_decision_log.algorithm_calls += 1
-            self._current_decision_log.decisions.append(LayerUsage(
-                layer="analytical",
-                component="market_segmenter",
-                decision=f"Created {len(result.clusters)} segments",
-                confidence=result.quality_score,
-                execution_time_ms=execution_time,
-            ))
+            self._current_decision_log.decisions.append(
+                LayerUsage(
+                    layer="analytical",
+                    component="market_segmenter",
+                    decision=f"Created {len(result.clusters)} segments",
+                    confidence=result.quality_score,
+                    execution_time_ms=execution_time,
+                )
+            )
 
         return result.to_dict()
 
@@ -474,13 +477,15 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
 
         if self._current_decision_log:
             self._current_decision_log.algorithm_calls += 1
-            self._current_decision_log.decisions.append(LayerUsage(
-                layer="analytical",
-                component="market_size_calculator",
-                decision=f"TAM: {result.tam:,.0f}, SAM: {result.sam:,.0f}, SOM: {result.som:,.0f}",
-                confidence=result.confidence,
-                execution_time_ms=execution_time,
-            ))
+            self._current_decision_log.decisions.append(
+                LayerUsage(
+                    layer="analytical",
+                    component="market_size_calculator",
+                    decision=f"TAM: {result.tam:,.0f}, SAM: {result.sam:,.0f}, SOM: {result.som:,.0f}",
+                    confidence=result.confidence,
+                    execution_time_ms=execution_time,
+                )
+            )
 
         return result.to_dict()
 
@@ -504,13 +509,15 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
 
         if self._current_decision_log:
             self._current_decision_log.algorithm_calls += 1
-            self._current_decision_log.decisions.append(LayerUsage(
-                layer="analytical",
-                component="lead_value_calculator",
-                decision=f"Expected value: {result.expected_value:,.2f}",
-                confidence=result.confidence,
-                execution_time_ms=execution_time,
-            ))
+            self._current_decision_log.decisions.append(
+                LayerUsage(
+                    layer="analytical",
+                    component="lead_value_calculator",
+                    decision=f"Expected value: {result.expected_value:,.2f}",
+                    confidence=result.confidence,
+                    execution_time_ms=execution_time,
+                )
+            )
 
         return result.to_dict()
 
@@ -630,15 +637,19 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
         if self._current_decision_log:
             self._current_decision_log.llm_calls += 1
             self._current_decision_log.total_tokens += total_tokens
-            self._current_decision_log.total_cost_usd += (total_tokens / 1000) * 0.03  # Rough estimate
-            self._current_decision_log.decisions.append(LayerUsage(
-                layer="cognitive",
-                component="llm",
-                decision="LLM completion",
-                confidence=0.8,  # LLM confidence is uncertain
-                execution_time_ms=execution_time,
-                metadata={"tokens": total_tokens},
-            ))
+            self._current_decision_log.total_cost_usd += (
+                total_tokens / 1000
+            ) * 0.03  # Rough estimate
+            self._current_decision_log.decisions.append(
+                LayerUsage(
+                    layer="cognitive",
+                    component="llm",
+                    decision="LLM completion",
+                    confidence=0.8,  # LLM confidence is uncertain
+                    execution_time_ms=execution_time,
+                    metadata={"tokens": total_tokens},
+                )
+            )
 
         return result
 

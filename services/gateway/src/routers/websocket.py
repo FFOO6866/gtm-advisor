@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 from typing import Any
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
+
+from packages.database.src.models import Analysis
+from packages.database.src.session import async_session_factory
+
+from ..auth.dependencies import db_user_to_api_user, get_user_by_id, validate_company_access
+from ..auth.utils import decode_token
 
 logger = structlog.get_logger()
 
@@ -50,9 +54,7 @@ class ConnectionManager:
             del self.websocket_to_analysis[websocket]
         logger.info("websocket_disconnected", analysis_id=str(analysis_id))
 
-    async def broadcast_to_analysis(
-        self, analysis_id: UUID, message: dict[str, Any]
-    ) -> None:
+    async def broadcast_to_analysis(self, analysis_id: UUID, message: dict[str, Any]) -> None:
         """Send message to all connections watching an analysis."""
         if analysis_id not in self.active_connections:
             return
@@ -76,7 +78,9 @@ manager = ConnectionManager()
 class AgentUpdateMessage(BaseModel):
     """Message format for agent updates."""
 
-    type: str = Field(...)  # agent_started, agent_progress, agent_completed, analysis_completed, error
+    type: str = Field(
+        ...
+    )  # agent_started, agent_progress, agent_completed, analysis_completed, error
     agent_id: str | None = Field(default=None)
     agent_name: str | None = Field(default=None)
     status: str | None = Field(default=None)
@@ -88,8 +92,49 @@ class AgentUpdateMessage(BaseModel):
 
 
 @router.websocket("/analysis/{analysis_id}")
-async def websocket_analysis(websocket: WebSocket, analysis_id: UUID):
-    """WebSocket endpoint for real-time analysis updates."""
+async def websocket_analysis(
+    websocket: WebSocket,
+    analysis_id: UUID,
+    token: str | None = Query(default=None),
+):
+    """WebSocket endpoint for real-time analysis updates.
+
+    Authentication is handled via token query parameter since WebSocket
+    doesn't support standard HTTP headers in the same way.
+
+    For MVP mode (unowned companies), connections are allowed without a token.
+    For owned companies, a valid JWT token is required.
+    """
+    # Validate authentication and authorization
+    async with async_session_factory() as db:
+        # Get the analysis to find its company
+        analysis = await db.get(Analysis, analysis_id)
+        if not analysis:
+            await websocket.close(code=4004, reason="Analysis not found")
+            return
+
+        # Validate user access to the analysis's company
+        user = None
+        if token:
+            token_data = decode_token(token, token_type="access")
+            if token_data:
+                db_user = await get_user_by_id(str(token_data.user_id), db)
+                if db_user and db_user.is_active:
+                    user = db_user_to_api_user(db_user)
+
+        # Check company access
+        try:
+            await validate_company_access(analysis.company_id, user, db)
+        except Exception as e:
+            logger.warning(
+                "websocket_auth_failed",
+                analysis_id=str(analysis_id),
+                error=str(e),
+            )
+            await websocket.close(code=4003, reason="Access denied")
+            return
+
+    # Authorization passed - establish connection
     await manager.connect(websocket, analysis_id)
     try:
         while True:

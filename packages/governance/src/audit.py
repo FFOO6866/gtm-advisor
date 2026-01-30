@@ -12,20 +12,21 @@ Enables: Debugging, compliance, billing, improvement.
 
 from __future__ import annotations
 
+import json
+import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any
-import json
-import uuid
-import logging
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class AuditEventType(Enum):
     """Types of audit events."""
+
     # Agent events
     AGENT_START = "agent.start"
     AGENT_COMPLETE = "agent.complete"
@@ -75,6 +76,7 @@ class AuditEventType(Enum):
 @dataclass
 class AuditEvent:
     """An audit log entry."""
+
     id: str
     event_type: AuditEventType
     timestamp: datetime
@@ -220,7 +222,7 @@ class AuditLogger:
             self._events.append(event)
             # Trim if too many
             if len(self._events) > self.max_memory_events:
-                self._events = self._events[-self.max_memory_events:]
+                self._events = self._events[-self.max_memory_events :]
 
         elif self.storage_backend == "file" and self.file_path:
             try:
@@ -355,25 +357,37 @@ class AuditLogger:
             writer = csv.writer(output)
 
             # Header
-            writer.writerow([
-                "id", "event_type", "timestamp", "agent_id", "user_id",
-                "action", "resource", "success", "duration_ms", "error_message"
-            ])
+            writer.writerow(
+                [
+                    "id",
+                    "event_type",
+                    "timestamp",
+                    "agent_id",
+                    "user_id",
+                    "action",
+                    "resource",
+                    "success",
+                    "duration_ms",
+                    "error_message",
+                ]
+            )
 
             # Rows
             for event in events:
-                writer.writerow([
-                    event.id,
-                    event.event_type.value,
-                    event.timestamp.isoformat(),
-                    event.agent_id,
-                    event.user_id,
-                    event.action,
-                    event.resource,
-                    event.success,
-                    event.duration_ms,
-                    event.error_message,
-                ])
+                writer.writerow(
+                    [
+                        event.id,
+                        event.event_type.value,
+                        event.timestamp.isoformat(),
+                        event.agent_id,
+                        event.user_id,
+                        event.action,
+                        event.resource,
+                        event.success,
+                        event.duration_ms,
+                        event.error_message,
+                    ]
+                )
 
             return output.getvalue()
 
@@ -392,9 +406,11 @@ def audit_function(
     agent_id: str | None = None,
 ):
     """Decorator to audit function calls."""
+
     def decorator(func):
         async def async_wrapper(*args, **kwargs):
             import time
+
             start = time.time()
 
             try:
@@ -427,6 +443,7 @@ def audit_function(
 
         def sync_wrapper(*args, **kwargs):
             import time
+
             start = time.time()
 
             try:
@@ -455,6 +472,7 @@ def audit_function(
                 raise
 
         import asyncio
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper

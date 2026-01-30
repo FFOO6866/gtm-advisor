@@ -11,15 +11,16 @@ Principle: No unlimited spending.
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
-import threading
 
 
 class BudgetPeriod(Enum):
     """Budget reset periods."""
+
     HOURLY = "hourly"
     DAILY = "daily"
     WEEKLY = "weekly"
@@ -29,6 +30,7 @@ class BudgetPeriod(Enum):
 @dataclass
 class BudgetLimit:
     """A budget limit configuration."""
+
     id: str
     name: str
     limit_type: str  # "tokens", "api_calls", "dollars"
@@ -56,6 +58,7 @@ class BudgetLimit:
 @dataclass
 class UsageRecord:
     """A usage record."""
+
     timestamp: datetime
     agent_id: str | None
     tool_name: str | None
@@ -331,18 +334,20 @@ class BudgetManager:
 
             usage_percent = current / limit.limit_value if limit.limit_value > 0 else 0
 
-            status.append({
-                "limit_id": limit.id,
-                "limit_name": limit.name,
-                "limit_type": limit.limit_type,
-                "limit_value": limit.limit_value,
-                "period": limit.period.value,
-                "current_usage": round(current, 2),
-                "remaining": round(limit.limit_value - current, 2),
-                "usage_percent": round(usage_percent * 100, 1),
-                "at_alert_threshold": usage_percent >= limit.alert_threshold,
-                "exceeded": current >= limit.limit_value,
-            })
+            status.append(
+                {
+                    "limit_id": limit.id,
+                    "limit_name": limit.name,
+                    "limit_type": limit.limit_type,
+                    "limit_value": limit.limit_value,
+                    "period": limit.period.value,
+                    "current_usage": round(current, 2),
+                    "remaining": round(limit.limit_value - current, 2),
+                    "usage_percent": round(usage_percent * 100, 1),
+                    "at_alert_threshold": usage_percent >= limit.alert_threshold,
+                    "exceeded": current >= limit.limit_value,
+                }
+            )
 
         return status
 
@@ -406,7 +411,6 @@ def create_gtm_budget_limits() -> list[BudgetLimit]:
             alert_threshold=0.9,
             hard_limit=True,
         ),
-
         # Per-agent limits
         BudgetLimit(
             id="lead_hunter_hourly",
@@ -424,7 +428,6 @@ def create_gtm_budget_limits() -> list[BudgetLimit]:
             period=BudgetPeriod.DAILY,
             agent_id="market_intelligence",
         ),
-
         # Tool-specific limits
         BudgetLimit(
             id="enrichment_daily",

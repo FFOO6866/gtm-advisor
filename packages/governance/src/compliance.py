@@ -14,16 +14,17 @@ Principle: No personal data processing without consent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
-import re
-import hashlib
 
 
 class DataCategory(Enum):
     """Categories of data under PDPA."""
+
     PUBLIC = "public"  # Publicly available (company info, job titles)
     BUSINESS = "business"  # Business contact info with consent
     PERSONAL = "personal"  # Personal identifiable information
@@ -32,6 +33,7 @@ class DataCategory(Enum):
 
 class ConsentStatus(Enum):
     """Status of consent for data processing."""
+
     NOT_REQUIRED = "not_required"  # Public/business data
     GRANTED = "granted"
     DENIED = "denied"
@@ -42,6 +44,7 @@ class ConsentStatus(Enum):
 
 class ProcessingPurpose(Enum):
     """Purposes for data processing."""
+
     MARKETING = "marketing"
     SALES = "sales"
     ANALYTICS = "analytics"
@@ -53,6 +56,7 @@ class ProcessingPurpose(Enum):
 @dataclass
 class ConsentRecord:
     """Record of consent for data processing."""
+
     id: str
     data_subject_id: str  # Hashed email or identifier
     purposes: list[ProcessingPurpose]
@@ -87,6 +91,7 @@ class ConsentRecord:
 @dataclass
 class DataField:
     """Definition of a data field and its category."""
+
     name: str
     category: DataCategory
     requires_consent: bool
@@ -105,7 +110,6 @@ STANDARD_FIELDS = {
     "company_size": DataField("company_size", DataCategory.PUBLIC, False),
     "company_revenue": DataField("company_revenue", DataCategory.BUSINESS, False),
     "company_address": DataField("company_address", DataCategory.PUBLIC, False),
-
     # Contact fields (require consent for marketing)
     "contact_email": DataField(
         "contact_email",
@@ -130,7 +134,6 @@ STANDARD_FIELDS = {
     ),
     "contact_title": DataField("contact_title", DataCategory.BUSINESS, False),
     "contact_linkedin": DataField("contact_linkedin", DataCategory.BUSINESS, False),
-
     # Sensitive fields
     "nric": DataField(
         "nric",
@@ -332,60 +335,53 @@ class PDPAChecker:
         findings = []
 
         # Email pattern
-        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+        emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
         for email in emails:
-            findings.append({
-                "type": "email",
-                "value": email,
-                "masked": self._mask_email(email),
-                "category": DataCategory.PERSONAL.value,
-            })
+            findings.append(
+                {
+                    "type": "email",
+                    "value": email,
+                    "masked": self._mask_email(email),
+                    "category": DataCategory.PERSONAL.value,
+                }
+            )
 
         # Singapore phone numbers
-        phones = re.findall(r'(?:\+65\s?)?[689]\d{3}\s?\d{4}', text)
+        phones = re.findall(r"(?:\+65\s?)?[689]\d{3}\s?\d{4}", text)
         for phone in phones:
-            findings.append({
-                "type": "phone",
-                "value": phone,
-                "masked": self._mask_phone(phone),
-                "category": DataCategory.PERSONAL.value,
-            })
+            findings.append(
+                {
+                    "type": "phone",
+                    "value": phone,
+                    "masked": self._mask_phone(phone),
+                    "category": DataCategory.PERSONAL.value,
+                }
+            )
 
         # Singapore NRIC
-        nrics = re.findall(r'[STFG]\d{7}[A-Z]', text, re.IGNORECASE)
+        nrics = re.findall(r"[STFG]\d{7}[A-Z]", text, re.IGNORECASE)
         for nric in nrics:
-            findings.append({
-                "type": "nric",
-                "value": nric,
-                "masked": self._mask_nric(nric),
-                "category": DataCategory.SENSITIVE.value,
-            })
+            findings.append(
+                {
+                    "type": "nric",
+                    "value": nric,
+                    "masked": self._mask_nric(nric),
+                    "category": DataCategory.SENSITIVE.value,
+                }
+            )
 
         return findings
 
     def redact_pii(self, text: str) -> str:
         """Redact PII from text."""
         # Redact emails
-        text = re.sub(
-            r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
-            '[EMAIL REDACTED]',
-            text
-        )
+        text = re.sub(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "[EMAIL REDACTED]", text)
 
         # Redact Singapore phone numbers
-        text = re.sub(
-            r'(?:\+65\s?)?[689]\d{3}\s?\d{4}',
-            '[PHONE REDACTED]',
-            text
-        )
+        text = re.sub(r"(?:\+65\s?)?[689]\d{3}\s?\d{4}", "[PHONE REDACTED]", text)
 
         # Redact NRIC
-        text = re.sub(
-            r'[STFG]\d{7}[A-Z]',
-            '[NRIC REDACTED]',
-            text,
-            flags=re.IGNORECASE
-        )
+        text = re.sub(r"[STFG]\d{7}[A-Z]", "[NRIC REDACTED]", text, flags=re.IGNORECASE)
 
         return text
 
@@ -432,7 +428,7 @@ class PDPAChecker:
 
     def _mask_phone(self, phone: str) -> str:
         """Mask phone number."""
-        digits = re.sub(r'\D', '', phone)
+        digits = re.sub(r"\D", "", phone)
         if len(digits) >= 4:
             return "*" * (len(digits) - 4) + digits[-4:]
         return "****"
@@ -458,17 +454,14 @@ class PDPAChecker:
         """Generate PDPA compliance report."""
         total_consents = sum(len(records) for records in self._consent_records.values())
         active_consents = sum(
-            1 for records in self._consent_records.values()
-            for record in records
-            if record.is_valid
+            1 for records in self._consent_records.values() for record in records if record.is_valid
         )
 
         # Categorize fields
         field_categories = {}
         for cat in DataCategory:
             field_categories[cat.value] = [
-                f.name for f in self._field_definitions.values()
-                if f.category == cat
+                f.name for f in self._field_definitions.values() if f.category == cat
             ]
 
         return {
@@ -478,7 +471,8 @@ class PDPAChecker:
             "active_consents": active_consents,
             "field_categories": field_categories,
             "sensitive_fields": [
-                f.name for f in self._field_definitions.values()
+                f.name
+                for f in self._field_definitions.values()
                 if f.category == DataCategory.SENSITIVE
             ],
             "retention_policies": {

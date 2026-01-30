@@ -1,22 +1,22 @@
 """Market Insights API endpoints."""
 
-from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.src.models import MarketInsight, Company
+from packages.database.src.models import Company, MarketInsight
 from packages.database.src.session import get_db_session
 
+from ..auth.dependencies import get_optional_user, validate_company_access
+from ..auth.models import User
 from ..schemas.insights import (
-    MarketInsightResponse,
-    MarketInsightListResponse,
-    InsightMarkRead,
     InsightArchive,
+    InsightMarkRead,
+    MarketInsightListResponse,
+    MarketInsightResponse,
 )
 
 logger = structlog.get_logger()
@@ -50,8 +50,9 @@ def insight_to_response(insight: MarketInsight) -> MarketInsightResponse:
 @router.get("/{company_id}/insights", response_model=MarketInsightListResponse)
 async def list_insights(
     company_id: UUID,
-    insight_type: Optional[str] = Query(default=None, pattern="^(trend|opportunity|threat|news)$"),
-    impact_level: Optional[str] = Query(default=None, pattern="^(low|medium|high)$"),
+    current_user: User | None = Depends(get_optional_user),
+    insight_type: str | None = Query(default=None, pattern="^(trend|opportunity|threat|news)$"),
+    impact_level: str | None = Query(default=None, pattern="^(low|medium|high)$"),
     unread_only: bool = Query(default=False),
     include_archived: bool = Query(default=False),
     page: int = Query(default=1, ge=1),
@@ -59,6 +60,8 @@ async def list_insights(
     db: AsyncSession = Depends(get_db_session),
 ) -> MarketInsightListResponse:
     """List market insights for a company."""
+    await validate_company_access(company_id, current_user, db)
+
     # Build query
     query = select(MarketInsight).where(MarketInsight.company_id == company_id)
 
@@ -146,9 +149,12 @@ async def list_insights(
 async def get_insight(
     company_id: UUID,
     insight_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MarketInsightResponse:
     """Get a specific market insight."""
+    await validate_company_access(company_id, current_user, db)
+
     insight = await db.get(MarketInsight, insight_id)
     if not insight or insight.company_id != company_id:
         raise HTTPException(status_code=404, detail="Insight not found")
@@ -165,9 +171,12 @@ async def get_insight(
 async def mark_insights_read(
     company_id: UUID,
     data: InsightMarkRead,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Mark multiple insights as read."""
+    await validate_company_access(company_id, current_user, db)
+
     for insight_id in data.insight_ids:
         insight = await db.get(MarketInsight, insight_id)
         if insight and insight.company_id == company_id:
@@ -181,9 +190,12 @@ async def mark_insights_read(
 async def archive_insights(
     company_id: UUID,
     data: InsightArchive,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Archive multiple insights."""
+    await validate_company_access(company_id, current_user, db)
+
     for insight_id in data.insight_ids:
         insight = await db.get(MarketInsight, insight_id)
         if insight and insight.company_id == company_id:
@@ -197,9 +209,12 @@ async def archive_insights(
 async def unarchive_insight(
     company_id: UUID,
     insight_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> MarketInsightResponse:
     """Unarchive an insight."""
+    await validate_company_access(company_id, current_user, db)
+
     insight = await db.get(MarketInsight, insight_id)
     if not insight or insight.company_id != company_id:
         raise HTTPException(status_code=404, detail="Insight not found")
@@ -213,9 +228,12 @@ async def unarchive_insight(
 @router.get("/{company_id}/insights/summary")
 async def get_insights_summary(
     company_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     """Get a summary of market insights for the company."""
+    await validate_company_access(company_id, current_user, db)
+
     # Verify company exists
     company = await db.get(Company, company_id)
     if not company:
@@ -229,7 +247,9 @@ async def get_insights_summary(
 
     total = (await db.execute(base_query)).scalar() or 0
     unread = (await db.execute(base_query.where(MarketInsight.is_read == False))).scalar() or 0
-    high_impact = (await db.execute(base_query.where(MarketInsight.impact_level == "high"))).scalar() or 0
+    high_impact = (
+        await db.execute(base_query.where(MarketInsight.impact_level == "high"))
+    ).scalar() or 0
 
     # Get recent trends
     trends_query = (

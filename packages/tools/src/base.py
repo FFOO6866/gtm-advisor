@@ -9,15 +9,14 @@ All tools MUST:
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Generic, TypeVar
-import asyncio
-import logging
-import time
-from functools import wraps
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +25,7 @@ T = TypeVar("T")
 
 class ToolAccess(Enum):
     """Access levels for tools."""
+
     READ = "read"  # Read-only operations (fetching data)
     WRITE = "write"  # Create/update operations
     DELETE = "delete"  # Delete operations
@@ -34,6 +34,7 @@ class ToolAccess(Enum):
 
 class ToolCategory(Enum):
     """Categories of tools."""
+
     ENRICHMENT = "enrichment"
     SCRAPING = "scraping"
     CRM = "crm"
@@ -45,6 +46,7 @@ class ToolCategory(Enum):
 @dataclass
 class ToolError(Exception):
     """Tool execution error with context."""
+
     tool_name: str
     operation: str
     message: str
@@ -58,6 +60,7 @@ class ToolError(Exception):
 @dataclass
 class ToolResult(Generic[T]):
     """Result of a tool operation."""
+
     success: bool
     data: T | None
     error: str | None = None
@@ -81,6 +84,7 @@ class ToolResult(Generic[T]):
 @dataclass
 class RateLimitConfig:
     """Rate limiting configuration."""
+
     requests_per_minute: int = 60
     requests_per_hour: int = 1000
     burst_limit: int = 10  # Max concurrent requests
@@ -89,6 +93,7 @@ class RateLimitConfig:
 @dataclass
 class AuditEntry:
     """Audit log entry for tool operations."""
+
     timestamp: datetime
     tool_name: str
     operation: str

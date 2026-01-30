@@ -157,26 +157,26 @@ export function transformAnalysisResult(
       determinismRatio: decisionData.determinismRatio,
       breakdown: [
         // Generate breakdown based on actual decisions
-        ...leads.map((lead) => ({
+        ...leads.map((lead, index) => ({
           layer: 'analytical' as const,
           component: 'ICP Scorer',
           decision: `Fit score: ${lead.fitScore.toFixed(2)}`,
           confidence: lead.fitScore,
-          executionTimeMs: 2 + Math.random(),
+          executionTimeMs: 2.0 + index * 0.1, // Deterministic based on index
         })),
         {
           layer: 'operational' as const,
           component: 'Company Enrichment',
           decision: `Enriched ${leads.length} companies`,
           confidence: 1.0,
-          executionTimeMs: 200 + Math.random() * 100,
+          executionTimeMs: 200 + leads.length * 10, // Deterministic based on lead count
         },
         {
           layer: 'cognitive' as const,
           component: 'LLM Synthesis',
           decision: 'Generated market insights',
           confidence: backend.total_confidence,
-          executionTimeMs: 1500 + Math.random() * 500,
+          executionTimeMs: 1500, // Fixed value
         },
         {
           layer: 'governance' as const,

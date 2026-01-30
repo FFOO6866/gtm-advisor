@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
-from packages.core.src.types import CustomerPersona, IndustryVertical
+from packages.core.src.types import CustomerPersona
 
 
 class ICPDefinition(BaseModel):
@@ -55,7 +55,9 @@ class CustomerProfilerAgent(BaseGTMAgent[CustomerProfileOutput]):
             max_iterations=2,
             model="gpt-4o",
             capabilities=[
-                AgentCapability(name="icp-development", description="Define ideal customer profile"),
+                AgentCapability(
+                    name="icp-development", description="Define ideal customer profile"
+                ),
                 AgentCapability(name="persona-creation", description="Create buyer personas"),
                 AgentCapability(name="segmentation", description="Market segmentation strategy"),
             ],
@@ -105,10 +107,10 @@ Include Singapore/APAC specific insights."""
                 "role": "user",
                 "content": f"""Create customer profiles based on:
 
-Company/Product: {plan.get('company_info', 'Not specified')}
-Value Proposition: {plan.get('value_proposition', 'Not specified')}
-Target Industries: {plan.get('target_industries', [])}
-Market Insights: {plan.get('market_insights', {})}
+Company/Product: {plan.get("company_info", "Not specified")}
+Value Proposition: {plan.get("value_proposition", "Not specified")}
+Target Industries: {plan.get("target_industries", [])}
+Market Insights: {plan.get("market_insights", {})}
 
 Create:
 1. Detailed ICP with firmographics and buying signals

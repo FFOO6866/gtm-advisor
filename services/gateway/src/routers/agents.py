@@ -4,29 +4,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+import structlog
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-# Import agents
-from agents.campaign_architect.src import CampaignArchitectAgent
-from agents.competitor_analyst.src import CompetitorAnalystAgent
-from agents.customer_profiler.src import CustomerProfilerAgent
-from agents.gtm_strategist.src import GTMStrategistAgent
-from agents.lead_hunter.src import LeadHunterAgent
-from agents.market_intelligence.src import MarketIntelligenceAgent
+from ..agents_registry import (
+    AGENT_METADATA,
+    get_agent_class,
+    get_all_agent_classes,
+    is_valid_agent,
+)
+from ..auth.dependencies import get_optional_user
+from ..auth.models import User
 
+logger = structlog.get_logger()
 router = APIRouter()
-
-
-# Agent registry
-AGENTS = {
-    "gtm-strategist": GTMStrategistAgent,
-    "market-intelligence": MarketIntelligenceAgent,
-    "competitor-analyst": CompetitorAnalystAgent,
-    "customer-profiler": CustomerProfilerAgent,
-    "lead-hunter": LeadHunterAgent,
-    "campaign-architect": CampaignArchitectAgent,
-}
 
 
 class AgentCard(BaseModel):
@@ -59,47 +51,16 @@ class AgentRunResponse(BaseModel):
 
 
 @router.get("/")
-async def list_agents() -> list[AgentCard]:
+async def list_agents(
+    _current_user: User | None = Depends(get_optional_user),
+) -> list[AgentCard]:
     """List all available agents with their cards."""
     cards = []
+    agents = get_all_agent_classes()
 
-    # Agent metadata for UI
-    agent_metadata = {
-        "gtm-strategist": {
-            "title": "GTM Strategist",
-            "color": "#8B5CF6",  # Purple
-            "avatar": "🎯",
-        },
-        "market-intelligence": {
-            "title": "Market Intelligence",
-            "color": "#10B981",  # Green
-            "avatar": "📊",
-        },
-        "competitor-analyst": {
-            "title": "Competitor Analyst",
-            "color": "#F59E0B",  # Amber
-            "avatar": "🔍",
-        },
-        "customer-profiler": {
-            "title": "Customer Profiler",
-            "color": "#EC4899",  # Pink
-            "avatar": "👥",
-        },
-        "lead-hunter": {
-            "title": "Lead Hunter",
-            "color": "#3B82F6",  # Blue
-            "avatar": "🎣",
-        },
-        "campaign-architect": {
-            "title": "Campaign Architect",
-            "color": "#EF4444",  # Red
-            "avatar": "📣",
-        },
-    }
-
-    for name, agent_class in AGENTS.items():
+    for name, agent_class in agents.items():
         agent = agent_class()
-        metadata = agent_metadata.get(name, {})
+        metadata = AGENT_METADATA.get(name, {})
 
         cards.append(
             AgentCard(
@@ -108,8 +69,7 @@ async def list_agents() -> list[AgentCard]:
                 description=agent.description,
                 status=agent.status.value,
                 capabilities=[
-                    {"name": c.name, "description": c.description}
-                    for c in agent.capabilities
+                    {"name": c.name, "description": c.description} for c in agent.capabilities
                 ],
                 avatar=metadata.get("avatar"),
                 color=metadata.get("color", "#3B82F6"),
@@ -120,31 +80,51 @@ async def list_agents() -> list[AgentCard]:
 
 
 @router.get("/{agent_name}")
-async def get_agent(agent_name: str) -> AgentCard:
+async def get_agent(
+    agent_name: str,
+    _current_user: User | None = Depends(get_optional_user),
+) -> AgentCard:
     """Get a specific agent's card."""
-    if agent_name not in AGENTS:
+    if not is_valid_agent(agent_name):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
 
-    agent = AGENTS[agent_name]()
+    agent_class = get_agent_class(agent_name)
+    if not agent_class:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
+
+    agent = agent_class()
+    metadata = AGENT_METADATA.get(agent_name, {})
+
     return AgentCard(
         name=agent.name,
-        title=agent.name.replace("-", " ").title(),
+        title=metadata.get("title", agent.name.replace("-", " ").title()),
         description=agent.description,
         status=agent.status.value,
-        capabilities=[
-            {"name": c.name, "description": c.description}
-            for c in agent.capabilities
-        ],
+        capabilities=[{"name": c.name, "description": c.description} for c in agent.capabilities],
+        avatar=metadata.get("avatar"),
+        color=metadata.get("color", "#3B82F6"),
     )
 
 
 @router.post("/{agent_name}/run")
-async def run_agent(agent_name: str, request: AgentRunRequest) -> AgentRunResponse:
-    """Run a specific agent with a task."""
-    if agent_name not in AGENTS:
+async def run_agent(
+    agent_name: str,
+    request: AgentRunRequest,
+    _current_user: User | None = Depends(get_optional_user),
+) -> AgentRunResponse:
+    """Run a specific agent with a task.
+
+    Note: For company-scoped agent runs with persistence, use the
+    /api/v1/companies/{company_id}/agents/{agent_id}/run endpoint instead.
+    """
+    if not is_valid_agent(agent_name):
         raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
 
-    agent = AGENTS[agent_name]()
+    agent_class = get_agent_class(agent_name)
+    if not agent_class:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
+
+    agent = agent_class()
 
     try:
         result = await agent.run(request.task, context=request.context)
@@ -158,4 +138,9 @@ async def run_agent(agent_name: str, request: AgentRunRequest) -> AgentRunRespon
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Log the actual error for debugging
+        logger.error("agent_run_failed", agent_name=agent_name, error=str(e))
+        # Return a generic error to the client (don't expose internal details)
+        raise HTTPException(
+            status_code=500, detail="Agent execution failed. Please try again or contact support."
+        )

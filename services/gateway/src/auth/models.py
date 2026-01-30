@@ -1,19 +1,12 @@
 """Authentication models for GTM Advisor Gateway."""
 
 from datetime import datetime
-from enum import Enum
-from typing import Optional
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, EmailStr, Field
 
-
-class SubscriptionTier(str, Enum):
-    """User subscription tiers matching business plan."""
-
-    FREE = "free"  # Trial/limited access
-    TIER1 = "tier1"  # $700/month - Self-serve AI marketing
-    TIER2 = "tier2"  # $7,000/month - Advisory + Governance
+# Single source of truth for SubscriptionTier - from database models
+from packages.database.src.models import SubscriptionTier
 
 
 class UserBase(BaseModel):
@@ -21,7 +14,7 @@ class UserBase(BaseModel):
 
     email: EmailStr
     full_name: str = Field(..., min_length=1, max_length=100)
-    company_name: Optional[str] = Field(None, max_length=200)
+    company_name: str | None = Field(None, max_length=200)
 
 
 class UserCreate(UserBase):
@@ -40,7 +33,7 @@ class User(UserBase):
 
     # Usage tracking
     daily_requests: int = 0
-    last_request_date: Optional[datetime] = None
+    last_request_date: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -68,6 +61,7 @@ class TokenData(BaseModel):
     email: str
     tier: SubscriptionTier
     exp: datetime
+    jti: str | None = None  # JWT ID for blacklist support
 
 
 class LoginRequest(BaseModel):

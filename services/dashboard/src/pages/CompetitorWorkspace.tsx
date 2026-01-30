@@ -5,7 +5,7 @@
  * Connected to real backend API.
  */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { AgentWorkspace } from '../components/agents/AgentWorkspace';
 import {
   Card,
@@ -15,15 +15,17 @@ import {
   CompetitorListLoading,
   ErrorState,
   SkeletonCard,
+  useToast,
 } from '../components/common';
 import { AGENTS } from '../types';
 import { useCompanyId } from '../context/CompanyContext';
-import { useCompetitors, useBattleCard } from '../hooks/useApi';
+import { useCompetitors, useBattleCard, useMutation } from '../hooks/useApi';
 import * as api from '../api/workspaces';
 import type { Competitor } from '../api/workspaces';
 
 export function CompetitorWorkspace() {
   const companyId = useCompanyId();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedCompetitorId, setSelectedCompetitorId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -47,13 +49,34 @@ export function CompetitorWorkspace() {
 
   const agent = AGENTS.find((a) => a.id === 'competitor-analyst')!;
 
-  const handleRun = async () => {
+  // Mutation to trigger agent run with proper error handling
+  const triggerAgentMutation = useMutation(
+    () => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.triggerAgent(companyId, 'competitor-analyst');
+    },
+    {
+      invalidateKeys: ['competitors'],
+      onSuccess: () => {
+        refresh();
+        setIsRunning(false);
+        toast.success('Competitor analysis completed');
+      },
+      onError: (err) => {
+        setIsRunning(false);
+        toast.error('Failed to run competitor analysis', err.message);
+      },
+    }
+  );
+
+  const handleRun = useCallback(async () => {
+    if (!companyId) {
+      toast.error('Please complete onboarding first', 'No company selected');
+      return;
+    }
     setIsRunning(true);
-    // Trigger competitor analysis agent
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    refresh();
-    setIsRunning(false);
-  };
+    await triggerAgentMutation.mutate(undefined);
+  }, [companyId, triggerAgentMutation, toast]);
 
   const competitors = competitorData?.competitors || [];
   const selected = competitors.find((c) => c.id === selectedCompetitorId);

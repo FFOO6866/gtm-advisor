@@ -5,7 +5,7 @@
  * Connected to real backend API.
  */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { AgentWorkspace } from '../components/agents/AgentWorkspace';
 import {
   Card,
@@ -14,14 +14,17 @@ import {
   EmptyState,
   ICPListLoading,
   ErrorState,
+  useToast,
 } from '../components/common';
 import { AGENTS } from '../types';
 import { useCompanyId } from '../context/CompanyContext';
-import { useICPs } from '../hooks/useApi';
+import { useICPs, useMutation } from '../hooks/useApi';
+import * as api from '../api/workspaces';
 import type { ICP, Persona } from '../api/workspaces';
 
 export function CustomerWorkspace() {
   const companyId = useCompanyId();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('icps');
   const [selectedICPId, setSelectedICPId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -31,12 +34,34 @@ export function CustomerWorkspace() {
 
   const agent = AGENTS.find((a) => a.id === 'customer-profiler')!;
 
-  const handleRun = async () => {
+  // Mutation to trigger agent run with proper error handling
+  const triggerAgentMutation = useMutation(
+    () => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.triggerAgent(companyId, 'customer-profiler');
+    },
+    {
+      invalidateKeys: ['icps'],
+      onSuccess: () => {
+        refresh();
+        setIsRunning(false);
+        toast.success('Customer profiling completed');
+      },
+      onError: (err) => {
+        setIsRunning(false);
+        toast.error('Failed to run customer profiler', err.message);
+      },
+    }
+  );
+
+  const handleRun = useCallback(async () => {
+    if (!companyId) {
+      toast.error('Please complete onboarding first', 'No company selected');
+      return;
+    }
     setIsRunning(true);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    refresh();
-    setIsRunning(false);
-  };
+    await triggerAgentMutation.mutate(undefined);
+  }, [companyId, triggerAgentMutation, toast]);
 
   const icps = icpData?.icps || [];
   const selectedICP = icps.find((icp) => icp.id === selectedICPId);

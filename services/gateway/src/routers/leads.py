@@ -1,23 +1,24 @@
 """Lead management API endpoints."""
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.src.models import Lead, Company, LeadStatus
+from packages.database.src.models import Company, Lead, LeadStatus
 from packages.database.src.session import get_db_session
 
+from ..auth.dependencies import get_optional_user, validate_company_access
+from ..auth.models import User
 from ..schemas.leads import (
     LeadCreate,
-    LeadUpdate,
-    LeadResponse,
     LeadListResponse,
+    LeadResponse,
     LeadScoreUpdate,
+    LeadUpdate,
 )
 
 logger = structlog.get_logger()
@@ -59,16 +60,21 @@ def lead_to_response(lead: Lead) -> LeadResponse:
 @router.get("/{company_id}/leads", response_model=LeadListResponse)
 async def list_leads(
     company_id: UUID,
-    status: Optional[str] = Query(default=None, pattern="^(new|qualified|contacted|converted|lost)$"),
+    status: str | None = Query(default=None, pattern="^(new|qualified|contacted|converted|lost)$"),
     min_score: int = Query(default=0, ge=0, le=100),
-    search: Optional[str] = Query(default=None, max_length=100),
+    search: str | None = Query(default=None, max_length=100),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
-    sort_by: str = Query(default="overall_score", pattern="^(overall_score|created_at|fit_score|intent_score)$"),
+    sort_by: str = Query(
+        default="overall_score", pattern="^(overall_score|created_at|fit_score|intent_score)$"
+    ),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LeadListResponse:
     """List leads for a company with filtering and pagination."""
+    await validate_company_access(company_id, current_user, db)
+
     # Build base query
     query = select(Lead).where(Lead.company_id == company_id)
 
@@ -130,9 +136,12 @@ async def list_leads(
 async def create_lead(
     company_id: UUID,
     data: LeadCreate,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LeadResponse:
     """Create a new lead."""
+    await validate_company_access(company_id, current_user, db)
+
     # Verify company exists
     company = await db.get(Company, company_id)
     if not company:
@@ -174,9 +183,12 @@ async def create_lead(
 async def get_lead(
     company_id: UUID,
     lead_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LeadResponse:
     """Get a specific lead."""
+    await validate_company_access(company_id, current_user, db)
+
     lead = await db.get(Lead, lead_id)
     if not lead or lead.company_id != company_id:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -189,9 +201,12 @@ async def update_lead(
     company_id: UUID,
     lead_id: UUID,
     data: LeadUpdate,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LeadResponse:
     """Update a lead."""
+    await validate_company_access(company_id, current_user, db)
+
     lead = await db.get(Lead, lead_id)
     if not lead or lead.company_id != company_id:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -223,9 +238,12 @@ async def update_lead_score(
     company_id: UUID,
     lead_id: UUID,
     data: LeadScoreUpdate,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LeadResponse:
     """Update lead scores."""
+    await validate_company_access(company_id, current_user, db)
+
     lead = await db.get(Lead, lead_id)
     if not lead or lead.company_id != company_id:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -248,9 +266,12 @@ async def update_lead_score(
 async def delete_lead(
     company_id: UUID,
     lead_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
     """Delete a lead permanently."""
+    await validate_company_access(company_id, current_user, db)
+
     lead = await db.get(Lead, lead_id)
     if not lead or lead.company_id != company_id:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -265,9 +286,12 @@ async def delete_lead(
 async def qualify_lead(
     company_id: UUID,
     lead_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LeadResponse:
     """Mark a lead as qualified."""
+    await validate_company_access(company_id, current_user, db)
+
     lead = await db.get(Lead, lead_id)
     if not lead or lead.company_id != company_id:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -283,9 +307,12 @@ async def qualify_lead(
 async def mark_lead_contacted(
     company_id: UUID,
     lead_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LeadResponse:
     """Mark a lead as contacted."""
+    await validate_company_access(company_id, current_user, db)
+
     lead = await db.get(Lead, lead_id)
     if not lead or lead.company_id != company_id:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -302,9 +329,12 @@ async def mark_lead_contacted(
 async def convert_lead(
     company_id: UUID,
     lead_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db_session),
 ) -> LeadResponse:
     """Mark a lead as converted (won)."""
+    await validate_company_access(company_id, current_user, db)
+
     lead = await db.get(Lead, lead_id)
     if not lead or lead.company_id != company_id:
         raise HTTPException(status_code=404, detail="Lead not found")

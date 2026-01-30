@@ -9,7 +9,6 @@ All GTM Advisor agents inherit from this base class to ensure:
 
 from __future__ import annotations
 
-import asyncio
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -21,7 +20,6 @@ import structlog
 from packages.core.src.errors import AgentError, MaxIterationsExceededError
 from packages.core.src.types import (
     AgentStatus,
-    ConfidenceLevel,
     ExecutionMode,
     FastPathConfig,
     FastPathRule,
@@ -497,8 +495,7 @@ When uncertain, clearly indicate confidence level."""
             "description": self.description,
             "status": self.status.value,
             "capabilities": [
-                {"name": c.name, "description": c.description}
-                for c in self.capabilities
+                {"name": c.name, "description": c.description} for c in self.capabilities
             ],
             "confidence_threshold": self.min_confidence,
             "model": self.model,

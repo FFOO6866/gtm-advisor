@@ -6,24 +6,26 @@ All tools have rate limiting and caching built-in.
 
 from __future__ import annotations
 
+import asyncio
+import os
 from dataclasses import dataclass, field
 from typing import Any
-import asyncio
+
 import httpx
-import os
 
 from .base import (
     BaseTool,
-    ToolAccess,
-    ToolResult,
-    ToolCategory,
     RateLimitConfig,
+    ToolAccess,
+    ToolCategory,
+    ToolResult,
 )
 
 
 @dataclass
 class CompanyData:
     """Enriched company data."""
+
     name: str
     domain: str | None = None
     industry: str | None = None
@@ -64,6 +66,7 @@ class CompanyData:
 @dataclass
 class ContactData:
     """Enriched contact data."""
+
     name: str
     email: str | None = None
     email_verified: bool = False
@@ -232,7 +235,7 @@ class CompanyEnrichmentTool(BaseTool):
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
-                    f"https://company.clearbit.com/v2/companies/find",
+                    "https://company.clearbit.com/v2/companies/find",
                     params={"domain": domain},
                     headers={"Authorization": f"Bearer {self.api_key}"},
                     timeout=10.0,
@@ -495,7 +498,9 @@ class EmailFinderTool(BaseTool):
                 "candidates": candidates[:5],
                 "confidence": 0.6,
                 "verified": False,
-            } if best_candidate else None,
+            }
+            if best_candidate
+            else None,
         )
 
     def _generate_candidates(

@@ -6,26 +6,28 @@ PDPA-compliant - no personal data scraping without consent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
 import asyncio
-import httpx
 import re
-from urllib.parse import urljoin, urlparse
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
+from urllib.parse import urljoin, urlparse
+
+import httpx
 
 from .base import (
     BaseTool,
-    ToolAccess,
-    ToolResult,
-    ToolCategory,
     RateLimitConfig,
+    ToolAccess,
+    ToolCategory,
+    ToolResult,
 )
 
 
 @dataclass
 class ScrapedPage:
     """Result of page scraping."""
+
     url: str
     title: str | None
     meta_description: str | None
@@ -51,6 +53,7 @@ class ScrapedPage:
 @dataclass
 class LinkedInProfile:
     """LinkedIn company/profile data (public only)."""
+
     url: str
     name: str
     headline: str | None
@@ -78,6 +81,7 @@ class LinkedInProfile:
 @dataclass
 class NewsArticle:
     """Scraped news article."""
+
     url: str
     title: str
     source: str
@@ -277,10 +281,12 @@ class WebScraperTool(BaseTool):
         links = []
         for href, text in link_matches[:50]:
             if href.startswith(("http", "/")):
-                links.append({
-                    "href": urljoin(url, href),
-                    "text": text.strip()[:100],
-                })
+                links.append(
+                    {
+                        "href": urljoin(url, href),
+                        "text": text.strip()[:100],
+                    }
+                )
 
         # Extract text content (strip tags)
         text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
@@ -508,15 +514,17 @@ class NewsScraperTool(BaseTool):
                             except Exception:
                                 pass
 
-                        articles.append(NewsArticle(
-                            url=item.get("url", ""),
-                            title=item.get("title", ""),
-                            source=item.get("source", {}).get("name", "Unknown"),
-                            published_at=published,
-                            author=item.get("author"),
-                            content_preview=item.get("description", ""),
-                            sentiment=None,  # Would need NLP
-                        ))
+                        articles.append(
+                            NewsArticle(
+                                url=item.get("url", ""),
+                                title=item.get("title", ""),
+                                source=item.get("source", {}).get("name", "Unknown"),
+                                published_at=published,
+                                author=item.get("author"),
+                                content_preview=item.get("description", ""),
+                                sentiment=None,  # Would need NLP
+                            )
+                        )
                     return articles
 
             except Exception:

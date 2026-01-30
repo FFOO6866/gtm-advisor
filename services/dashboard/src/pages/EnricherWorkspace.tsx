@@ -5,27 +5,50 @@
  * Connected to company context for real data.
  */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { AgentWorkspace } from '../components/agents/AgentWorkspace';
-import { Card, Badge, Button, EmptyState, ErrorState } from '../components/common';
+import { Card, Badge, Button, EmptyState, ErrorState, useToast } from '../components/common';
 import { AGENTS } from '../types';
 import { useCompany, useCompanyId } from '../context/CompanyContext';
+import { useMutation } from '../hooks/useApi';
+import * as api from '../api/workspaces';
 
 export function EnricherWorkspace() {
   const companyId = useCompanyId();
+  const toast = useToast();
   const { company, isLoading: _isLoading, error, refreshCompany } = useCompany();
   const [activeTab, setActiveTab] = useState('profile');
   const [isRunning, setIsRunning] = useState(false);
 
   const agent = AGENTS.find((a) => a.id === 'company-enricher')!;
 
-  const handleRun = async () => {
+  // Mutation to trigger agent run with proper error handling
+  const triggerAgentMutation = useMutation(
+    () => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.triggerAgent(companyId, 'company-enricher');
+    },
+    {
+      onSuccess: async () => {
+        await refreshCompany();
+        setIsRunning(false);
+        toast.success('Company enrichment completed');
+      },
+      onError: (err) => {
+        setIsRunning(false);
+        toast.error('Failed to enrich company', err.message);
+      },
+    }
+  );
+
+  const handleRun = useCallback(async () => {
+    if (!companyId) {
+      toast.error('Please complete onboarding first', 'No company selected');
+      return;
+    }
     setIsRunning(true);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    // In production, this would trigger the company enricher agent
-    await refreshCompany();
-    setIsRunning(false);
-  };
+    await triggerAgentMutation.mutate(undefined);
+  }, [companyId, triggerAgentMutation, toast]);
 
   // Compute enriched data from company context
   const enrichment = company ? {
@@ -33,9 +56,9 @@ export function EnricherWorkspace() {
       name: company.name,
       website: company.website || 'Not provided',
       description: company.description || 'Not provided',
-      founded: company.founded_year || 'Unknown',
-      headquarters: company.headquarters || 'Singapore',
-      employeeCount: company.employee_count || 'Unknown',
+      founded: company.founded_year || 'Not available',
+      headquarters: company.headquarters || 'Not specified',
+      employeeCount: company.employee_count || 'Not available',
       funding: company.funding_stage || 'Not disclosed',
     },
     products: company.products || [],
@@ -46,7 +69,7 @@ export function EnricherWorkspace() {
     lastEnriched: company.last_enriched_at ? new Date(company.last_enriched_at) : null,
   } : null;
 
-  // Mock A2A discoveries based on company data
+  // Transform company data into A2A discovery entries for display
   const discoveries = company ? [
     ...(company.products.length > 0 ? [{
       id: '1',

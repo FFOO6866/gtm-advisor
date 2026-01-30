@@ -4,19 +4,42 @@
  * Fallback workspace for agents that don't have a custom implementation yet.
  */
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { AgentWorkspace } from '../components/agents/AgentWorkspace';
-import { Card, Badge, Button, EmptyState } from '../components/common';
+import { Card, Badge, Button, EmptyState, useToast } from '../components/common';
 import { AGENTS } from '../types';
+import { useCompanyId } from '../context/CompanyContext';
+import { useMutation } from '../hooks/useApi';
+import * as api from '../api/workspaces';
 
 export function GenericAgentWorkspace() {
   const { agentId } = useParams<{ agentId: string }>();
   const navigate = useNavigate();
+  const companyId = useCompanyId();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('overview');
   const [isRunning, setIsRunning] = useState(false);
 
   const agent = AGENTS.find((a) => a.id === agentId);
+
+  // Mutation to trigger agent run with proper error handling
+  const triggerAgentMutation = useMutation(
+    () => {
+      if (!companyId || !agentId) return Promise.reject(new Error('No company or agent selected'));
+      return api.triggerAgent(companyId, agentId);
+    },
+    {
+      onSuccess: () => {
+        setIsRunning(false);
+        toast.success(`${agent?.name || 'Agent'} completed successfully`);
+      },
+      onError: (err) => {
+        setIsRunning(false);
+        toast.error(`Failed to run ${agent?.name || 'agent'}`, err.message);
+      },
+    }
+  );
 
   if (!agent) {
     return (
@@ -33,11 +56,14 @@ export function GenericAgentWorkspace() {
     );
   }
 
-  const handleRun = async () => {
+  const handleRun = useCallback(async () => {
+    if (!companyId) {
+      toast.error('Please complete onboarding first', 'No company selected');
+      return;
+    }
     setIsRunning(true);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setIsRunning(false);
-  };
+    await triggerAgentMutation.mutate(undefined);
+  }, [companyId, triggerAgentMutation, toast]);
 
   const tabs = [
     { id: 'overview', label: 'Overview', icon: '📋' },

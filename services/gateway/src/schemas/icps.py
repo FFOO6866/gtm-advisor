@@ -1,7 +1,6 @@
 """ICP and Persona API schemas."""
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -10,14 +9,20 @@ from pydantic import BaseModel, Field
 class PersonaCreate(BaseModel):
     """Schema for creating a buyer persona."""
 
-    name: str = Field(..., min_length=1, max_length=100, description="Persona name (e.g., 'Marketing Michelle')")
+    name: str = Field(
+        ..., min_length=1, max_length=100, description="Persona name (e.g., 'Marketing Michelle')"
+    )
     role: str = Field(..., min_length=1, max_length=100, description="Job title/role")
-    avatar: Optional[str] = Field(default=None, max_length=10, description="Emoji or icon")
+    avatar: str | None = Field(default=None, max_length=10, description="Emoji or icon")
 
     # Demographics
-    age_range: Optional[str] = Field(default=None, max_length=20, description="Age range (e.g., '30-40')")
-    experience_years: Optional[str] = Field(default=None, max_length=20, description="Years of experience")
-    education: Optional[str] = Field(default=None, max_length=100, description="Education level")
+    age_range: str | None = Field(
+        default=None, max_length=20, description="Age range (e.g., '30-40')"
+    )
+    experience_years: str | None = Field(
+        default=None, max_length=20, description="Years of experience"
+    )
+    education: str | None = Field(default=None, max_length=100, description="Education level")
 
     # Psychographics
     goals: list[str] = Field(default_factory=list, description="Professional goals")
@@ -25,27 +30,31 @@ class PersonaCreate(BaseModel):
     objections: list[str] = Field(default_factory=list, description="Common objections")
 
     # Engagement
-    preferred_channels: list[str] = Field(default_factory=list, description="Preferred communication channels")
+    preferred_channels: list[str] = Field(
+        default_factory=list, description="Preferred communication channels"
+    )
     messaging_hooks: list[str] = Field(default_factory=list, description="Messaging that resonates")
-    content_preferences: list[str] = Field(default_factory=list, description="Preferred content types")
+    content_preferences: list[str] = Field(
+        default_factory=list, description="Preferred content types"
+    )
 
 
 class PersonaUpdate(BaseModel):
     """Schema for updating a persona."""
 
-    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    role: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    avatar: Optional[str] = Field(default=None, max_length=10)
-    age_range: Optional[str] = None
-    experience_years: Optional[str] = None
-    education: Optional[str] = None
-    goals: Optional[list[str]] = None
-    challenges: Optional[list[str]] = None
-    objections: Optional[list[str]] = None
-    preferred_channels: Optional[list[str]] = None
-    messaging_hooks: Optional[list[str]] = None
-    content_preferences: Optional[list[str]] = None
-    is_active: Optional[bool] = None
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    role: str | None = Field(default=None, min_length=1, max_length=100)
+    avatar: str | None = Field(default=None, max_length=10)
+    age_range: str | None = None
+    experience_years: str | None = None
+    education: str | None = None
+    goals: list[str] | None = None
+    challenges: list[str] | None = None
+    objections: list[str] | None = None
+    preferred_channels: list[str] | None = None
+    messaging_hooks: list[str] | None = None
+    content_preferences: list[str] | None = None
+    is_active: bool | None = None
 
 
 class PersonaResponse(BaseModel):
@@ -55,10 +64,10 @@ class PersonaResponse(BaseModel):
     icp_id: UUID
     name: str
     role: str
-    avatar: Optional[str]
-    age_range: Optional[str]
-    experience_years: Optional[str]
-    education: Optional[str]
+    avatar: str | None
+    age_range: str | None
+    experience_years: str | None
+    education: str | None
     goals: list[str]
     challenges: list[str]
     objections: list[str]
@@ -67,7 +76,7 @@ class PersonaResponse(BaseModel):
     content_preferences: list[str]
     is_active: bool
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: datetime | None
 
     class Config:
         from_attributes = True
@@ -76,16 +85,24 @@ class PersonaResponse(BaseModel):
 class ICPCreate(BaseModel):
     """Schema for creating an Ideal Customer Profile."""
 
-    name: str = Field(..., min_length=1, max_length=200, description="ICP name (e.g., 'Growth-Stage SaaS')")
-    description: Optional[str] = Field(default=None, description="Description of this ICP")
+    name: str = Field(
+        ..., min_length=1, max_length=200, description="ICP name (e.g., 'Growth-Stage SaaS')"
+    )
+    description: str | None = Field(default=None, description="Description of this ICP")
     fit_score: int = Field(default=0, ge=0, le=100, description="Fit score 0-100")
 
     # Characteristics
-    company_size: Optional[str] = Field(default=None, max_length=100, description="Target company size")
-    revenue_range: Optional[str] = Field(default=None, max_length=100, description="Revenue range")
-    industry: Optional[str] = Field(default=None, max_length=100, description="Target industry")
-    tech_stack: Optional[str] = Field(default=None, max_length=200, description="Tech stack preference")
-    buying_triggers: list[str] = Field(default_factory=list, description="Events that trigger buying")
+    company_size: str | None = Field(
+        default=None, max_length=100, description="Target company size"
+    )
+    revenue_range: str | None = Field(default=None, max_length=100, description="Revenue range")
+    industry: str | None = Field(default=None, max_length=100, description="Target industry")
+    tech_stack: str | None = Field(
+        default=None, max_length=200, description="Tech stack preference"
+    )
+    buying_triggers: list[str] = Field(
+        default_factory=list, description="Events that trigger buying"
+    )
 
     # Pain points
     pain_points: list[str] = Field(default_factory=list, description="Key pain points")
@@ -95,17 +112,17 @@ class ICPCreate(BaseModel):
 class ICPUpdate(BaseModel):
     """Schema for updating an ICP."""
 
-    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
-    description: Optional[str] = None
-    fit_score: Optional[int] = Field(default=None, ge=0, le=100)
-    company_size: Optional[str] = None
-    revenue_range: Optional[str] = None
-    industry: Optional[str] = None
-    tech_stack: Optional[str] = None
-    buying_triggers: Optional[list[str]] = None
-    pain_points: Optional[list[str]] = None
-    needs: Optional[list[str]] = None
-    is_active: Optional[bool] = None
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    fit_score: int | None = Field(default=None, ge=0, le=100)
+    company_size: str | None = None
+    revenue_range: str | None = None
+    industry: str | None = None
+    tech_stack: str | None = None
+    buying_triggers: list[str] | None = None
+    pain_points: list[str] | None = None
+    needs: list[str] | None = None
+    is_active: bool | None = None
 
 
 class ICPResponse(BaseModel):
@@ -114,19 +131,19 @@ class ICPResponse(BaseModel):
     id: UUID
     company_id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     fit_score: int
-    company_size: Optional[str]
-    revenue_range: Optional[str]
-    industry: Optional[str]
-    tech_stack: Optional[str]
+    company_size: str | None
+    revenue_range: str | None
+    industry: str | None
+    tech_stack: str | None
     buying_triggers: list[str]
     pain_points: list[str]
     needs: list[str]
     matching_companies_count: int
     is_active: bool
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: datetime | None
 
     # Nested personas
     personas: list[PersonaResponse] = Field(default_factory=list)

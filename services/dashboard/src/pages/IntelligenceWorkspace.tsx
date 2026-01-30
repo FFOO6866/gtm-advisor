@@ -5,7 +5,7 @@
  * Connected to real backend API.
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Filter, TrendingUp, AlertTriangle, Lightbulb, Archive } from 'lucide-react';
 import { AgentWorkspace } from '../components/agents/AgentWorkspace';
@@ -17,6 +17,7 @@ import {
   EmptyState,
   InsightListLoading,
   ErrorState,
+  useToast,
 } from '../components/common';
 import { AGENTS } from '../types';
 import { useCompanyId } from '../context/CompanyContext';
@@ -27,6 +28,7 @@ import type { MarketInsight } from '../api/workspaces';
 export function IntelligenceWorkspace() {
   const navigate = useNavigate();
   const companyId = useCompanyId();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('insights');
   const [isRunning, setIsRunning] = useState(false);
   const [filter, setFilter] = useState<string>('all');
@@ -36,20 +38,35 @@ export function IntelligenceWorkspace() {
 
   const agent = AGENTS.find((a) => a.id === 'market-intelligence')!;
 
-  // Mutations
+  // Mutations with proper error handling
   const markReadMutation = useMutation(
-    (insightId: string) => api.markInsightRead(companyId!, insightId),
+    (insightId: string) => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.markInsightRead(companyId, insightId);
+    },
     {
       invalidateKeys: ['insights'],
       onSuccess: () => refresh(),
+      onError: (err) => {
+        toast.error('Failed to mark insight as read', err.message);
+      },
     }
   );
 
   const archiveMutation = useMutation(
-    (insightId: string) => api.archiveInsight(companyId!, insightId),
+    (insightId: string) => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.archiveInsight(companyId, insightId);
+    },
     {
       invalidateKeys: ['insights'],
-      onSuccess: () => refresh(),
+      onSuccess: () => {
+        refresh();
+        toast.success('Insight archived');
+      },
+      onError: (err) => {
+        toast.error('Failed to archive insight', err.message);
+      },
     }
   );
 
@@ -68,16 +85,38 @@ export function IntelligenceWorkspace() {
     opportunity: filteredInsights.filter((i) => i.priority === 'opportunity'),
   }), [filteredInsights]);
 
-  const handleRun = async () => {
-    setIsRunning(true);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    refresh();
-    setIsRunning(false);
-  };
+  // Mutation to trigger agent run with proper error handling
+  const triggerAgentMutation = useMutation(
+    () => {
+      if (!companyId) return Promise.reject(new Error('No company selected'));
+      return api.triggerAgent(companyId, 'market-intelligence');
+    },
+    {
+      invalidateKeys: ['insights'],
+      onSuccess: () => {
+        refresh();
+        setIsRunning(false);
+        toast.success('Market intelligence gathering completed');
+      },
+      onError: (err) => {
+        setIsRunning(false);
+        toast.error('Failed to gather market intelligence', err.message);
+      },
+    }
+  );
 
-  const handleSendToAgent = (agentId: string) => {
+  const handleRun = useCallback(async () => {
+    if (!companyId) {
+      toast.error('Please complete onboarding first', 'No company selected');
+      return;
+    }
+    setIsRunning(true);
+    await triggerAgentMutation.mutate(undefined);
+  }, [companyId, triggerAgentMutation, toast]);
+
+  const handleSendToAgent = useCallback((agentId: string) => {
     navigate(`/agent/${agentId}`);
-  };
+  }, [navigate]);
 
   const tabs = [
     { id: 'insights', label: 'Insights', badge: unreadCount, icon: '📊' },
@@ -276,28 +315,32 @@ export function IntelligenceWorkspace() {
       {/* Competitors Tab */}
       {activeTab === 'competitors' && (
         <div className="grid grid-cols-2 gap-4">
-          {insightData?.competitor_summaries?.map((comp) => (
-            <CompetitorCard
-              key={comp.name}
-              name={comp.name}
-              status={comp.status}
-              lastActivity={comp.last_activity}
-              threatLevel={comp.threat_level}
-            />
-          )) || (
-            <>
+          {insightData?.competitor_summaries && insightData.competitor_summaries.length > 0 ? (
+            insightData.competitor_summaries.map((comp) => (
               <CompetitorCard
-                name="TechRival Inc."
-                status="Actively Monitoring"
-                lastActivity="No recent activity"
-                threatLevel="medium"
+                key={comp.name}
+                name={comp.name}
+                status={comp.status}
+                lastActivity={comp.last_activity}
+                threatLevel={comp.threat_level}
               />
-              <Card className="border-dashed border-2 border-white/20 flex items-center justify-center min-h-[150px]">
-                <Button variant="ghost" onClick={() => navigate('/agent/competitor-analyst')}>
-                  + Add Competitor
-                </Button>
-              </Card>
-            </>
+            ))
+          ) : (
+            <div className="col-span-2">
+              <EmptyState
+                icon="🔍"
+                title="No Competitors Tracked"
+                description="Add competitors to monitor their activities and market movements."
+                action={{ label: 'Add Competitor', onClick: () => navigate('/agent/competitor-analyst') }}
+              />
+            </div>
+          )}
+          {insightData?.competitor_summaries && insightData.competitor_summaries.length > 0 && (
+            <Card className="border-dashed border-2 border-white/20 flex items-center justify-center min-h-[150px]">
+              <Button variant="ghost" onClick={() => navigate('/agent/competitor-analyst')}>
+                + Add Competitor
+              </Button>
+            </Card>
           )}
         </div>
       )}

@@ -407,3 +407,42 @@ export function useUsageStats(userId: string | null) {
     { refreshInterval: 30000 }
   );
 }
+
+// Strategy
+export function useStrategyDashboard(companyId: string | null) {
+  return useApi(
+    companyId ? `strategy-dashboard-${companyId}` : null,
+    () => api.getStrategyDashboard(companyId!),
+    { revalidateOnFocus: true }
+  );
+}
+
+export function useStrategyRecommendations(companyId: string | null) {
+  return useApi(
+    companyId ? `strategy-recommendations-${companyId}` : null,
+    () => api.getStrategyRecommendations(companyId!),
+    { revalidateOnFocus: true }
+  );
+}
+
+// Agent Status - polls only when agent is running
+export function useAgentStatus(companyId: string | null, agentId: string | null) {
+  const result = useApi(
+    companyId && agentId ? `agent-status-${companyId}-${agentId}` : null,
+    () => api.getAgentStatus(companyId!, agentId!),
+    { revalidateOnFocus: true }
+  );
+
+  // Set up conditional polling only when agent is running
+  useEffect(() => {
+    if (result.data?.status !== 'running') return;
+
+    const interval = setInterval(() => {
+      result.refresh();
+    }, 3000); // Poll every 3 seconds when running
+
+    return () => clearInterval(interval);
+  }, [result.data?.status, result.refresh]);
+
+  return result;
+}

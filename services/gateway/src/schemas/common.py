@@ -1,6 +1,7 @@
 """Common schemas used across the API."""
 
-from typing import Generic, TypeVar, Optional
+from typing import Generic, TypeVar
+
 from pydantic import BaseModel, Field
 
 T = TypeVar("T")
@@ -20,8 +21,8 @@ class PaginationParams(BaseModel):
 class SearchParams(BaseModel):
     """Search and filter parameters."""
 
-    query: Optional[str] = Field(default=None, description="Search query")
-    sort_by: Optional[str] = Field(default=None, description="Field to sort by")
+    query: str | None = Field(default=None, description="Search query")
+    sort_by: str | None = Field(default=None, description="Field to sort by")
     sort_order: str = Field(default="desc", pattern="^(asc|desc)$", description="Sort order")
 
 

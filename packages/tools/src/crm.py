@@ -10,25 +10,27 @@ All operations are audited and respect access boundaries.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Literal
-from datetime import datetime
 import asyncio
-import httpx
 import os
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+import httpx
 
 from .base import (
     BaseTool,
-    ToolAccess,
-    ToolResult,
-    ToolCategory,
     RateLimitConfig,
+    ToolAccess,
+    ToolCategory,
+    ToolResult,
 )
 
 
 @dataclass
 class CRMContact:
     """Unified contact representation across CRMs."""
+
     id: str
     email: str
     first_name: str | None
@@ -66,6 +68,7 @@ class CRMContact:
 @dataclass
 class CRMCompany:
     """Unified company representation across CRMs."""
+
     id: str
     name: str
     domain: str | None
@@ -95,6 +98,7 @@ class CRMCompany:
 @dataclass
 class CRMDeal:
     """Unified deal/opportunity representation."""
+
     id: str
     name: str
     amount: float | None
@@ -201,7 +205,13 @@ class HubSpotTool(BaseTool):
             )
 
         # Check write access for write operations
-        write_ops = ["create_contact", "update_contact", "create_company", "create_deal", "update_deal"]
+        write_ops = [
+            "create_contact",
+            "update_contact",
+            "create_company",
+            "create_deal",
+            "update_deal",
+        ]
         if operation in write_ops and not self.has_access(ToolAccess.WRITE):
             return ToolResult(
                 success=False,
@@ -230,8 +240,7 @@ class HubSpotTool(BaseTool):
                 if response.status_code == 200:
                     data = response.json()
                     contacts = [
-                        self._parse_hubspot_contact(item)
-                        for item in data.get("results", [])
+                        self._parse_hubspot_contact(item) for item in data.get("results", [])
                     ]
                     return ToolResult(success=True, data=contacts)
                 else:
@@ -287,11 +296,13 @@ class HubSpotTool(BaseTool):
         # Build search filter
         filters = []
         if email:
-            filters.append({
-                "propertyName": "email",
-                "operator": "CONTAINS_TOKEN",
-                "value": email,
-            })
+            filters.append(
+                {
+                    "propertyName": "email",
+                    "operator": "CONTAINS_TOKEN",
+                    "value": email,
+                }
+            )
 
         async with httpx.AsyncClient() as client:
             try:
@@ -311,8 +322,7 @@ class HubSpotTool(BaseTool):
                 if response.status_code == 200:
                     data = response.json()
                     contacts = [
-                        self._parse_hubspot_contact(item)
-                        for item in data.get("results", [])
+                        self._parse_hubspot_contact(item) for item in data.get("results", [])
                     ]
                     return ToolResult(success=True, data=contacts)
                 else:
@@ -691,8 +701,7 @@ class PipedriveTool(BaseTool):
                 if response.status_code == 200:
                     data = response.json()
                     contacts = [
-                        self._parse_pipedrive_person(item)
-                        for item in data.get("data", []) or []
+                        self._parse_pipedrive_person(item) for item in data.get("data", []) or []
                     ]
                     return ToolResult(success=True, data=contacts)
 

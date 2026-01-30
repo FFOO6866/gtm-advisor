@@ -64,7 +64,7 @@ class NewsAPIClient:
             return False
         try:
             # Use a minimal query to check connectivity
-            result = await self.search("test", page_size=1)
+            await self.search("test", page_size=1)
             return True
         except Exception:
             return False
@@ -155,9 +155,7 @@ class NewsAPIClient:
                 author=article.get("author"),
                 source_name=article.get("source", {}).get("name", "Unknown"),
                 url=article["url"],
-                published_at=datetime.fromisoformat(
-                    article["publishedAt"].replace("Z", "+00:00")
-                ),
+                published_at=datetime.fromisoformat(article["publishedAt"].replace("Z", "+00:00")),
                 content=article.get("content"),
             )
             for article in data.get("articles", [])
@@ -207,9 +205,7 @@ class NewsAPIClient:
                 author=article.get("author"),
                 source_name=article.get("source", {}).get("name", "Unknown"),
                 url=article["url"],
-                published_at=datetime.fromisoformat(
-                    article["publishedAt"].replace("Z", "+00:00")
-                ),
+                published_at=datetime.fromisoformat(article["publishedAt"].replace("Z", "+00:00")),
                 content=article.get("content"),
             )
             for article in data.get("articles", [])

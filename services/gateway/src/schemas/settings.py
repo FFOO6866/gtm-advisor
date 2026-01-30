@@ -1,10 +1,9 @@
 """User settings API schemas."""
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 
 
 class NotificationPreferences(BaseModel):
@@ -35,19 +34,29 @@ class APIKeySettings(BaseModel):
     eodhd_configured: bool = Field(default=False)
 
     # These are write-only - never returned in responses
-    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key (write-only)")
-    perplexity_api_key: Optional[str] = Field(default=None, description="Perplexity API key (write-only)")
-    newsapi_api_key: Optional[str] = Field(default=None, description="NewsAPI key (write-only)")
-    eodhd_api_key: Optional[str] = Field(default=None, description="EODHD API key (write-only)")
+    openai_api_key: str | None = Field(default=None, description="OpenAI API key (write-only)")
+    perplexity_api_key: str | None = Field(
+        default=None, description="Perplexity API key (write-only)"
+    )
+    newsapi_api_key: str | None = Field(default=None, description="NewsAPI key (write-only)")
+    eodhd_api_key: str | None = Field(default=None, description="EODHD API key (write-only)")
 
 
 class AgentPreferences(BaseModel):
     """Agent execution preferences."""
 
-    auto_run_enrichment: bool = Field(default=True, description="Auto-run company enricher on new companies")
-    confidence_threshold: float = Field(default=0.7, ge=0, le=1, description="Minimum confidence for recommendations")
-    max_leads_per_run: int = Field(default=10, ge=1, le=50, description="Maximum leads to generate per run")
-    enable_a2a_sharing: bool = Field(default=True, description="Enable agent-to-agent discovery sharing")
+    auto_run_enrichment: bool = Field(
+        default=True, description="Auto-run company enricher on new companies"
+    )
+    confidence_threshold: float = Field(
+        default=0.7, ge=0, le=1, description="Minimum confidence for recommendations"
+    )
+    max_leads_per_run: int = Field(
+        default=10, ge=1, le=50, description="Maximum leads to generate per run"
+    )
+    enable_a2a_sharing: bool = Field(
+        default=True, description="Enable agent-to-agent discovery sharing"
+    )
     parallel_execution: bool = Field(default=True, description="Enable parallel agent execution")
 
 
@@ -62,12 +71,12 @@ class UserPreferences(BaseModel):
 class UserSettingsUpdate(BaseModel):
     """Schema for updating user settings."""
 
-    full_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
-    company_name: Optional[str] = Field(default=None, max_length=200)
-    preferences: Optional[UserPreferences] = None
+    full_name: str | None = Field(default=None, min_length=1, max_length=100)
+    company_name: str | None = Field(default=None, max_length=200)
+    preferences: UserPreferences | None = None
 
     # API keys (write-only, never returned)
-    api_keys: Optional[APIKeySettings] = None
+    api_keys: APIKeySettings | None = None
 
 
 class UserSettingsResponse(BaseModel):
@@ -76,7 +85,7 @@ class UserSettingsResponse(BaseModel):
     id: UUID
     email: str
     full_name: str
-    company_name: Optional[str]
+    company_name: str | None
 
     # Subscription
     tier: str
@@ -96,7 +105,7 @@ class UserSettingsResponse(BaseModel):
 
     # Timestamps
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: datetime | None
 
     class Config:
         from_attributes = True

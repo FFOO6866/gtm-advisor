@@ -15,6 +15,7 @@ from typing import Any
 @dataclass
 class MarketSizeResult:
     """Market sizing result."""
+
     tam: float  # Total Addressable Market
     sam: float  # Serviceable Addressable Market
     som: float  # Serviceable Obtainable Market
@@ -41,6 +42,7 @@ class MarketSizeResult:
 @dataclass
 class LeadValueResult:
     """Lead value estimation result."""
+
     expected_value: float  # Expected monetary value
     probability_to_close: float
     average_deal_size: float
@@ -62,6 +64,7 @@ class LeadValueResult:
 @dataclass
 class CampaignROIResult:
     """Campaign ROI projection."""
+
     projected_revenue: float
     projected_cost: float
     projected_roi: float  # (revenue - cost) / cost
@@ -154,18 +157,22 @@ class MarketSizeCalculator:
 
         tam_companies = int(tam_companies * geo_multiplier)
         tam = tam_companies * your_acv
-        assumptions.append(f"TAM: {tam_companies:,} companies × {self.currency} {your_acv:,.0f} ACV")
+        assumptions.append(
+            f"TAM: {tam_companies:,} companies × {self.currency} {your_acv:,.0f} ACV"
+        )
 
         # SAM: Companies matching your target criteria
         size_factor = self._size_coverage_factor(target_company_sizes)
         sam_companies = int(tam_companies * size_factor * serviceable_percentage)
         sam = sam_companies * your_acv
-        assumptions.append(f"SAM: {serviceable_percentage*100:.0f}% serviceable × {size_factor*100:.0f}% size fit")
+        assumptions.append(
+            f"SAM: {serviceable_percentage * 100:.0f}% serviceable × {size_factor * 100:.0f}% size fit"
+        )
 
         # SOM: Realistically obtainable
         som_companies = int(sam_companies * obtainable_percentage)
         som = som_companies * your_acv
-        assumptions.append(f"SOM: {obtainable_percentage*100:.0f}% obtainable market share")
+        assumptions.append(f"SOM: {obtainable_percentage * 100:.0f}% obtainable market share")
 
         # Confidence based on data quality
         confidence = 0.5  # Base confidence for estimates
@@ -260,13 +267,10 @@ class LeadValueCalculator:
         # Base conversion probability from lead score
         if lead_score >= 0.8:
             base_prob = self.conversion_rates["hot"]
-            quality = "hot"
         elif lead_score >= 0.5:
             base_prob = self.conversion_rates["warm"]
-            quality = "warm"
         else:
             base_prob = self.conversion_rates["cold"]
-            quality = "cold"
 
         factors["base_probability"] = base_prob
 
@@ -424,7 +428,9 @@ class CampaignROICalculator:
 
         # Revenue and ROI
         projected_revenue = conversions * your_acv
-        projected_roi = (projected_revenue - campaign_budget) / campaign_budget if campaign_budget > 0 else 0
+        projected_roi = (
+            (projected_revenue - campaign_budget) / campaign_budget if campaign_budget > 0 else 0
+        )
 
         # Break-even
         if your_acv > 0:
@@ -474,14 +480,17 @@ class CampaignROICalculator:
                 campaign_type=campaign.get("type", "email"),
             )
 
-            results.append({
-                "campaign_name": campaign.get("name", f"Campaign {i+1}"),
-                "budget": campaign.get("budget", 0),
-                "projected_roi": roi_result.projected_roi,
-                "projected_revenue": roi_result.projected_revenue,
-                "expected_conversions": roi_result.expected_conversions,
-                "efficiency_score": roi_result.projected_roi / (campaign.get("budget", 1) / 1000),
-            })
+            results.append(
+                {
+                    "campaign_name": campaign.get("name", f"Campaign {i + 1}"),
+                    "budget": campaign.get("budget", 0),
+                    "projected_roi": roi_result.projected_roi,
+                    "projected_revenue": roi_result.projected_revenue,
+                    "expected_conversions": roi_result.expected_conversions,
+                    "efficiency_score": roi_result.projected_roi
+                    / (campaign.get("budget", 1) / 1000),
+                }
+            )
 
         # Sort by ROI
         results.sort(key=lambda x: x["projected_roi"], reverse=True)

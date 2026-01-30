@@ -225,9 +225,7 @@ Focus on Singapore/APAC market context."""
         # If no seed companies, generate search queries for LLM
         if not seed_companies:
             industry_term = (
-                criteria.ideal_industries[0].value
-                if criteria.ideal_industries
-                else "technology"
+                criteria.ideal_industries[0].value if criteria.ideal_industries else "technology"
             )
             location = criteria.ideal_locations[0] if criteria.ideal_locations else "Singapore"
 
@@ -303,7 +301,7 @@ Focus on Singapore/APAC market context."""
 
             # Tag prospects with segments
             for segment in segmentation.get("clusters", []):
-                for i, member in enumerate(segment.get("members", [])):
+                for _, member in enumerate(segment.get("members", [])):
                     # Find matching prospect and tag
                     for p in prospects:
                         if p.company_name == member.get("company_name"):
@@ -330,7 +328,7 @@ Focus on Singapore/APAC market context."""
                 qualified_leads.append(lead)
 
         # Sort by overall score
-        qualified_leads.sort(key=lambda l: l.overall_score, reverse=True)
+        qualified_leads.sort(key=lambda lead: lead.overall_score, reverse=True)
 
         # Calculate total pipeline value
         total_value = sum(p.expected_value for p in prospects)
@@ -369,12 +367,21 @@ Focus on Singapore/APAC market context."""
         """Process a single company through the enrichment and scoring pipeline."""
         # Normalize input
         if isinstance(company_info, str):
-            company_data = {"name": company_info, "domain": f"{company_info.lower().replace(' ', '')}.com"}
+            company_data = {
+                "name": company_info,
+                "domain": f"{company_info.lower().replace(' ', '')}.com",
+            }
         else:
             company_data = company_info
 
         # Step 2: OPERATIONAL - Enrich company data
-        domain = company_data.get("domain") or company_data.get("website", "").replace("https://", "").replace("http://", "").split("/")[0]
+        domain = (
+            company_data.get("domain")
+            or company_data.get("website", "")
+            .replace("https://", "")
+            .replace("http://", "")
+            .split("/")[0]
+        )
 
         if domain:
             enrichment_result = await self.use_tool(
@@ -385,23 +392,27 @@ Focus on Singapore/APAC market context."""
 
             if enrichment_result.success and enrichment_result.data:
                 enriched = enrichment_result.data
-                company_data.update({
-                    "name": enriched.name or company_data.get("name"),
-                    "domain": enriched.domain,
-                    "industry": enriched.industry,
-                    "employee_count": enriched.employee_count or enriched.employee_range,
-                    "description": enriched.description,
-                    "location": enriched.location.get("city") if enriched.location else None,
-                    "funding_stage": enriched.funding_stage,
-                    "technologies": enriched.technologies,
-                })
+                company_data.update(
+                    {
+                        "name": enriched.name or company_data.get("name"),
+                        "domain": enriched.domain,
+                        "industry": enriched.industry,
+                        "employee_count": enriched.employee_count or enriched.employee_range,
+                        "description": enriched.description,
+                        "location": enriched.location.get("city") if enriched.location else None,
+                        "funding_stage": enriched.funding_stage,
+                        "technologies": enriched.technologies,
+                    }
+                )
 
         # Step 3: ANALYTICAL - Score ICP fit
         icp_result = await self.score_icp_fit(
             company_data,
             {
                 "industries": [i.value for i in criteria.ideal_industries],
-                "company_sizes": [criteria.ideal_company_size] if criteria.ideal_company_size else [],
+                "company_sizes": [criteria.ideal_company_size]
+                if criteria.ideal_company_size
+                else [],
                 "locations": criteria.ideal_locations,
             },
         )
@@ -411,7 +422,9 @@ Focus on Singapore/APAC market context."""
         lead_data = {
             **company_data,
             "budget_confirmed": company_data.get("funding_stage") is not None,
-            "authority_level": "decision_maker" if company_data.get("employee_count", 0) < 50 else "influencer",
+            "authority_level": "decision_maker"
+            if company_data.get("employee_count", 0) < 50
+            else "influencer",
             "need_score": 0.7 if criteria.pain_points else 0.5,
             "timeline_days": 60,  # Default assumption
         }
@@ -478,14 +491,19 @@ Focus on Singapore/APAC market context."""
                 # Extract company names from news using LLM
                 articles = news_result.data
                 if articles:
-                    article_text = "\n".join([
-                        f"- {a.title}: {a.content_preview}"
-                        for a in articles[:5]
-                    ])
+                    article_text = "\n".join(
+                        [f"- {a.title}: {a.content_preview}" for a in articles[:5]]
+                    )
 
                     messages = [
-                        {"role": "system", "content": "Extract company names from news articles. Return as JSON list."},
-                        {"role": "user", "content": f"Extract Singapore/APAC company names from:\n{article_text}\n\nReturn format: {{\"companies\": [{{\"name\": \"...\", \"domain\": \"...\"}}]}}"},
+                        {
+                            "role": "system",
+                            "content": "Extract company names from news articles. Return as JSON list.",
+                        },
+                        {
+                            "role": "user",
+                            "content": f'Extract Singapore/APAC company names from:\n{article_text}\n\nReturn format: {{"companies": [{{"name": "...", "domain": "..."}}]}}',
+                        },
                     ]
 
                     try:
@@ -506,9 +524,9 @@ Focus on Singapore/APAC market context."""
         # The caller should handle empty results appropriately
         if not companies:
             self._logger.warning(
-                "no_companies_found",
-                industries=industries,
-                search_queries_tried=len(industries) * 2,  # tech news + hiring signals per industry
+                "no_companies_found: queries=%s, search_queries_tried=%d",
+                queries,
+                len(queries),
             )
 
         return companies
@@ -537,7 +555,7 @@ Focus on Singapore/APAC market context."""
                 "content": f"""Based on these algorithmically-scored leads:
 {chr(10).join(lead_summaries)}
 
-Pain points we address: {', '.join(criteria.pain_points) or 'General business challenges'}
+Pain points we address: {", ".join(criteria.pain_points) or "General business challenges"}
 Our ACV: SGD {criteria.your_acv:,.0f}
 
 Write a 2-3 sentence outreach approach that:
@@ -558,13 +576,11 @@ Write a 2-3 sentence outreach approach that:
 
         # Top lead recommendation
         top = qualified_leads[0]
-        recommendations.append(
-            f"Prioritize {top.company_name} (score: {top.overall_score:.0%})"
-        )
+        recommendations.append(f"Prioritize {top.company_name} (score: {top.overall_score:.0%})")
 
         # Volume recommendation
         if len(qualified_leads) >= 5:
-            avg_score = sum(l.overall_score for l in qualified_leads) / len(qualified_leads)
+            avg_score = sum(lead.overall_score for lead in qualified_leads) / len(qualified_leads)
             recommendations.append(
                 f"Pipeline health: {len(qualified_leads)} qualified leads, avg score {avg_score:.0%}"
             )
@@ -592,7 +608,7 @@ Write a 2-3 sentence outreach approach that:
         if qualified:
             score += 0.15
             # High average score
-            avg = sum(l.overall_score for l in qualified) / len(qualified)
+            avg = sum(lead.overall_score for lead in qualified) / len(qualified)
             if avg >= 0.7:
                 score += 0.1
 
@@ -651,9 +667,7 @@ Write a 2-3 sentence outreach approach that:
         if result.qualified_leads:
             score += 0.2
             # Quality: leads should have reasons
-            with_reasons = sum(
-                1 for p in result.prospects if p.fit_reasons
-            )
+            with_reasons = sum(1 for p in result.prospects if p.fit_reasons)
             if with_reasons >= 2:
                 score += 0.15
 

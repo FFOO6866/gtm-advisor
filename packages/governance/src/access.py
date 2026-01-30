@@ -18,6 +18,7 @@ from typing import Any
 
 class Permission(Enum):
     """Fine-grained permissions."""
+
     # Tool permissions
     TOOL_READ = "tool:read"
     TOOL_WRITE = "tool:write"
@@ -62,6 +63,7 @@ class Permission(Enum):
 @dataclass
 class Role:
     """A role bundles permissions."""
+
     id: str
     name: str
     description: str
@@ -147,6 +149,7 @@ ROLE_ADMIN = Role(
 @dataclass
 class AgentPermissions:
     """Permission configuration for an agent."""
+
     agent_id: str
     agent_name: str
     roles: list[Role] = field(default_factory=list)
@@ -266,11 +269,13 @@ class AccessControl:
             result = config.has_permission(permission)
 
         if log:
-            self._access_log.append({
-                "agent_id": agent_id,
-                "permission": permission.value,
-                "granted": result,
-            })
+            self._access_log.append(
+                {
+                    "agent_id": agent_id,
+                    "permission": permission.value,
+                    "granted": result,
+                }
+            )
 
         return result
 

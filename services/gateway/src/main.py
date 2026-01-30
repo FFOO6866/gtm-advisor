@@ -24,21 +24,30 @@ if _env_file.exists():
 else:
     # Try current working directory
     load_dotenv()
-from typing import Any
 
-import structlog
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+# These imports must come AFTER load_dotenv() to ensure env vars are available
+from typing import Any  # noqa: E402
 
-from packages.core.src.config import get_config
+import structlog  # noqa: E402
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from slowapi import _rate_limit_exceeded_handler  # noqa: E402
+from slowapi.errors import RateLimitExceeded  # noqa: E402
 
-from .routers import (
+from packages.core.src.config import get_config  # noqa: E402
+from packages.database.src.session import close_db, init_db  # noqa: E402
+
+from .cache import close_cache, init_cache  # noqa: E402
+from .errors import register_error_handlers  # noqa: E402
+from .middleware.auth import AuthMiddleware  # noqa: E402
+from .middleware.rate_limit import limiter  # noqa: E402
+from .routers import (  # noqa: E402
     agents,
     analysis,
     auth,
     campaigns,
     companies,
+    company_agents,
     competitors,
     exports,
     health,
@@ -46,6 +55,7 @@ from .routers import (
     insights,
     leads,
     settings,
+    strategy,
     websocket,
 )
 
@@ -53,7 +63,7 @@ logger = structlog.get_logger()
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """Application lifespan handler."""
     # Startup
     logger.info("gtm_advisor_starting", version="0.1.0")
@@ -63,9 +73,39 @@ async def lifespan(app: FastAPI):
         environment=config.environment.value,
         governance_enabled=config.enable_governance,
     )
+
+    # Validate production requirements
+    production_errors = config.validate_production_requirements()
+    if production_errors:
+        for error in production_errors:
+            logger.error("production_config_error", error=error)
+        if config.is_production:
+            raise RuntimeError(f"Production configuration errors: {'; '.join(production_errors)}")
+
+    # Initialize database tables
+    try:
+        await init_db()
+        logger.info("database_initialized")
+    except Exception as e:
+        logger.error("database_initialization_failed", error=str(e))
+        raise
+
+    # Initialize cache (Redis or in-memory)
+    try:
+        await init_cache()
+        logger.info("cache_initialized")
+    except Exception as e:
+        logger.error("cache_initialization_failed", error=str(e))
+        raise
+
     yield
+
     # Shutdown
     logger.info("gtm_advisor_stopping")
+    await close_cache()
+    logger.info("cache_closed")
+    await close_db()
+    logger.info("database_connections_closed")
 
 
 app = FastAPI(
@@ -80,6 +120,10 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# Rate limiting
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # CORS configuration
 config = get_config()
 app.add_middleware(
@@ -90,25 +134,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Authentication middleware (sets request.state.user)
+app.add_middleware(AuthMiddleware)
 
-# Global exception handler
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Handle all unhandled exceptions."""
-    logger.error(
-        "unhandled_exception",
-        path=request.url.path,
-        method=request.method,
-        error=str(exc),
-    )
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": "InternalServerError",
-            "message": "An unexpected error occurred",
-        },
-    )
-
+# Register all error handlers for consistent error responses
+register_error_handlers(app)
 
 # Include routers
 app.include_router(health.router, tags=["Health"])
@@ -124,6 +154,8 @@ app.include_router(icps.router, prefix="/api/v1/companies", tags=["ICPs & Person
 app.include_router(leads.router, prefix="/api/v1/companies", tags=["Leads"])
 app.include_router(campaigns.router, prefix="/api/v1/companies", tags=["Campaigns"])
 app.include_router(insights.router, prefix="/api/v1/companies", tags=["Market Insights"])
+app.include_router(strategy.router, prefix="/api/v1/companies", tags=["Strategy"])
+app.include_router(company_agents.router, prefix="/api/v1/companies", tags=["Company Agents"])
 app.include_router(exports.router, prefix="/api/v1/exports", tags=["Exports"])
 app.include_router(settings.router, prefix="/api/v1/settings", tags=["Settings"])
 

@@ -16,12 +16,12 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
-from packages.core.src.types import IndustryVertical
 from packages.core.src.agent_bus import (
     AgentBus,
     DiscoveryType,
     get_agent_bus,
 )
+from packages.core.src.types import IndustryVertical
 from packages.llm.src import get_llm_manager
 
 
@@ -239,8 +239,8 @@ Be specific. "AI-powered analytics platform" is better than "technology company"
                 "content": f"""Research and extract information about this company:
 
 Company Name: {company_name}
-Industry Hint: {context.get('industry', 'Not specified')}
-Description Hint: {context.get('description', 'Not specified')}
+Industry Hint: {context.get("industry", "Not specified")}
+Description Hint: {context.get("description", "Not specified")}
 
 Without a website, use the company name and hints to:
 1. Try to identify what they do
@@ -330,8 +330,8 @@ Note: Without a website, confidence should be lower (0.4-0.6).""",
 {perplexity_response}
 
 Additional context from user:
-- Industry: {context.get('industry', 'Not specified')}
-- Description: {context.get('description', 'Not specified')}
+- Industry: {context.get("industry", "Not specified")}
+- Description: {context.get("description", "Not specified")}
 
 Extract and structure the company information.
 Confidence should reflect how much concrete data was found.""",
@@ -370,8 +370,8 @@ Confidence should reflect how much concrete data was found.""",
 
 Company Name: {company_name}
 Website: {website}
-Industry: {context.get('industry', 'Not specified')}
-User's Description: {context.get('description', 'Not specified')}
+Industry: {context.get("industry", "Not specified")}
+User's Description: {context.get("description", "Not specified")}
 
 Based on the company name, website domain, and provided description,
 extract as much structured information as possible.
@@ -431,7 +431,9 @@ Note: This is inference-based analysis, so confidence should be moderate (0.5-0.
 
         return min(score, 1.0)
 
-    async def _act(self, result: CompanyEnrichmentOutput, confidence: float) -> CompanyEnrichmentOutput:
+    async def _act(
+        self, result: CompanyEnrichmentOutput, confidence: float
+    ) -> CompanyEnrichmentOutput:
         """Publish discoveries to the AgentBus."""
         result.confidence = confidence
 

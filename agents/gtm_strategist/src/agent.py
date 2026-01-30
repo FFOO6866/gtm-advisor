@@ -15,9 +15,7 @@ from pydantic import BaseModel, Field
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
 from packages.core.src.types import (
-    CompanyProfile,
     CompanyStage,
-    GTMAnalysisResult,
     IndustryVertical,
 )
 
@@ -308,9 +306,7 @@ Output a complete GTMStrategyOutput with:
             score += 0.15
             # Quality check - recommendations should be specific
             specific_recs = sum(
-                1
-                for rec in result.initial_recommendations
-                if len(rec.next_steps) > 0
+                1 for rec in result.initial_recommendations if len(rec.next_steps) > 0
             )
             if specific_recs >= 2:
                 score += 0.1
@@ -371,9 +367,7 @@ Focus on understanding:
         Returns:
             Structured requirements
         """
-        conversation_text = "\n".join(
-            f"{msg['role']}: {msg['content']}" for msg in conversation
-        )
+        conversation_text = "\n".join(f"{msg['role']}: {msg['content']}" for msg in conversation)
 
         messages = [
             {"role": "system", "content": self.get_system_prompt()},

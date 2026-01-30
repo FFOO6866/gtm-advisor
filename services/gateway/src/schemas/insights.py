@@ -1,7 +1,6 @@
 """Market Insight API schemas."""
 
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -15,19 +14,19 @@ class MarketInsightResponse(BaseModel):
 
     # Insight details
     insight_type: str  # trend, opportunity, threat, news
-    category: Optional[str]  # market, competitor, technology, regulation
+    category: str | None  # market, competitor, technology, regulation
     title: str
-    summary: Optional[str]
-    full_content: Optional[str]
+    summary: str | None
+    full_content: str | None
 
     # Impact assessment
-    impact_level: Optional[str]  # low, medium, high
+    impact_level: str | None  # low, medium, high
     relevance_score: float
 
     # Source
-    source_name: Optional[str]
-    source_url: Optional[str]
-    published_at: Optional[datetime]
+    source_name: str | None
+    source_url: str | None
+    published_at: datetime | None
 
     # Actionability
     recommended_actions: list[str]
@@ -39,7 +38,7 @@ class MarketInsightResponse(BaseModel):
 
     # Timestamps
     created_at: datetime
-    expires_at: Optional[datetime]
+    expires_at: datetime | None
 
     class Config:
         from_attributes = True

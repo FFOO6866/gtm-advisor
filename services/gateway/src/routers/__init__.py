@@ -6,6 +6,7 @@ from . import (
     auth,
     campaigns,
     companies,
+    company_agents,
     competitors,
     exports,
     health,
@@ -13,6 +14,7 @@ from . import (
     insights,
     leads,
     settings,
+    strategy,
     websocket,
 )
 
@@ -22,12 +24,14 @@ __all__ = [
     "auth",
     "campaigns",
     "companies",
+    "company_agents",
     "competitors",
     "exports",
     "icps",
     "insights",
     "leads",
     "settings",
+    "strategy",
     "analysis",
     "websocket",
 ]

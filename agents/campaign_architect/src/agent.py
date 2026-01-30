@@ -68,7 +68,9 @@ class CampaignArchitectAgent(BaseGTMAgent[CampaignPlanOutput]):
             max_iterations=2,
             model="gpt-4o",
             capabilities=[
-                AgentCapability(name="messaging-development", description="Create messaging frameworks"),
+                AgentCapability(
+                    name="messaging-development", description="Create messaging frameworks"
+                ),
                 AgentCapability(name="content-creation", description="Generate campaign content"),
                 AgentCapability(name="channel-strategy", description="Plan multi-channel approach"),
             ],
@@ -119,11 +121,11 @@ Templates should be ready to personalize and send."""
                 "role": "user",
                 "content": f"""Create a complete campaign plan:
 
-Company: {plan.get('company_info', 'Not specified')}
-Value Proposition: {plan.get('value_proposition', 'Not specified')}
-Target Personas: {plan.get('personas', [])}
-Campaign Goal: {plan.get('campaign_goal')}
-Target Leads: {len(plan.get('leads', []))} leads identified
+Company: {plan.get("company_info", "Not specified")}
+Value Proposition: {plan.get("value_proposition", "Not specified")}
+Target Personas: {plan.get("personas", [])}
+Campaign Goal: {plan.get("campaign_goal")}
+Target Leads: {len(plan.get("leads", []))} leads identified
 
 Create:
 1. Campaign brief with objectives and targets
@@ -153,10 +155,7 @@ Make all content COMPLETE and READY TO USE - not templates with placeholders."""
         if result.content_pieces:
             score += 0.2
             # Check content quality
-            complete_content = sum(
-                1 for c in result.content_pieces
-                if len(c.content) > 100
-            )
+            complete_content = sum(1 for c in result.content_pieces if len(c.content) > 100)
             if complete_content >= 3:
                 score += 0.15
         if result.channel_strategy:
