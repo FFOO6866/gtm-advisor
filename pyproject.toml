@@ -46,6 +46,14 @@ newsapi = [
 eodhd = [
     "eodhd>=1.0",
 ]
+crm = [
+    "hubspot-api-client>=8.0",
+    "simple-salesforce>=1.12",
+    "msal>=1.24",
+]
+email = [
+    "sendgrid>=6.10",
+]
 api = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
@@ -72,7 +80,7 @@ vectors = [
     "sentence-transformers>=2.7",
 ]
 all = [
-    "gtm-advisor[mcp,llm,perplexity,newsapi,eodhd,api,redis,postgres,observability,vectors]",
+    "gtm-advisor[mcp,llm,perplexity,newsapi,eodhd,crm,email,api,redis,postgres,observability,vectors]",
 ]
 dev = [
     "pytest>=8.0",
@@ -160,7 +168,7 @@ warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["newsapi.*", "eodhd.*"]
+module = ["newsapi.*", "eodhd.*", "hubspot.*", "simple_salesforce.*", "msal.*", "sendgrid.*"]
 ignore_missing_imports = true
 
 [dependency-groups]

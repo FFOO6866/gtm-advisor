@@ -29,6 +29,14 @@ from packages.mcp.src.servers.acra import ACRAMCPServer
 from packages.mcp.src.servers.eodhd import EODHDMCPServer
 from packages.mcp.src.servers.news import NewsAggregatorMCPServer
 from packages.mcp.src.servers.web_scraper import WebScraperMCPServer
+# CRM integrations
+from packages.mcp.src.servers.hubspot import HubSpotMCPServer
+from packages.mcp.src.servers.salesforce import SalesforceMCPServer
+from packages.mcp.src.servers.dynamics import DynamicsMCPServer
+from packages.mcp.src.servers.sugarcrm import SugarCRMMCPServer
+# Email services
+from packages.mcp.src.servers.mailgun import MailgunMCPServer
+from packages.mcp.src.servers.sendgrid import SendGridMCPServer
 from packages.mcp.src.types import (
     EvidencedFact,
     FactType,
@@ -131,6 +139,58 @@ class AgentMCPClient:
             self._logger.info("registered_server", server="web_scraper")
         except Exception as e:
             self._logger.warning("server_registration_failed", server="web_scraper", error=str(e))
+
+        # === CRM Integrations ===
+
+        # HubSpot CRM
+        if os.getenv("HUBSPOT_API_KEY"):
+            try:
+                self._registry.register(HubSpotMCPServer.from_env())
+                self._logger.info("registered_server", server="hubspot")
+            except Exception as e:
+                self._logger.warning("server_registration_failed", server="hubspot", error=str(e))
+
+        # Salesforce CRM
+        if os.getenv("SALESFORCE_CLIENT_ID"):
+            try:
+                self._registry.register(SalesforceMCPServer.from_env())
+                self._logger.info("registered_server", server="salesforce")
+            except Exception as e:
+                self._logger.warning("server_registration_failed", server="salesforce", error=str(e))
+
+        # Microsoft Dynamics 365
+        if os.getenv("DYNAMICS_CLIENT_ID"):
+            try:
+                self._registry.register(DynamicsMCPServer.from_env())
+                self._logger.info("registered_server", server="dynamics")
+            except Exception as e:
+                self._logger.warning("server_registration_failed", server="dynamics", error=str(e))
+
+        # SugarCRM
+        if os.getenv("SUGARCRM_URL"):
+            try:
+                self._registry.register(SugarCRMMCPServer.from_env())
+                self._logger.info("registered_server", server="sugarcrm")
+            except Exception as e:
+                self._logger.warning("server_registration_failed", server="sugarcrm", error=str(e))
+
+        # === Email Services ===
+
+        # Mailgun
+        if os.getenv("MAILGUN_API_KEY") and os.getenv("MAILGUN_DOMAIN"):
+            try:
+                self._registry.register(MailgunMCPServer.from_env())
+                self._logger.info("registered_server", server="mailgun")
+            except Exception as e:
+                self._logger.warning("server_registration_failed", server="mailgun", error=str(e))
+
+        # SendGrid
+        if os.getenv("SENDGRID_API_KEY"):
+            try:
+                self._registry.register(SendGridMCPServer.from_env())
+                self._logger.info("registered_server", server="sendgrid")
+            except Exception as e:
+                self._logger.warning("server_registration_failed", server="sendgrid", error=str(e))
 
     @property
     def registry(self) -> MCPRegistry:
@@ -391,3 +451,186 @@ class AgentMCPClient:
             lines.append(f"   Confidence: {fact.confidence:.0%}")
 
         return "\n".join(lines)
+
+    # === CRM Integration Methods ===
+
+    async def sync_lead_to_crm(
+        self,
+        lead_data: dict[str, Any],
+        crm_type: str = "hubspot",
+    ) -> str | None:
+        """Push a qualified lead to CRM.
+
+        Args:
+            lead_data: Lead data (email, name, company, etc.)
+            crm_type: CRM to sync to ("hubspot", "salesforce", "dynamics", "sugarcrm")
+
+        Returns:
+            CRM record ID if successful, None otherwise
+        """
+        server_names = {
+            "hubspot": "HubSpot CRM",
+            "salesforce": "Salesforce CRM",
+            "dynamics": "Microsoft Dynamics 365",
+            "sugarcrm": "SugarCRM",
+        }
+
+        server_name = server_names.get(crm_type)
+        if not server_name:
+            self._logger.warning("unknown_crm_type", crm_type=crm_type)
+            return None
+
+        server = self._registry.get_server(server_name)
+        if not server:
+            self._logger.warning("crm_server_not_configured", crm_type=crm_type)
+            return None
+
+        try:
+            if crm_type == "hubspot":
+                return await server.create_contact(lead_data)
+            elif crm_type == "salesforce":
+                return await server.create_lead(lead_data)
+            elif crm_type == "dynamics":
+                return await server.create_lead(lead_data)
+            elif crm_type == "sugarcrm":
+                return await server.create_lead(lead_data)
+        except Exception as e:
+            self._logger.error("crm_sync_failed", crm_type=crm_type, error=str(e))
+            return None
+
+        return None
+
+    async def get_crm_company(
+        self,
+        company_name: str,
+        domain: str | None = None,
+    ) -> list[EvidencedFact]:
+        """Get company info from connected CRMs.
+
+        Args:
+            company_name: Company name to search
+            domain: Optional company domain
+
+        Returns:
+            Facts from CRM about the company
+        """
+        facts: list[EvidencedFact] = []
+        query = domain or company_name
+
+        crm_servers = [
+            "HubSpot CRM",
+            "Salesforce CRM",
+            "Microsoft Dynamics 365",
+            "SugarCRM",
+        ]
+
+        for server_name in crm_servers:
+            server = self._registry.get_server(server_name)
+            if server:
+                try:
+                    result = await server.search(query, search_type="company", limit=5)
+                    facts.extend(result.facts)
+                except Exception as e:
+                    self._logger.warning("crm_search_failed", server=server_name, error=str(e))
+
+        return facts
+
+    # === Email Integration Methods ===
+
+    async def send_outreach_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        template_id: str | None = None,
+        template_data: dict[str, Any] | None = None,
+        provider: str = "mailgun",
+        tags: list[str] | None = None,
+    ) -> str | None:
+        """Send email via configured provider.
+
+        Args:
+            to: Recipient email
+            subject: Email subject
+            body: Plain text body
+            template_id: Optional template ID
+            template_data: Optional template variables
+            provider: Email provider ("mailgun" or "sendgrid")
+            tags: Optional tags for tracking
+
+        Returns:
+            Message ID if successful, None otherwise
+        """
+        server_names = {
+            "mailgun": "Mailgun Email",
+            "sendgrid": "SendGrid Email",
+        }
+
+        server_name = server_names.get(provider)
+        if not server_name:
+            self._logger.warning("unknown_email_provider", provider=provider)
+            return None
+
+        server = self._registry.get_server(server_name)
+        if not server:
+            self._logger.warning("email_server_not_configured", provider=provider)
+            return None
+
+        try:
+            if template_id and template_data:
+                return await server.send_template(
+                    to=to,
+                    template_id=template_id,
+                    variables=template_data if provider == "mailgun" else template_data,
+                    tags=tags,
+                )
+            else:
+                return await server.send_email(
+                    to=to,
+                    subject=subject,
+                    body=body,
+                    tags=tags,
+                )
+        except Exception as e:
+            self._logger.error("email_send_failed", provider=provider, error=str(e))
+            return None
+
+    async def get_email_engagement(
+        self,
+        message_id: str | None = None,
+        recipient: str | None = None,
+        provider: str = "mailgun",
+    ) -> list[EvidencedFact]:
+        """Get email engagement signals.
+
+        Args:
+            message_id: Optional message ID to filter
+            recipient: Optional recipient email to filter
+            provider: Email provider ("mailgun" or "sendgrid")
+
+        Returns:
+            Facts about email engagement (opens, clicks, etc.)
+        """
+        server_names = {
+            "mailgun": "Mailgun Email",
+            "sendgrid": "SendGrid Email",
+        }
+
+        server_name = server_names.get(provider)
+        if not server_name:
+            return []
+
+        server = self._registry.get_server(server_name)
+        if not server:
+            return []
+
+        try:
+            query = message_id or recipient or ""
+            if not query:
+                return []
+
+            result = await server.search(query, limit=50)
+            return result.facts
+        except Exception as e:
+            self._logger.warning("email_engagement_fetch_failed", error=str(e))
+            return []

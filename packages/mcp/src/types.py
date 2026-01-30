@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 class SourceType(str, Enum):
     """Source types for evidenced facts - matches database enum."""
 
+    # Data providers
     ACRA = "acra"
     EODHD = "eodhd"
     NEWSAPI = "newsapi"
@@ -30,10 +31,21 @@ class SourceType(str, Enum):
     SEC_FILING = "sec_filing"
     USER_INPUT = "user_input"
 
+    # CRM platforms
+    HUBSPOT = "hubspot"
+    SALESFORCE = "salesforce"
+    DYNAMICS = "dynamics"
+    SUGARCRM = "sugarcrm"
+
+    # Email services
+    MAILGUN = "mailgun"
+    SENDGRID = "sendgrid"
+
 
 class FactType(str, Enum):
     """Types of evidenced facts - matches database enum."""
 
+    # Company and market facts
     COMPANY_INFO = "company_info"
     FUNDING = "funding"
     EXECUTIVE = "executive"
@@ -48,6 +60,18 @@ class FactType(str, Enum):
     REGULATION = "regulation"
     ACQUISITION = "acquisition"
     SENTIMENT = "sentiment"
+
+    # CRM facts
+    CONTACT_INFO = "contact_info"
+    CRM_ACTIVITY = "crm_activity"
+    DEAL_INFO = "deal_info"
+
+    # Email engagement facts
+    EMAIL_SENT = "email_sent"
+    EMAIL_OPENED = "email_opened"
+    EMAIL_CLICKED = "email_clicked"
+    EMAIL_BOUNCED = "email_bounced"
+    EMAIL_REPLIED = "email_replied"
 
 
 class EntityType(str, Enum):
