@@ -130,12 +130,11 @@ SSIC_INDUSTRY_MAP = {
 class ACRAMCPServer(APIBasedMCPServer):
     """MCP Server for ACRA Singapore company data.
 
-    Uses the data.gov.sg API to query official company registration data.
+    Uses the data.gov.sg CKAN API to query official company registration data.
     This provides high-confidence (0.95-0.99) facts from the government source.
 
-    The API supports two modes:
-    1. Dataset search - Search across ACRA datasets
-    2. Direct resource query - Query specific dataset resources
+    Data source: https://data.gov.sg/datasets/d_3f960c10fed6145404ca7b821f263b87/view
+    API documentation: https://data.gov.sg/api/action/datastore_search
 
     Example:
         server = ACRAMCPServer.create()
@@ -144,15 +143,12 @@ class ACRAMCPServer(APIBasedMCPServer):
             print(f"{fact.claim} (confidence: {fact.confidence})")
     """
 
-    # data.gov.sg API endpoints
-    # See: https://guide.data.gov.sg/developer-guide/api-guide
-    BASE_URL = "https://api-production.data.gov.sg/v2/public/api"
+    # data.gov.sg CKAN API endpoint
+    BASE_URL = "https://data.gov.sg/api/action"
 
-    # Known ACRA-related dataset IDs on data.gov.sg
-    # These are discovered by searching the data.gov.sg catalog
-    ACRA_DATASET_IDS = [
-        "d_6ae244ecbbcda21e5fd32a9e6b7c3dde",  # Entities registered with ACRA
-    ]
+    # ACRA dataset resource ID (Entities Registered with ACRA)
+    # Source: https://data.gov.sg/datasets/d_3f960c10fed6145404ca7b821f263b87/view
+    ACRA_RESOURCE_ID = "d_3f960c10fed6145404ca7b821f263b87"
 
     def __init__(self, config: MCPServerConfig) -> None:
         """Initialize ACRA server.
@@ -168,7 +164,6 @@ class ACRAMCPServer(APIBasedMCPServer):
                 "User-Agent": "GTM-Advisor/1.0 (Singapore SME GTM Platform)",
             },
         )
-        self._discovered_resources: dict[str, str] = {}
 
     @classmethod
     def create(cls) -> ACRAMCPServer:
@@ -191,53 +186,28 @@ class ACRAMCPServer(APIBasedMCPServer):
         return True
 
     async def _health_check_impl(self) -> bool:
-        """Check if data.gov.sg API is accessible."""
+        """Check if data.gov.sg CKAN API is accessible."""
         try:
-            # Try to list datasets to verify API is working
+            # Test with a minimal query to verify API is working
             response = await self._client.get(
-                f"{self.BASE_URL}/datasets",
-                params={"page": 1, "limit": 1},
+                f"{self.BASE_URL}/datastore_search",
+                params={
+                    "resource_id": self.ACRA_RESOURCE_ID,
+                    "limit": 1,
+                },
             )
-            return response.status_code == 200
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("success", False)
+            return False
         except Exception as e:
             self._logger.warning("health_check_failed", error=str(e))
             return False
 
-    async def _discover_resources(self) -> None:
-        """Discover available ACRA resources from data.gov.sg."""
-        if self._discovered_resources:
-            return  # Already discovered
-
-        for dataset_id in self.ACRA_DATASET_IDS:
-            try:
-                response = await self._client.get(
-                    f"{self.BASE_URL}/datasets/{dataset_id}/metadata",
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    dataset_info = data.get("data", {})
-
-                    # Store dataset info
-                    self._discovered_resources[dataset_id] = {
-                        "name": dataset_info.get("name", "ACRA Dataset"),
-                        "description": dataset_info.get("description", ""),
-                        "last_updated": dataset_info.get("lastUpdatedAt", ""),
-                    }
-
-                    self._logger.info(
-                        "discovered_acra_resource",
-                        dataset_id=dataset_id,
-                        name=dataset_info.get("name"),
-                    )
-            except Exception as e:
-                self._logger.warning(
-                    "resource_discovery_failed",
-                    dataset_id=dataset_id,
-                    error=str(e),
-                )
-
     async def search(self, query: str, **kwargs: Any) -> MCPQueryResult:
         """Search ACRA for companies matching query.
+
+        Uses the data.gov.sg CKAN datastore_search API with full-text search.
 
         Args:
             query: Company name or UEN to search
@@ -258,35 +228,53 @@ class ACRAMCPServer(APIBasedMCPServer):
             self._logger.debug("cache_hit", query=query)
             return cached
 
-        # Discover resources if not done yet
-        await self._discover_resources()
-
         facts = []
         entities = []
         errors = []
         total_results = 0
 
-        # Try each known ACRA dataset
-        for dataset_id in self.ACRA_DATASET_IDS:
-            try:
-                result = await self._query_dataset(dataset_id, query, limit, offset)
-                facts.extend(result.get("facts", []))
-                entities.extend(result.get("entities", []))
-                total_results += result.get("total", 0)
-            except Exception as e:
-                error_msg = f"Dataset {dataset_id} query failed: {str(e)}"
-                errors.append(error_msg)
-                self._logger.warning("dataset_query_failed", dataset_id=dataset_id, error=str(e))
+        try:
+            # Use CKAN datastore_search API with full-text search
+            response = await self._client.get(
+                f"{self.BASE_URL}/datastore_search",
+                params={
+                    "resource_id": self.ACRA_RESOURCE_ID,
+                    "q": query,  # Full-text search
+                    "limit": limit,
+                    "offset": offset,
+                },
+            )
 
-        # If no results from datasets, try search API
-        if not facts:
-            try:
-                search_result = await self._search_datasets(query, limit)
-                facts.extend(search_result.get("facts", []))
-                entities.extend(search_result.get("entities", []))
-                total_results += search_result.get("total", 0)
-            except Exception as e:
-                errors.append(f"Search API failed: {str(e)}")
+            if response.status_code != 200:
+                raise Exception(f"API returned status {response.status_code}")
+
+            data = response.json()
+
+            if not data.get("success"):
+                error_msg = data.get("error", {}).get("message", "Unknown API error")
+                raise Exception(error_msg)
+
+            result_data = data.get("result", {})
+            records = result_data.get("records", [])
+            total_results = result_data.get("total", len(records))
+
+            self._logger.info(
+                "acra_search_success",
+                query=query,
+                records_found=len(records),
+                total_available=total_results,
+            )
+
+            for record in records:
+                record_facts, entity = self._parse_company_record(record)
+                facts.extend(record_facts)
+                if entity:
+                    entities.append(entity)
+
+        except Exception as e:
+            error_msg = f"ACRA query failed: {str(e)}"
+            errors.append(error_msg)
+            self._logger.warning("acra_query_failed", query=query, error=str(e))
 
         result = MCPQueryResult(
             facts=facts,
@@ -303,134 +291,8 @@ class ACRAMCPServer(APIBasedMCPServer):
 
         return result
 
-    async def _query_dataset(
-        self,
-        dataset_id: str,
-        query: str,
-        limit: int,
-        offset: int,  # noqa: ARG002 - reserved for pagination
-    ) -> dict[str, Any]:
-        """Query a specific ACRA dataset."""
-        # Use the initiate download endpoint to get data
-        # This is the recommended way to query large datasets on data.gov.sg
-
-        params = {
-            "format": "json",
-        }
-
-        # For search, we use the poll endpoint with filters
-        response = await self._client.get(
-            f"{self.BASE_URL}/datasets/{dataset_id}/poll-download",
-            params=params,
-        )
-
-        if response.status_code != 200:
-            raise Exception(f"API returned status {response.status_code}")
-
-        data = response.json()
-
-        # Check if download is ready
-        if data.get("data", {}).get("status") != "completed":
-            # Data not ready, return empty
-            return {"facts": [], "entities": [], "total": 0}
-
-        # Get the download URL and fetch data
-        download_url = data.get("data", {}).get("url")
-        if not download_url:
-            return {"facts": [], "entities": [], "total": 0}
-
-        # Fetch the actual data
-        data_response = await self._client.get(download_url)
-        if data_response.status_code != 200:
-            return {"facts": [], "entities": [], "total": 0}
-
-        records = data_response.json()
-        if not isinstance(records, list):
-            records = records.get("data", []) if isinstance(records, dict) else []
-
-        # Filter records by query
-        query_lower = query.lower()
-        matching_records = [
-            r for r in records
-            if self._record_matches_query(r, query_lower)
-        ][:limit]
-
-        facts = []
-        entities = []
-
-        for record in matching_records:
-            record_facts, entity = self._parse_company_record(record, dataset_id)
-            facts.extend(record_facts)
-            if entity:
-                entities.append(entity)
-
-        return {
-            "facts": facts,
-            "entities": entities,
-            "total": len(matching_records),
-        }
-
-    def _record_matches_query(self, record: dict[str, Any], query_lower: str) -> bool:
-        """Check if a record matches the search query."""
-        # Check common field names for company data
-        searchable_fields = [
-            "entity_name", "uen", "company_name", "business_name",
-            "name", "reg_name", "registered_name",
-        ]
-
-        for field in searchable_fields:
-            value = record.get(field, "")
-            if value and query_lower in str(value).lower():
-                return True
-
-        return False
-
-    async def _search_datasets(self, query: str, limit: int) -> dict[str, Any]:
-        """Search across datasets using the search API."""
-        try:
-            # Search for ACRA-related datasets
-            response = await self._client.get(
-                f"{self.BASE_URL}/datasets",
-                params={
-                    "query": f"ACRA {query}",
-                    "page": 1,
-                    "limit": 10,
-                },
-            )
-
-            if response.status_code != 200:
-                return {"facts": [], "entities": [], "total": 0}
-
-            data = response.json()
-            datasets = data.get("data", {}).get("datasets", [])
-
-            # Create facts about found datasets (metadata)
-            facts = []
-            for dataset in datasets[:limit]:
-                if "acra" in dataset.get("name", "").lower():
-                    facts.append(
-                        self.create_fact(
-                            claim=f"ACRA dataset available: {dataset.get('name', 'Unknown')}",
-                            fact_type=FactType.COMPANY_INFO.value,
-                            source_name="data.gov.sg",
-                            source_url=f"https://data.gov.sg/datasets/{dataset.get('datasetId', '')}",
-                            confidence=0.95,
-                            extracted_data={
-                                "dataset_id": dataset.get("datasetId"),
-                                "name": dataset.get("name"),
-                                "description": dataset.get("description"),
-                            },
-                        )
-                    )
-
-            return {"facts": facts, "entities": [], "total": len(facts)}
-
-        except Exception as e:
-            self._logger.warning("search_failed", error=str(e))
-            return {"facts": [], "entities": [], "total": 0}
-
     def _parse_company_record(
-        self, record: dict[str, Any], dataset_id: str
+        self, record: dict[str, Any]
     ) -> tuple[list, EntityReference | None]:
         """Parse an ACRA record into evidenced facts.
 
@@ -488,8 +350,8 @@ class ACRAMCPServer(APIBasedMCPServer):
         if not uen and not name:
             return facts, None
 
-        # Source URL
-        source_url = f"https://data.gov.sg/datasets/{dataset_id}"
+        # Source URL - link to ACRA BizFile for UEN lookup
+        source_url = f"https://data.gov.sg/datasets/{self.ACRA_RESOURCE_ID}/view"
         if uen:
             source_url = f"https://www.acra.gov.sg/bizfile/company-profile?uen={uen}"
 

@@ -52,21 +52,60 @@ class TestACRAMCPServer:
     @pytest.mark.asyncio
     @pytest.mark.network
     async def test_search_companies_real_api(self, acra_server):
-        """Should search for companies via data.gov.sg API."""
-        # Search for a common term to ensure results
-        result = await acra_server.search("technology", limit=5)
+        """Should search for companies via data.gov.sg CKAN API.
 
-        # Should return MCPQueryResult
-        assert hasattr(result, "facts")
-        assert hasattr(result, "query")
-        assert hasattr(result, "mcp_server")
+        This is a TRUE end-to-end test that:
+        1. Makes real API calls to data.gov.sg
+        2. Verifies actual company data is returned
+        3. Validates the structure and content of EvidencedFacts
+        """
+        # Search for "pte ltd" which should always have results in Singapore
+        result = await acra_server.search("pte ltd", limit=5)
+
+        # Must return MCPQueryResult with actual data
+        assert result.query == "pte ltd"
+        assert result.mcp_server == "ACRA Singapore"
+
+        # CRITICAL: Must have actual results - fail if API returns nothing
+        assert len(result.facts) > 0, (
+            "ACRA API returned no facts. This indicates an API failure. "
+            f"Errors: {result.errors}"
+        )
+
+        # Validate each fact has proper structure and content
+        for fact in result.facts:
+            assert isinstance(fact, EvidencedFact)
+            # Must have non-empty claim
+            assert fact.claim and len(fact.claim) > 10, "Fact claim too short or empty"
+            # Must have proper source attribution
+            assert fact.source_name == "ACRA Singapore via data.gov.sg"
+            # Must have high confidence (government source)
+            assert fact.confidence >= 0.95, f"Government source should have high confidence, got {fact.confidence}"
+            # Must have extracted data with UEN
+            assert fact.extracted_data, "Fact must have extracted_data"
+            # At least company_name or uen must be present
+            assert fact.extracted_data.get("company_name") or fact.extracted_data.get("uen"), (
+                f"Fact missing company_name and uen: {fact.extracted_data}"
+            )
 
     @pytest.mark.asyncio
+    @pytest.mark.network
     async def test_health_check(self, acra_server):
-        """Health check should report server status."""
+        """Health check should verify API accessibility.
+
+        This makes a real API call to verify the data.gov.sg endpoint is working.
+        """
         health = await acra_server.health_check()
-        assert hasattr(health, "is_healthy")
-        assert hasattr(health, "last_check")
+
+        # Must return actual health status
+        assert health.server_name == "ACRA Singapore"
+        assert health.last_check is not None
+
+        # CRITICAL: Health check must actually succeed against real API
+        assert health.is_healthy, (
+            f"ACRA health check failed. Error: {health.error_message}. "
+            "This indicates the data.gov.sg API is not accessible."
+        )
 
 
 class TestNewsAggregatorMCPServer:
@@ -104,17 +143,34 @@ class TestNewsAggregatorMCPServer:
     @pytest.mark.asyncio
     @pytest.mark.network
     async def test_fetch_rss_feeds(self, news_server):
-        """Should fetch articles from RSS feeds."""
+        """Should fetch articles from RSS feeds.
+
+        This is a TRUE end-to-end test that:
+        1. Fetches real RSS feeds from Singapore news sources
+        2. Parses actual news articles
+        3. Produces properly structured EvidencedFacts
+        """
         result = await news_server.search("singapore", limit=10)
 
-        assert hasattr(result, "facts")
-        assert hasattr(result, "mcp_server")
+        assert result.mcp_server == "News & Media Intelligence"
 
-        # All facts should have required fields
-        for fact in result.facts:
-            assert isinstance(fact, EvidencedFact)
-            assert fact.claim is not None
-            assert fact.confidence >= 0 and fact.confidence <= 1
+        # Note: News results may be empty if feeds are down or no matching articles
+        # But if we have results, they must be properly structured
+        if result.facts:
+            for fact in result.facts:
+                assert isinstance(fact, EvidencedFact)
+                # Must have non-empty claim
+                assert fact.claim and len(fact.claim) > 5, "Fact claim too short"
+                # Must have a source URL (article link)
+                assert fact.source_url, f"News fact missing source_url: {fact.claim[:50]}"
+                # Confidence should be reasonable
+                assert 0 <= fact.confidence <= 1
+                # Must have source name
+                assert fact.source_name, "News fact missing source_name"
+        else:
+            # If no results, there should be no errors (graceful handling)
+            # OR clear errors explaining why
+            pass  # Empty results are acceptable for news (feeds may be empty)
 
     @pytest.mark.asyncio
     async def test_article_classification(self, news_server):
@@ -170,12 +226,31 @@ class TestWebScraperMCPServer:
     @pytest.mark.asyncio
     @pytest.mark.network
     async def test_scrape_real_website(self, scraper_server):
-        """Should scrape and extract information from a real website."""
+        """Should scrape and extract information from a real website.
+
+        This is a TRUE end-to-end test that:
+        1. Makes a real HTTP request to example.com
+        2. Parses the HTML response
+        3. Extracts facts about the website
+        """
         # Use a stable, simple website for testing
         result = await scraper_server.search("https://example.com")
 
-        assert hasattr(result, "facts")
-        assert hasattr(result, "mcp_server")
+        assert result.mcp_server == "Web Scraping Intelligence"
+        assert result.query == "https://example.com"
+
+        # Should have at least basic page info (title, description, etc.)
+        # example.com is stable and should always return content
+        assert len(result.facts) > 0, (
+            f"Web scraper returned no facts for example.com. Errors: {result.errors}"
+        )
+
+        # Verify the facts have proper structure
+        for fact in result.facts:
+            assert isinstance(fact, EvidencedFact)
+            assert fact.claim, "Scraped fact must have a claim"
+            assert fact.source_url == "https://example.com", f"Source URL mismatch: {fact.source_url}"
+            assert fact.confidence > 0, "Scraped fact must have confidence > 0"
 
 
 class TestMCPRegistry:
@@ -265,12 +340,23 @@ class TestMCPRegistry:
     @pytest.mark.asyncio
     @pytest.mark.network
     async def test_search_all(self, registry, news_config):
-        """Should search across all registered servers."""
+        """Should search across all registered servers.
+
+        This tests the registry's ability to aggregate results from multiple servers.
+        """
         registry.register(NewsAggregatorMCPServer(news_config))
 
         results = await registry.search("singapore technology")
 
-        assert hasattr(results, "facts")
+        # Result must have proper structure
+        assert results.query == "singapore technology"
+        assert isinstance(results.facts, list)
+
+        # If there are facts, they must be properly structured
+        for fact in results.facts:
+            assert isinstance(fact, EvidencedFact)
+            assert fact.claim
+            assert fact.source_name
 
 
 class TestEvidencedFactValidation:
