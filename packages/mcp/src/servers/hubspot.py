@@ -12,7 +12,7 @@ API Documentation: https://developers.hubspot.com/docs/api/overview
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -675,33 +675,6 @@ class HubSpotMCPServer(APIBasedMCPServer):
             self._logger.error("hubspot_company_create_error", error=str(e))
             return None
 
-    async def create_deal(self, deal_data: dict[str, Any]) -> str | None:
-        """Create a new deal in HubSpot.
-
-        Args:
-            deal_data: Deal properties (dealname, amount, dealstage, etc.)
-
-        Returns:
-            HubSpot deal ID if successful, None otherwise
-        """
-        try:
-            response = await self._client.post(
-                "/crm/v3/objects/deals",
-                json={"properties": deal_data},
-            )
-
-            if response.status_code == 201:
-                data = response.json()
-                deal_id = data.get("id")
-                self._logger.info("hubspot_deal_created", deal_id=deal_id)
-                return deal_id
-            else:
-                self._logger.warning("hubspot_deal_create_failed", status=response.status_code)
-                return None
-
-        except Exception as e:
-            self._logger.error("hubspot_deal_create_error", error=str(e))
-            return None
 
     async def add_note(
         self,
@@ -723,7 +696,7 @@ class HubSpotMCPServer(APIBasedMCPServer):
             # Create engagement (note)
             note_data = {
                 "properties": {
-                    "hs_timestamp": datetime.utcnow().isoformat() + "Z",
+                    "hs_timestamp": datetime.now(UTC).isoformat() + "Z",
                     "hs_note_body": note_body,
                 },
                 "associations": [
@@ -764,6 +737,178 @@ class HubSpotMCPServer(APIBasedMCPServer):
             "deal": 214,  # Note to Deal
         }
         return association_types.get(object_type, 202)
+
+    async def create_or_update_contact(
+        self,
+        email: str,
+        first_name: str = "",
+        last_name: str = "",
+        company: str = "",
+        job_title: str = "",
+        phone: str = "",
+        lifecycle_stage: str = "lead",
+        lead_source: str = "GTM Advisor",
+    ) -> str | None:
+        """Create or update a HubSpot contact. Returns HubSpot contact ID or None on failure.
+
+        Uses upsert endpoint so re-running the same lead is safe.
+        """
+        if not self.is_configured:
+            return None
+
+        properties = {
+            "email": email,
+            "lifecycle_stage": lifecycle_stage,
+            "lead_source": lead_source,
+        }
+        if first_name:
+            properties["firstname"] = first_name
+        if last_name:
+            properties["lastname"] = last_name
+        if company:
+            properties["company"] = company
+        if job_title:
+            properties["jobtitle"] = job_title
+        if phone:
+            properties["phone"] = phone
+
+        try:
+            response = await self._client.post(
+                "/crm/v3/objects/contacts",
+                json={"properties": properties},
+            )
+            if response.status_code in (200, 201):
+                return response.json().get("id")
+
+            # 409 Conflict = contact already exists — update instead
+            if response.status_code == 409:
+                # Extract existing contact ID from error body and patch
+                existing_id = response.json().get("message", "").split(":")[-1].strip()
+                if existing_id:
+                    patch_response = await self._client.patch(
+                        f"/crm/v3/objects/contacts/{existing_id}",
+                        json={"properties": properties},
+                    )
+                    if patch_response.status_code == 200:
+                        return existing_id
+
+            self._logger.warning(
+                "hubspot_contact_create_failed",
+                email=email,
+                status=response.status_code,
+            )
+            return None
+
+        except Exception as e:
+            self._logger.error("hubspot_contact_create_error", email=email, error=str(e))
+            return None
+
+    async def create_deal(
+        self,
+        deal_name: str,
+        contact_id: str | None = None,
+        amount: float = 0.0,
+        pipeline: str = "default",
+        deal_stage: str = "appointmentscheduled",
+        close_date_days: int = 90,
+    ) -> str | None:
+        """Create a deal in HubSpot. Returns deal ID or None on failure.
+
+        Optionally associates the deal with an existing contact.
+        """
+        if not self.is_configured:
+            return None
+
+        from datetime import timedelta
+        close_date = (datetime.now(UTC) + timedelta(days=close_date_days)).strftime("%Y-%m-%d")
+
+        deal_data: dict = {
+            "properties": {
+                "dealname": deal_name,
+                "pipeline": pipeline,
+                "dealstage": deal_stage,
+                "amount": str(amount),
+                "closedate": close_date,
+                "deal_source": "GTM Advisor",
+            }
+        }
+
+        if contact_id:
+            deal_data["associations"] = [
+                {
+                    "to": {"id": contact_id},
+                    "types": [{"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 3}],
+                }
+            ]
+
+        try:
+            response = await self._client.post("/crm/v3/objects/deals", json=deal_data)
+            if response.status_code in (200, 201):
+                deal_id = response.json().get("id")
+                self._logger.info("hubspot_deal_created", deal_name=deal_name, deal_id=deal_id)
+                return deal_id
+
+            self._logger.warning(
+                "hubspot_deal_create_failed",
+                deal_name=deal_name,
+                status=response.status_code,
+            )
+            return None
+
+        except Exception as e:
+            self._logger.error("hubspot_deal_create_error", deal_name=deal_name, error=str(e))
+            return None
+
+    async def log_email_activity(
+        self,
+        contact_id: str,
+        subject: str,
+        from_email: str = "",
+        timestamp: datetime | None = None,
+    ) -> bool:
+        """Log an outbound email activity on a contact's timeline.
+
+        Returns True on success.
+        """
+        if not self.is_configured:
+            return False
+
+        ts = timestamp or datetime.now(UTC)
+        ts_ms = int(ts.timestamp() * 1000)
+
+        try:
+            response = await self._client.post(
+                "/crm/v3/objects/emails",
+                json={
+                    "properties": {
+                        "hs_timestamp": str(ts_ms),
+                        "hs_email_direction": "EMAIL",
+                        "hs_email_status": "SENT",
+                        "hs_email_subject": subject,
+                        "hs_email_from_email": from_email,
+                    },
+                    "associations": [
+                        {
+                            "to": {"id": contact_id},
+                            "types": [
+                                {"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 9}
+                            ],
+                        }
+                    ],
+                },
+            )
+            success = response.status_code in (200, 201)
+            if not success:
+                self._logger.warning(
+                    "hubspot_email_log_failed",
+                    contact_id=contact_id,
+                    status=response.status_code,
+                )
+            return success
+
+        except Exception as e:
+            self._logger.error("hubspot_email_log_error", contact_id=contact_id, error=str(e))
+            return False
 
     async def close(self) -> None:
         """Close HTTP client."""

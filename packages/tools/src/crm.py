@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -498,7 +498,7 @@ class HubSpotTool(BaseTool):
                 lifecycle_stage="lead",
                 lead_status="new",
                 owner_id="owner_1",
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
                 updated_at=None,
                 source_crm="hubspot",
             ),
@@ -513,7 +513,7 @@ class HubSpotTool(BaseTool):
                 lifecycle_stage="opportunity",
                 lead_status="qualified",
                 owner_id="owner_1",
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
                 updated_at=None,
                 source_crm="hubspot",
             ),
@@ -531,7 +531,7 @@ class HubSpotTool(BaseTool):
             title="Manager",
             lifecycle_stage="lead",
             lead_status="new",
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             source_crm="hubspot",
             owner_id=None,
             phone=None,
@@ -564,7 +564,7 @@ class HubSpotTool(BaseTool):
             lifecycle_stage="lead",
             lead_status="new",
             owner_id=None,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(UTC),
             updated_at=None,
             source_crm="hubspot",
         )
@@ -593,7 +593,7 @@ class HubSpotTool(BaseTool):
                 employee_count=25,
                 revenue=500000,
                 owner_id="owner_1",
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
                 source_crm="hubspot",
             ),
         ]
@@ -608,12 +608,12 @@ class HubSpotTool(BaseTool):
                 amount=50000,
                 stage="proposal",
                 pipeline="default",
-                close_date=datetime.utcnow(),
+                close_date=datetime.now(UTC),
                 contact_ids=["1001"],
                 company_id="c1001",
                 owner_id="owner_1",
                 probability=0.6,
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(UTC),
                 source_crm="hubspot",
             ),
         ]

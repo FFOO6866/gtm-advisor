@@ -27,10 +27,13 @@ export interface AnalysisRequest {
   include_lead_generation?: boolean;
   include_campaign_planning?: boolean;
   lead_count?: number;
+  // Optional: raw document text from uploaded corporate profile
+  additional_context?: string;
 }
 
 export interface AnalysisStatus {
   analysis_id: string;
+  company_id?: string | null;
   status: 'pending' | 'running' | 'completed' | 'failed';
   progress: number;
   current_agent: string | null;
@@ -55,6 +58,9 @@ export interface Lead {
   trigger_events: string[];
   recommended_approach: string | null;
   source: string;
+  verified_email?: boolean;
+  email_domain_valid?: boolean;
+  buying_cycle_stage?: string | null;
 }
 
 export interface MarketInsight {
@@ -122,6 +128,11 @@ export interface GTMAnalysisResult {
   agents_used: string[];
   total_confidence: number;
   processing_time_seconds: number;
+  market_sizing?: Record<string, unknown> | null;
+  sales_motion?: Record<string, unknown> | null;
+  outreach_sequences?: unknown[];
+  success_metrics?: string[];
+  compliance_flags?: string[];
 }
 
 export interface AnalysisResponse {
@@ -170,12 +181,18 @@ async function fetchAPI<T>(
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
+  const token = localStorage.getItem('gtm_access_token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...options.headers as Record<string, string>,
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const response = await fetch(url, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
+    headers,
   });
 
   if (!response.ok) {
@@ -315,4 +332,54 @@ export function pollAnalysisStatus(
   };
 }
 
+/** Generic REST client wrapping fetchAPI for other API modules. */
+export const apiClient = {
+  get: <T>(path: string): Promise<T> => fetchAPI<T>(`/api/v1${path}`),
+  post: <T>(path: string, body?: unknown): Promise<T> =>
+    fetchAPI<T>(`/api/v1${path}`, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined }),
+  patch: <T>(path: string, body?: unknown): Promise<T> =>
+    fetchAPI<T>(`/api/v1${path}`, { method: 'PATCH', body: body !== undefined ? JSON.stringify(body) : undefined }),
+  delete: <T>(path: string): Promise<T> =>
+    fetchAPI<T>(`/api/v1${path}`, { method: 'DELETE' }),
+  getBlob: async (path: string): Promise<Blob> => {
+    const token = localStorage.getItem('gtm_access_token');
+    const response = await fetch(`${API_BASE_URL}/api/v1${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new APIError(`Download failed: ${response.status}`, response.status);
+    return response.blob();
+  },
+};
+
+/** Upload a file (multipart/form-data) and return parsed JSON. */
+export async function uploadFile<T>(path: string, file: File): Promise<T> {
+  const token = localStorage.getItem('gtm_access_token');
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new APIError(err.detail || `Upload failed: ${response.status}`, response.status, err);
+  }
+  return response.json();
+}
+
 export { APIError };
+
+export function storeAuthTokens(accessToken: string, refreshToken: string): void {
+  localStorage.setItem('gtm_access_token', accessToken);
+  localStorage.setItem('gtm_refresh_token', refreshToken);
+}
+
+export function clearAuthTokens(): void {
+  localStorage.removeItem('gtm_access_token');
+  localStorage.removeItem('gtm_refresh_token');
+}
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem('gtm_access_token');
+}

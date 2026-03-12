@@ -12,7 +12,7 @@ All operations use async SQLAlchemy sessions.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -399,7 +399,7 @@ class EntityRepository:
         entity = await self.get_by_id(entity_id)
         if entity:
             entity.fact_count = count
-            entity.last_updated = datetime.utcnow()
+            entity.last_updated = datetime.now(UTC)
             await self._session.commit()
 
     async def merge_entities(
@@ -540,7 +540,7 @@ class EntityRelationRepository:
 
         if relation:
             relation.is_current = False
-            relation.valid_until = end_date or datetime.utcnow()
+            relation.valid_until = end_date or datetime.now(UTC)
             await self._session.commit()
 
 
@@ -661,7 +661,7 @@ class CompetitorSignalRepository:
 
         if signal:
             signal.is_acknowledged = True
-            signal.acknowledged_at = datetime.utcnow()
+            signal.acknowledged_at = datetime.now(UTC)
             await self._session.commit()
 
 
@@ -729,7 +729,7 @@ class MCPDataSourceRepository:
         source = await self.get_by_name(name)
         if source:
             source.is_healthy = is_healthy
-            source.last_health_check = datetime.utcnow()
+            source.last_health_check = datetime.now(UTC)
             await self._session.commit()
 
     async def record_sync(
@@ -741,7 +741,7 @@ class MCPDataSourceRepository:
         """Record a sync operation."""
         source = await self.get_by_name(name)
         if source:
-            source.last_sync = datetime.utcnow()
+            source.last_sync = datetime.now(UTC)
             source.total_facts_produced += facts_produced
             source.facts_today += facts_produced
             # Running average

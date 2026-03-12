@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import UUID
 
@@ -28,9 +29,20 @@ class ConnectionManager:
         self.active_connections: dict[UUID, list[WebSocket]] = {}
         # Map websocket -> analysis_id for cleanup
         self.websocket_to_analysis: dict[WebSocket, UUID] = {}
+        # Per-analysis send lock — prevents concurrent ws.send_json() calls
+        # from parallel agent coroutines from interleaving frames.
+        self._send_locks: dict[UUID, asyncio.Lock] = {}
 
     async def connect(self, websocket: WebSocket, analysis_id: UUID) -> None:
         """Accept connection and track it."""
+        if analysis_id in self.active_connections and len(self.active_connections[analysis_id]) >= 10:
+            logger.warning(
+                "websocket_connection_limit_reached",
+                analysis_id=str(analysis_id),
+                total_connections=len(self.active_connections[analysis_id]),
+            )
+            await websocket.close(code=1008)
+            return
         await websocket.accept()
         if analysis_id not in self.active_connections:
             self.active_connections[analysis_id] = []
@@ -49,26 +61,34 @@ class ConnectionManager:
             if websocket in self.active_connections[analysis_id]:
                 self.active_connections[analysis_id].remove(websocket)
             if not self.active_connections[analysis_id]:
-                del self.active_connections[analysis_id]
-        if websocket in self.websocket_to_analysis:
-            del self.websocket_to_analysis[websocket]
+                self.active_connections.pop(analysis_id, None)
+        self.websocket_to_analysis.pop(websocket, None)
         logger.info("websocket_disconnected", analysis_id=str(analysis_id))
 
     async def broadcast_to_analysis(self, analysis_id: UUID, message: dict[str, Any]) -> None:
-        """Send message to all connections watching an analysis."""
+        """Send message to all connections watching an analysis.
+
+        Serialises writes per analysis_id — concurrent coroutines (parallel
+        wave-2 agents, A2A bus broadcasts) must not interleave WebSocket frames
+        on the same connection.
+        """
         if analysis_id not in self.active_connections:
             return
 
-        disconnected = []
-        for websocket in self.active_connections[analysis_id]:
-            try:
-                await websocket.send_json(message)
-            except Exception:
-                disconnected.append(websocket)
+        if analysis_id not in self._send_locks:
+            self._send_locks[analysis_id] = asyncio.Lock()
 
-        # Clean up disconnected
-        for ws in disconnected:
-            self.disconnect(ws)
+        async with self._send_locks[analysis_id]:
+            disconnected = []
+            for websocket in self.active_connections[analysis_id]:
+                try:
+                    await websocket.send_json(message)
+                except Exception:
+                    disconnected.append(websocket)
+
+            # Clean up disconnected
+            for ws in disconnected:
+                self.disconnect(ws)
 
 
 # Global connection manager
@@ -162,7 +182,7 @@ async def send_agent_update(
     error: str | None = None,
 ) -> None:
     """Send an agent update to all connected clients."""
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     update = {
         "type": update_type,
@@ -173,7 +193,7 @@ async def send_agent_update(
         "message": message,
         "result": result,
         "error": error,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     await manager.broadcast_to_analysis(analysis_id, update)

@@ -152,3 +152,14 @@ def expired_access_token(test_user: DBUser) -> str:
 def auth_headers(test_access_token: str) -> dict[str, str]:
     """Generate auth headers with test token."""
     return {"Authorization": f"Bearer {test_access_token}"}
+
+
+@pytest.fixture
+def mock_llm_manager():
+    """AsyncMock of LLMManager for unit tests."""
+    from unittest.mock import AsyncMock
+
+    manager = AsyncMock()
+    manager.complete.return_value = "Test completion"
+    manager.complete_structured.return_value = {}
+    return manager

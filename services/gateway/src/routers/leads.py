@@ -1,6 +1,6 @@
 """Lead management API endpoints."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
@@ -220,9 +220,9 @@ async def update_lead(
 
         # Track status changes
         if new_status == LeadStatus.CONTACTED and not lead.contacted_at:
-            lead.contacted_at = datetime.utcnow()
+            lead.contacted_at = datetime.now(UTC)
         elif new_status == LeadStatus.CONVERTED and not lead.converted_at:
-            lead.converted_at = datetime.utcnow()
+            lead.converted_at = datetime.now(UTC)
 
     for field, value in update_data.items():
         setattr(lead, field, value)
@@ -318,7 +318,7 @@ async def mark_lead_contacted(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     lead.status = LeadStatus.CONTACTED
-    lead.contacted_at = datetime.utcnow()
+    lead.contacted_at = datetime.now(UTC)
     await db.flush()
 
     logger.info("lead_contacted", lead_id=str(lead_id))
@@ -340,7 +340,7 @@ async def convert_lead(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     lead.status = LeadStatus.CONVERTED
-    lead.converted_at = datetime.utcnow()
+    lead.converted_at = datetime.now(UTC)
     await db.flush()
 
     logger.info("lead_converted", lead_id=str(lead_id))

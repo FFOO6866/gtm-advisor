@@ -1,6 +1,6 @@
 """Authentication models for GTM Advisor Gateway."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, EmailStr, Field
@@ -29,7 +29,7 @@ class User(UserBase):
     id: UUID = Field(default_factory=uuid4)
     tier: SubscriptionTier = SubscriptionTier.FREE
     is_active: bool = True
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Usage tracking
     daily_requests: int = 0

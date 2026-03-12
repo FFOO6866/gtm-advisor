@@ -1,0 +1,13 @@
+[project]
+name = "gtm-advisor-crm-sync"
+version = "0.1.0"
+description = "CRM Sync Agent - Creates and updates HubSpot contacts and deals"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "structlog>=24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

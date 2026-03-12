@@ -11,7 +11,7 @@ API Documentation: https://docs.sendgrid.com/api-reference
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -412,9 +412,9 @@ class SendGridMCPServer(APIBasedMCPServer):
         """
         try:
             if not start_date:
-                start_date = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
+                start_date = (datetime.now(UTC) - timedelta(days=7)).strftime("%Y-%m-%d")
             if not end_date:
-                end_date = datetime.utcnow().strftime("%Y-%m-%d")
+                end_date = datetime.now(UTC).strftime("%Y-%m-%d")
 
             response = await self._client.get(
                 "/stats",

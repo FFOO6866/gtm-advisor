@@ -145,6 +145,63 @@ async def list_insights(
     )
 
 
+@router.get("/{company_id}/insights/summary")
+async def get_insights_summary(
+    company_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Get a summary of market insights for the company."""
+    await validate_company_access(company_id, current_user, db)
+
+    company = await db.get(Company, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    base_query = select(func.count(MarketInsight.id)).where(
+        MarketInsight.company_id == company_id,
+        MarketInsight.is_archived == False,
+    )
+
+    total = (await db.execute(base_query)).scalar() or 0
+    unread = (await db.execute(base_query.where(MarketInsight.is_read == False))).scalar() or 0
+    high_impact = (
+        await db.execute(base_query.where(MarketInsight.impact_level == "high"))
+    ).scalar() or 0
+
+    trends_query = (
+        select(MarketInsight)
+        .where(
+            MarketInsight.company_id == company_id,
+            MarketInsight.insight_type == "trend",
+            MarketInsight.is_archived == False,
+        )
+        .order_by(MarketInsight.created_at.desc())
+        .limit(3)
+    )
+    trends = (await db.execute(trends_query)).scalars().all()
+
+    opportunities_query = (
+        select(MarketInsight)
+        .where(
+            MarketInsight.company_id == company_id,
+            MarketInsight.insight_type == "opportunity",
+            MarketInsight.is_archived == False,
+        )
+        .order_by(MarketInsight.relevance_score.desc())
+        .limit(3)
+    )
+    opportunities = (await db.execute(opportunities_query)).scalars().all()
+
+    return {
+        "total_insights": total,
+        "unread_insights": unread,
+        "high_impact_count": high_impact,
+        "recent_trends": [insight_to_response(t) for t in trends],
+        "top_opportunities": [insight_to_response(o) for o in opportunities],
+    }
+
+
 @router.get("/{company_id}/insights/{insight_id}", response_model=MarketInsightResponse)
 async def get_insight(
     company_id: UUID,
@@ -223,64 +280,3 @@ async def unarchive_insight(
     await db.flush()
 
     return insight_to_response(insight)
-
-
-@router.get("/{company_id}/insights/summary")
-async def get_insights_summary(
-    company_id: UUID,
-    current_user: User | None = Depends(get_optional_user),
-    db: AsyncSession = Depends(get_db_session),
-) -> dict:
-    """Get a summary of market insights for the company."""
-    await validate_company_access(company_id, current_user, db)
-
-    # Verify company exists
-    company = await db.get(Company, company_id)
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found")
-
-    # Get counts
-    base_query = select(func.count(MarketInsight.id)).where(
-        MarketInsight.company_id == company_id,
-        MarketInsight.is_archived == False,
-    )
-
-    total = (await db.execute(base_query)).scalar() or 0
-    unread = (await db.execute(base_query.where(MarketInsight.is_read == False))).scalar() or 0
-    high_impact = (
-        await db.execute(base_query.where(MarketInsight.impact_level == "high"))
-    ).scalar() or 0
-
-    # Get recent trends
-    trends_query = (
-        select(MarketInsight)
-        .where(
-            MarketInsight.company_id == company_id,
-            MarketInsight.insight_type == "trend",
-            MarketInsight.is_archived == False,
-        )
-        .order_by(MarketInsight.created_at.desc())
-        .limit(3)
-    )
-    trends = (await db.execute(trends_query)).scalars().all()
-
-    # Get opportunities
-    opportunities_query = (
-        select(MarketInsight)
-        .where(
-            MarketInsight.company_id == company_id,
-            MarketInsight.insight_type == "opportunity",
-            MarketInsight.is_archived == False,
-        )
-        .order_by(MarketInsight.relevance_score.desc())
-        .limit(3)
-    )
-    opportunities = (await db.execute(opportunities_query)).scalars().all()
-
-    return {
-        "total_insights": total,
-        "unread_insights": unread,
-        "high_impact_count": high_impact,
-        "recent_trends": [insight_to_response(t) for t in trends],
-        "top_opportunities": [insight_to_response(o) for o in opportunities],
-    }

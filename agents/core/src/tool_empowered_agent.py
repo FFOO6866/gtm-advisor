@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
 import structlog
@@ -670,7 +670,7 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
         self._current_decision_log = AgentDecisionLog(
             task_id=str(uuid4()),
             agent_id=self.name,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
 
         # Audit start
@@ -685,7 +685,7 @@ class ToolEmpoweredAgent(BaseGTMAgent[T], Generic[T]):
             result = await super().run(task, context, **kwargs)
 
             # Complete logging
-            self._current_decision_log.completed_at = datetime.utcnow()
+            self._current_decision_log.completed_at = datetime.now(UTC)
 
             self._audit_logger.log(
                 event_type=AuditEventType.AGENT_COMPLETE,

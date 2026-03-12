@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+import traceback
+from typing import Any
 from uuid import UUID, uuid4
 
 import structlog
@@ -28,25 +30,64 @@ from agents.lead_hunter.src import LeadHunterAgent
 from agents.market_intelligence.src import MarketIntelligenceAgent
 from packages.core.src.agent_bus import (
     AgentMessage,
+    DiscoveryType,
     get_agent_bus,
 )
+from packages.core.src.errors import AgentError, MaxIterationsExceededError
 from packages.core.src.types import (
     GTMAnalysisResult,
     IndustryVertical,
     LeadProfile,
     MarketInsight,
 )
-from packages.database.src.models import Analysis, Company
+from packages.database.src.models import (
+    Analysis,
+    CampaignStatus,
+    Company,
+    Lead,
+)
 from packages.database.src.models import AnalysisStatus as DBAnalysisStatus
+from packages.database.src.models import (
+    Campaign as DBCampaign,
+)
+from packages.database.src.models import MarketInsight as DBMarketInsight
 from packages.database.src.session import async_session_factory, get_db_session
 
 from ..auth.dependencies import get_optional_user
 from ..auth.models import User
 from ..middleware.rate_limit import analysis_limit
+from ..services import (
+    ClarificationResponse,
+    GTMClarificationService,
+    TaskDecompositionService,
+)
 from .websocket import send_agent_update
 
 router = APIRouter()
 logger = structlog.get_logger()
+
+
+def _build_context_string(context_sources: list[dict] | None) -> str:
+    """Join all company context sources into a single additional_context string for agents."""
+    if not context_sources:
+        return ""
+    parts = []
+    for src in context_sources:
+        label = src.get("name") or src.get("type", "source")
+        parts.append(f"=== {label} ===\n{src.get('text', '')}")
+    return "\n\n".join(parts)
+
+
+def _make_source_entry(source_type: str, name: str, text: str) -> dict:
+    """Create a context_sources entry."""
+    from datetime import UTC, datetime
+    return {
+        "type": source_type,
+        "name": name,
+        "text": text,
+        "chars": len(text),
+        "added_at": datetime.now(UTC).isoformat(),
+    }
 
 
 class AnalysisRequest(BaseModel):
@@ -67,15 +108,41 @@ class AnalysisRequest(BaseModel):
     include_customer_profiling: bool = Field(default=True)
     include_lead_generation: bool = Field(default=True)
     include_campaign_planning: bool = Field(default=True)
-    lead_count: int = Field(default=10, ge=1, le=50)
+    lead_count: int = Field(default=25, ge=1, le=100)
     # Optional: link to existing company
     company_id: UUID | None = Field(default=None)
+    # Optional: clarification responses to enrich context
+    clarification_responses: list[ClarificationResponse] = Field(default_factory=list)
+    # Optional: raw document text from uploaded corporate profile / business plan
+    additional_context: str | None = Field(default=None, description="Raw text from uploaded document for agent context")
+
+
+class ClarifyRequest(BaseModel):
+    """Request to generate clarifying questions."""
+
+    company_name: str = Field(..., min_length=1)
+    industry: IndustryVertical = Field(default=IndustryVertical.OTHER)
+    goals: list[str] = Field(default_factory=list)
+    existing_context: dict = Field(default_factory=dict)
+
+
+class DecomposeRequest(BaseModel):
+    """Request to decompose analysis into a task dependency graph."""
+
+    include_market_research: bool = Field(default=True)
+    include_competitor_analysis: bool = Field(default=True)
+    include_customer_profiling: bool = Field(default=True)
+    include_lead_generation: bool = Field(default=True)
+    include_campaign_planning: bool = Field(default=True)
+    include_enrichment: bool = Field(default=True)
+    clarification_responses: list[ClarificationResponse] = Field(default_factory=list)
 
 
 class AnalysisStatusResponse(BaseModel):
     """Status of an analysis."""
 
     analysis_id: UUID
+    company_id: UUID | None = None
     status: str  # pending, running, completed, failed
     progress: float = 0.0  # 0-1
     current_agent: str | None = None
@@ -95,6 +162,59 @@ class AnalysisResponse(BaseModel):
 # ============================================================================
 # Endpoints
 # ============================================================================
+
+
+@router.post("/clarify")
+async def generate_clarifications(
+    request: ClarifyRequest,
+) -> dict:
+    """Generate clarifying questions before starting analysis.
+
+    Call this first to get tailored questions, then submit answers with the
+    /start request as clarification_responses.
+    """
+    svc = GTMClarificationService()
+    session = svc.generate_questions(
+        company_name=request.company_name,
+        industry=request.industry,
+        goals=request.goals,
+        existing_context=request.existing_context,
+    )
+    return {
+        "company_name": session.company_name,
+        "industry": session.industry.value,
+        "readiness_score": session.readiness_score,
+        "questions": [q.model_dump() for q in session.questions],
+        "total_questions": len(session.questions),
+        "required_count": sum(1 for q in session.questions if q.required),
+    }
+
+
+@router.post("/decompose")
+async def decompose_analysis(
+    request: DecomposeRequest,
+) -> dict:
+    """Decompose analysis into a dependency graph of agent tasks.
+
+    Returns execution waves showing which agents run in parallel and which
+    must wait for others. Useful for UI progress visualization.
+    """
+    clarification_context = {}
+    if request.clarification_responses:
+        svc = GTMClarificationService()
+        clarification_context = svc.responses_to_context(request.clarification_responses)
+
+    decomp_svc = TaskDecompositionService()
+    graph = decomp_svc.decompose(
+        include_enrichment=request.include_enrichment,
+        include_market=request.include_market_research,
+        include_competitor=request.include_competitor_analysis,
+        include_profiling=request.include_customer_profiling,
+        include_leads=request.include_lead_generation,
+        include_campaign=request.include_campaign_planning,
+        clarification_context=clarification_context,
+    )
+    return graph.to_dict()
 
 
 @router.post("/start")
@@ -125,11 +245,25 @@ async def start_analysis(
             competitors=analysis_request.competitors,
             target_markets=analysis_request.target_markets,
             value_proposition=analysis_request.value_proposition,
-            owner_id=user_id,  # Set owner if authenticated
+            owner_id=user_id,
+            context_sources=(
+                [_make_source_entry("document", "uploaded_document", analysis_request.additional_context)]
+                if analysis_request.additional_context else []
+            ),
         )
         db.add(company)
         await db.flush()
         company_id = company.id
+    elif analysis_request.additional_context:
+        # Existing company — append new document source if a new document was uploaded
+        existing = await db.get(Company, company_id)
+        if existing:
+            sources: list[dict] = list(existing.context_sources or [])
+            # Replace any existing "document" entry with the same name, or append
+            new_entry = _make_source_entry("document", "uploaded_document", analysis_request.additional_context)
+            sources = [s for s in sources if not (s.get("type") == "document" and s.get("name") == "uploaded_document")]
+            sources.append(new_entry)
+            existing.context_sources = sources
 
     # Create analysis record with user_id if authenticated
     analysis = Analysis(
@@ -148,6 +282,7 @@ async def start_analysis(
 
     return AnalysisStatusResponse(
         analysis_id=analysis.id,
+        company_id=company_id,
         status="pending",
         progress=0.0,
     )
@@ -266,6 +401,10 @@ async def quick_analysis(
             description=analysis_request.description,
             industry=analysis_request.industry.value,
             owner_id=user_id,
+            context_sources=(
+                [_make_source_entry("document", "uploaded_document", analysis_request.additional_context)]
+                if analysis_request.additional_context else []
+            ),
         )
         db.add(company)
         await db.flush()
@@ -278,7 +417,7 @@ async def quick_analysis(
             progress=100,
             completed_agents=result.agents_used,
             executive_summary=result.executive_summary,
-            leads=[lead.model_dump() for lead in result.leads] if result.leads else [],
+            leads=[lead.model_dump(mode="json") for lead in result.leads] if result.leads else [],
             total_confidence=result.total_confidence,
             processing_time_seconds=processing_time,
         )
@@ -293,7 +432,8 @@ async def quick_analysis(
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("analysis_error", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Analysis failed. Please try again.")
 
 
 @router.get("/")
@@ -358,6 +498,11 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
         analysis.status = DBAnalysisStatus.RUNNING
         await db.commit()
 
+        # Wait briefly so the browser has time to establish the WebSocket before
+        # we start firing events. BackgroundTasks run almost immediately after the
+        # HTTP response is sent; the WS handshake needs ~100-500 ms.
+        await asyncio.sleep(1.5)
+
         start_time = time.time()
 
         # Initialize AgentBus for this analysis
@@ -382,8 +527,28 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
         agent_bus.set_ws_broadcast(broadcast_a2a_message)
 
         try:
+            # Build additional_context from persistent context_sources on the company.
+            # If the request includes a new document, merge it into context_sources first.
+            _company_for_ctx: Company | None = None
+            if analysis.company_id:
+                _company_for_ctx = await db.get(Company, analysis.company_id)
+
+            if _company_for_ctx is not None and request.additional_context:
+                # Merge new document into company's context_sources
+                sources: list[dict] = list(_company_for_ctx.context_sources or [])
+                new_entry = _make_source_entry("document", "uploaded_document", request.additional_context)
+                sources = [s for s in sources if not (s.get("type") == "document" and s.get("name") == "uploaded_document")]
+                sources.append(new_entry)
+                _company_for_ctx.context_sources = sources
+                await db.commit()
+
+            additional_context = _build_context_string(
+                _company_for_ctx.context_sources if _company_for_ctx else None
+            ) or request.additional_context
+
             # Build context
             context = {
+                "analysis_id": analysis_id,
                 "company_name": request.company_name,
                 "website": request.website,
                 "description": request.description,
@@ -393,6 +558,7 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 "known_competitors": request.competitors,
                 "target_markets": request.target_markets or ["Singapore"],
                 "value_proposition": request.value_proposition,
+                "additional_context": additional_context,
             }
 
             result = GTMAnalysisResult(
@@ -408,7 +574,7 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
             }
 
             # Calculate total steps
-            include_company_enrichment = bool(request.website)
+            include_company_enrichment = bool(request.website or additional_context)
             total_steps = sum(
                 [
                     include_company_enrichment,
@@ -433,8 +599,16 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
             async def update_progress(agent_id: str, progress_pct: int) -> None:
                 analysis.current_agent = agent_id
                 analysis.progress = progress_pct
-                analysis.completed_agents = completed_agents
-                await db.commit()
+                # Use list() copy — SQLAlchemy JSON column may not detect dirty
+                # when the same list object is re-assigned after in-place mutations.
+                analysis.completed_agents = list(completed_agents)
+                try:
+                    await db.commit()
+                except Exception as _commit_err:
+                    # Non-fatal: progress update failed, but the analysis continues.
+                    # The final commit will persist the completed state.
+                    logger.warning("progress_commit_failed", agent=agent_id, error=str(_commit_err))
+                    await db.rollback()
 
             # =====================================================================
             # STEP 0: Company Enrichment
@@ -449,17 +623,28 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     agent_id=agent_id,
                     agent_name="Company Enricher",
                     status="thinking",
-                    message=f"Analyzing company website: {request.website}...",
+                    message=f"Analyzing {request.website or 'uploaded document'}...",
                 )
 
                 enricher = CompanyEnricherAgent(agent_bus=agent_bus, analysis_id=analysis_id)
-                enrichment_result = await enricher.enrich_company(
-                    company_name=request.company_name,
-                    website=request.website,
-                    industry=request.industry,
-                    description=request.description,
-                    analysis_id=analysis_id,
-                )
+                enrichment_result = None
+                try:
+                    async with asyncio.timeout(90):
+                        enrichment_result = await enricher.enrich_company(
+                            company_name=request.company_name,
+                            website=request.website,
+                            industry=request.industry,
+                            description=request.description,
+                            additional_context=additional_context,
+                            analysis_id=analysis_id,
+                        )
+                except (TimeoutError, MaxIterationsExceededError, AgentError) as e:
+                    logger.warning(
+                        "agent_failed",
+                        agent=agent_id,
+                        error=str(e),
+                        analysis_id=str(analysis_id),
+                    )
 
                 # Update context with enriched data
                 if enrichment_result:
@@ -476,6 +661,23 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     if enrichment_result.target_markets:
                         context["target_markets"] = enrichment_result.target_markets
 
+                    # Persist website scrape to context_sources so future re-runs have it
+                    if enrichment_result.raw_website_context and _company_for_ctx is not None:
+                        async with async_session_factory() as persist_db:
+                            company_to_update = await persist_db.get(Company, analysis.company_id)
+                            if company_to_update is not None:
+                                sources = list(company_to_update.context_sources or [])
+                                website_name = request.website or "website_scrape"
+                                sources = [s for s in sources if not (s.get("type") == "website" and s.get("name") == website_name)]
+                                sources.append(_make_source_entry("website", website_name, enrichment_result.raw_website_context))
+                                company_to_update.context_sources = sources
+                                await persist_db.commit()
+                        # Rebuild additional_context with website scrape now included
+                        _company_for_ctx.context_sources = [s for s in (_company_for_ctx.context_sources or []) if s.get("type") != "website"]
+                        _company_for_ctx.context_sources = (_company_for_ctx.context_sources or []) + [_make_source_entry("website", request.website or "website_scrape", enrichment_result.raw_website_context)]
+                        additional_context = _build_context_string(_company_for_ctx.context_sources)
+                        context["additional_context"] = additional_context
+
                 completed_agents.append(agent_id)
                 step += 1
 
@@ -486,39 +688,117 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     agent_name="Company Enricher",
                     status="complete",
                     progress=step / total_steps,
-                    message=f"Enriched profile with {len(enrichment_result.products)} products",
+                    message=f"Enriched profile with {len(enrichment_result.products) if enrichment_result else 0} products",
                     result={
-                        "products_count": len(enrichment_result.products),
-                        "competitors_discovered": len(enrichment_result.mentioned_competitors),
+                        "products_count": len(enrichment_result.products) if enrichment_result else 0,
+                        "competitors_discovered": len(enrichment_result.mentioned_competitors) if enrichment_result else 0,
                     },
                 )
 
                 await asyncio.sleep(0.1)
 
             # =====================================================================
-            # STEP 1: Market Intelligence
+            # WAVE 2: Market Intelligence + Competitor Analysis (truly independent)
+            # CustomerProfiler is moved to WAVE 3 so it can read market/competitor
+            # bus publications in its _plan() step (A2A data flow).
             # =====================================================================
-            if request.include_market_research:
-                agent_id = "market-intelligence"
-                await update_progress(agent_id, int((step / total_steps) * 100))
 
+            async def _run_market_intel() -> Any:
+                if not request.include_market_research:
+                    return None
+                _mi = MarketIntelligenceAgent(agent_bus=agent_bus)
+                try:
+                    async with asyncio.timeout(90):
+                        return await _mi.run(
+                            f"Research {request.industry.value} market in Singapore for: {request.company_name}. {request.description}",
+                            context=context,
+                        )
+                except (TimeoutError, MaxIterationsExceededError, AgentError) as e:
+                    logger.warning(
+                        "agent_failed",
+                        agent="market-intelligence",
+                        error=str(e),
+                        analysis_id=str(analysis_id),
+                    )
+                    return None
+
+            async def _run_competitor_analyst() -> Any:
+                if not request.include_competitor_analysis:
+                    return None
+                _competitors = context.get("known_competitors", [])[:5]
+                _ca = CompetitorAnalystAgent(agent_bus=agent_bus, analysis_id=analysis_id)
+                try:
+                    async with asyncio.timeout(90):
+                        return await _ca.run(
+                            f"Analyze competitors for {request.company_name} in {request.industry.value}: {', '.join(_competitors)}",
+                            context=context,
+                        )
+                except (TimeoutError, MaxIterationsExceededError, AgentError) as e:
+                    logger.warning(
+                        "agent_failed",
+                        agent="competitor-analyst",
+                        error=str(e),
+                        analysis_id=str(analysis_id),
+                    )
+                    return None
+
+            async def _run_customer_profiler() -> Any:
+                if not request.include_customer_profiling:
+                    return None
+                _cp = CustomerProfilerAgent(bus=agent_bus)
+                try:
+                    async with asyncio.timeout(90):
+                        return await _cp.run(
+                            f"Create ideal customer profiles for {request.company_name}",
+                            context=context,
+                        )
+                except (TimeoutError, MaxIterationsExceededError, AgentError) as e:
+                    logger.warning(
+                        "agent_failed",
+                        agent="customer-profiler",
+                        error=str(e),
+                        analysis_id=str(analysis_id),
+                    )
+                    return None
+
+            if any([
+                request.include_market_research,
+                request.include_competitor_analysis,
+            ]):
+                await update_progress("wave-2", int((step / total_steps) * 100))
+
+            # Send agent_started updates sequentially BEFORE the parallel gather
+            # so concurrent coroutines never write to the WebSocket simultaneously.
+            if request.include_market_research:
                 await send_agent_update(
                     analysis_id=analysis_id,
                     update_type="agent_started",
-                    agent_id=agent_id,
+                    agent_id="market-intelligence",
                     agent_name="Market Intelligence",
                     status="thinking",
                     message=f"Researching {request.industry.value} market in Singapore...",
                 )
-
-                agent = MarketIntelligenceAgent()
-                market_result = await agent.run(
-                    f"Research {request.industry.value} market in Singapore for: {request.company_name}. {request.description}",
-                    context=context,
+            if request.include_competitor_analysis:
+                _wave2_competitors = context.get("known_competitors", [])[:5]
+                await send_agent_update(
+                    analysis_id=analysis_id,
+                    update_type="agent_started",
+                    agent_id="competitor-analyst",
+                    agent_name="Competitor Analyst",
+                    status="thinking",
+                    message=f"Analyzing {len(_wave2_competitors)} competitors...",
                 )
 
-                # Convert to MarketInsight format
-                if hasattr(market_result, "insights"):
+            market_result, competitor_result = await asyncio.gather(
+                _run_market_intel(),
+                _run_competitor_analyst(),
+            )
+
+            # --- Process market_result ---
+            if request.include_market_research:
+                if market_result is None:
+                    result.market_insights = []
+                elif hasattr(market_result, "insights"):
                     result.market_insights = market_result.insights
                 else:
                     key_findings = []
@@ -560,117 +840,86 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                         )
                     ]
 
-                completed_agents.append(agent_id)
+                completed_agents.append("market-intelligence")
                 step += 1
-
                 await send_agent_update(
                     analysis_id=analysis_id,
                     update_type="agent_completed",
-                    agent_id=agent_id,
+                    agent_id="market-intelligence",
                     agent_name="Market Intelligence",
                     status="complete",
                     progress=step / total_steps,
                     message=f"Found {len(result.market_insights)} market insights",
                     result={"insights_count": len(result.market_insights)},
                 )
-
                 decision_attribution["llm_decisions"] += 1
 
-            # =====================================================================
-            # STEP 2: Competitor Analysis
-            # =====================================================================
+            # --- Process competitor_result ---
             if request.include_competitor_analysis:
-                agent_id = "competitor-analyst"
-                await update_progress(agent_id, int((step / total_steps) * 100))
-
-                all_competitors = context.get("known_competitors", [])
-                competitors_to_analyze = (
-                    all_competitors[:5] if all_competitors else ["market leaders"]
-                )
-
-                await send_agent_update(
-                    analysis_id=analysis_id,
-                    update_type="agent_started",
-                    agent_id=agent_id,
-                    agent_name="Competitor Analyst",
-                    status="thinking",
-                    message=f"Analyzing {len(competitors_to_analyze)} competitors...",
-                )
-
-                agent = CompetitorAnalystAgent(agent_bus=agent_bus, analysis_id=analysis_id)
-                competitor_result = await agent.run(
-                    f"Analyze competitors for {request.company_name} in {request.industry.value}: {', '.join(competitors_to_analyze)}",
-                    context=context,
-                )
-
                 if hasattr(competitor_result, "competitors"):
                     result.competitor_analysis = competitor_result.competitors
                 else:
                     result.competitor_analysis = []
 
-                completed_agents.append(agent_id)
+                completed_agents.append("competitor-analyst")
                 step += 1
-
                 await send_agent_update(
                     analysis_id=analysis_id,
                     update_type="agent_completed",
-                    agent_id=agent_id,
+                    agent_id="competitor-analyst",
                     agent_name="Competitor Analyst",
                     status="complete",
                     progress=step / total_steps,
                     message=f"Analyzed {len(result.competitor_analysis)} competitors",
                     result={"competitors_count": len(result.competitor_analysis)},
                 )
-
                 decision_attribution["llm_decisions"] += 1
                 decision_attribution["tool_calls"] += 2
 
             # =====================================================================
-            # STEP 3: Customer Profiling
+            # WAVE 3: Customer Profiling
+            # Runs AFTER wave-2 so _plan() can read market_result and
+            # competitor_result bus publications (true A2A data flow).
             # =====================================================================
+            profile_result: object = None  # default if wave-3 is skipped
             if request.include_customer_profiling:
-                agent_id = "customer-profiler"
-                await update_progress(agent_id, int((step / total_steps) * 100))
-
+                await update_progress("customer-profiler", int((step / total_steps) * 100))
                 await send_agent_update(
                     analysis_id=analysis_id,
                     update_type="agent_started",
-                    agent_id=agent_id,
+                    agent_id="customer-profiler",
                     agent_name="Customer Profiler",
                     status="thinking",
-                    message="Developing ideal customer profiles...",
+                    message="Developing ideal customer profiles from market intel...",
                 )
 
-                agent = CustomerProfilerAgent()
-                profile_result = await agent.run(
-                    f"Create ideal customer profiles for {request.company_name}",
-                    context=context,
-                )
+                profile_result = await _run_customer_profiler()
 
                 if hasattr(profile_result, "personas"):
                     result.customer_personas = profile_result.personas
                 else:
                     result.customer_personas = []
 
-                completed_agents.append(agent_id)
+                completed_agents.append("customer-profiler")
                 step += 1
-
                 await send_agent_update(
                     analysis_id=analysis_id,
                     update_type="agent_completed",
-                    agent_id=agent_id,
+                    agent_id="customer-profiler",
                     agent_name="Customer Profiler",
                     status="complete",
                     progress=step / total_steps,
                     message=f"Created {len(result.customer_personas)} customer personas",
                     result={"personas_count": len(result.customer_personas)},
                 )
-
                 decision_attribution["llm_decisions"] += 1
 
             # =====================================================================
             # STEP 4: Lead Generation
             # =====================================================================
+            lead_result: object = None
+            campaign_result: object = None
+
             if request.include_lead_generation:
                 agent_id = "lead-hunter"
                 await update_progress(agent_id, int((step / total_steps) * 100))
@@ -685,15 +934,32 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 )
 
                 agent = LeadHunterAgent()
+                # Harvest pain_points from CustomerProfiler personas so LeadHunter
+                # can target companies experiencing those specific problems.
+                persona_pain_points: list[str] = []
+                for persona in result.customer_personas[:2]:
+                    if hasattr(persona, "pain_points"):
+                        persona_pain_points.extend(persona.pain_points[:3])
                 lead_context = {
                     **context,
                     "target_industries": [request.industry.value],
                     "target_count": request.lead_count,
+                    "target_locations": request.target_markets or ["Singapore"],
+                    "pain_points": list(dict.fromkeys(persona_pain_points)),  # deduped
+                    "personas": [p.model_dump(mode="json") for p in result.customer_personas[:2]]
+                    if result.customer_personas
+                    else [],
                 }
-                lead_result = await agent.run(
-                    f"Find {request.lead_count} qualified leads for {request.company_name} in {request.industry.value}",
-                    context=lead_context,
-                )
+                try:
+                    # 3 min: 5 parallel Perplexity calls + enrichment of 25 companies
+                    async with asyncio.timeout(180):
+                        lead_result = await agent.run(
+                            f"Find {request.lead_count} qualified leads for {request.company_name} in {request.industry.value}",
+                            context=lead_context,
+                        )
+                except (TimeoutError, MaxIterationsExceededError, AgentError) as e:
+                    logger.warning("agent_failed", agent=agent_id, error=str(e), analysis_id=str(analysis_id))
+                    lead_result = None
 
                 if hasattr(lead_result, "qualified_leads"):
                     result.leads = lead_result.qualified_leads
@@ -704,13 +970,11 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     decision_attribution["algorithm_decisions"] += lead_result.algorithm_decisions
                 if hasattr(lead_result, "llm_decisions"):
                     decision_attribution["llm_decisions"] += lead_result.llm_decisions
-                if hasattr(lead_result, "tool_calls"):
-                    decision_attribution["tool_calls"] += lead_result.tool_calls
 
                 completed_agents.append(agent_id)
                 step += 1
 
-                total_pipeline = sum(lead.overall_score * 50000 for lead in result.leads)
+                total_pipeline = sum(lead.overall_score * 15000 for lead in result.leads)
 
                 await send_agent_update(
                     analysis_id=analysis_id,
@@ -742,25 +1006,39 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     message="Creating outreach campaigns...",
                 )
 
-                agent = CampaignArchitectAgent()
+                agent = CampaignArchitectAgent(bus=agent_bus)
                 campaign_context = {
                     **context,
-                    "leads": [lead.model_dump() for lead in result.leads[:3]]
+                    "leads": [lead.model_dump(mode="json") for lead in result.leads[:3]]
                     if result.leads
                     else [],
-                    "personas": [p.model_dump() for p in result.customer_personas[:2]]
+                    "personas": [p.model_dump(mode="json") for p in result.customer_personas[:2]]
                     if result.customer_personas
                     else [],
+                    # company_name, description, value_proposition etc. already in context
+                    # via **context spread above — no separate company_profile needed.
                 }
-                campaign_result = await agent.run(
-                    f"Create outreach campaign for {request.company_name}",
-                    context=campaign_context,
-                )
+                try:
+                    async with asyncio.timeout(90):
+                        campaign_result = await agent.run(
+                            f"Create outreach campaign for {request.company_name}",
+                            context=campaign_context,
+                        )
+                except (TimeoutError, MaxIterationsExceededError, AgentError) as e:
+                    logger.warning("agent_failed", agent=agent_id, error=str(e), analysis_id=str(analysis_id))
+                    campaign_result = None
 
                 if hasattr(campaign_result, "campaign_brief"):
                     result.campaign_brief = campaign_result.campaign_brief
                 elif hasattr(campaign_result, "brief"):
                     result.campaign_brief = campaign_result.brief
+
+                if campaign_result:
+                    result.outreach_sequences = [
+                        seq.model_dump() for seq in (campaign_result.outreach_sequences or [])
+                    ]
+                    result.success_metrics = campaign_result.success_metrics or []
+                    result.compliance_flags = getattr(campaign_result, "compliance_flags", []) or []
 
                 completed_agents.append(agent_id)
                 step += 1
@@ -779,53 +1057,253 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 decision_attribution["llm_decisions"] += 1
 
             # =====================================================================
+            # Pull GTM Strategist market sizing + sales motion from bus history
+            # (published via MARKET_TREND discovery by GTMStrategistAgent._act())
+            # =====================================================================
+            market_trend_msgs = agent_bus.get_history(
+                analysis_id=analysis_id,
+                discovery_type=DiscoveryType.MARKET_TREND,
+                limit=1,
+            )
+            if market_trend_msgs:
+                mt = market_trend_msgs[0].content
+                tam = mt.get("tam_sgd_estimate")
+                sam = mt.get("sam_sgd_estimate")
+                som = mt.get("som_sgd_estimate")
+                primary_motion = mt.get("primary_motion")
+                deal_size = mt.get("deal_size_sgd")
+                if any([tam, sam, som]):
+                    result.market_sizing = {
+                        "tam_sgd_estimate": tam,
+                        "sam_sgd_estimate": sam,
+                        "som_sgd_estimate": som,
+                        "tam_description": mt.get("tam_description", ""),
+                        "sam_description": mt.get("sam_description", ""),
+                        "som_description": mt.get("som_description", ""),
+                        "assumptions": mt.get("assumptions", []),
+                    }
+                if any([primary_motion, deal_size]):
+                    result.sales_motion = {
+                        "primary_motion": primary_motion or "",
+                        "deal_size_sgd": deal_size or "",
+                        "sales_cycle_days": mt.get("sales_cycle_days"),
+                        "key_objections": mt.get("key_objections", []),
+                        "win_themes": mt.get("win_themes", []),
+                        "recommended_first_90_days": mt.get("recommended_first_90_days", []),
+                    }
+
+            # =====================================================================
             # Finalize Results
             # =====================================================================
-            total_decisions = (
-                decision_attribution["algorithm_decisions"] + decision_attribution["llm_decisions"]
-            )
-            determinism_ratio = (
-                decision_attribution["algorithm_decisions"] / total_decisions
-                if total_decisions > 0
-                else 0.5
-            )
-
             result.agents_used = completed_agents
             result.processing_time_seconds = time.time() - start_time
-            result.total_confidence = 0.75 + (determinism_ratio * 0.15)
 
-            result.executive_summary = (
-                f"GTM analysis completed for {request.company_name}. "
-                f"Found {len(result.leads)} qualified leads, "
-                f"analyzed {len(result.competitor_analysis)} competitors, "
-                f"and created {len(result.customer_personas)} customer personas."
-            )
+            # Derive confidence from actual per-agent outcomes
+            agent_scores: list[float] = []
+            if market_result is not None and hasattr(market_result, "confidence"):
+                agent_scores.append(market_result.confidence)
+            elif request.include_market_research:
+                agent_scores.append(0.0)  # agent failed
 
-            result.key_recommendations = [
-                "Focus on the identified high-fit leads for immediate outreach",
-                "Use the campaign templates provided for initial contact",
-                "Monitor market trends identified for ongoing opportunities",
-            ]
+            if competitor_result is not None and hasattr(competitor_result, "confidence"):
+                agent_scores.append(competitor_result.confidence)
+            elif request.include_competitor_analysis:
+                agent_scores.append(0.0)
+
+            if profile_result is not None and hasattr(profile_result, "confidence"):
+                agent_scores.append(profile_result.confidence)
+            elif request.include_customer_profiling:
+                agent_scores.append(0.0)
+
+            if lead_result is not None and hasattr(lead_result, "confidence"):
+                agent_scores.append(lead_result.confidence)
+            elif request.include_lead_generation:
+                agent_scores.append(0.0)
+
+            if campaign_result is not None and hasattr(campaign_result, "confidence"):
+                agent_scores.append(campaign_result.confidence)
+            elif request.include_campaign_planning:
+                agent_scores.append(0.0)
+
+            result.total_confidence = sum(agent_scores) / len(agent_scores) if agent_scores else 0.0
+
+            # ── Rich, data-driven executive summary ──────────────────────────────
+            top_lead = max(result.leads, key=lambda lead: lead.overall_score) if result.leads else None
+            top_insight = result.market_insights[0] if result.market_insights else None
+            top_competitor = result.competitor_analysis[0] if result.competitor_analysis else None
+
+            summary_parts: list[str] = []
+            sector_label = request.industry.value.replace('_', ' ')
+            if top_lead:
+                if top_lead.contact_name:
+                    title_part = f", {top_lead.contact_title}" if top_lead.contact_title else ""
+                    contact_str = f" Contact: {top_lead.contact_name}{title_part}."
+                else:
+                    contact_str = ""
+                summary_parts.append(
+                    f"GTM analysis for {request.company_name} ({sector_label} sector):"
+                    f" Identified {len(result.leads)} qualified leads — best fit is "
+                    f"{top_lead.company_name} ({top_lead.overall_score:.0%} match).{contact_str}"
+                )
+            else:
+                summary_parts.append(
+                    f"GTM analysis for {request.company_name} in Singapore's {sector_label} sector complete."
+                )
+            if top_insight and top_insight.summary:
+                summary_parts.append(top_insight.summary[:220].rstrip(".") + ".")
+            if top_competitor and top_competitor.weaknesses:
+                weakness_short = top_competitor.weaknesses[0][:120].rstrip(".")
+                summary_parts.append(
+                    f"Key competitive gap vs {top_competitor.competitor_name}: {weakness_short}."
+                )
+            result.executive_summary = " ".join(summary_parts)
+
+            # ── Actionable key recommendations ───────────────────────────────────
+            # Consistent ACV across all revenue displays (pipeline card uses same figure)
+            avg_acv_sgd = 15_000
+            key_recommendations: list[str] = []
+
+            # #1 Action first — this gets highlighted in the UI (index 0)
+            if top_lead:
+                trigger_str = ""
+                if hasattr(top_lead, "trigger_events") and top_lead.trigger_events:
+                    trigger_str = f" Trigger: {top_lead.trigger_events[0]}."
+                contact_str = ""
+                if top_lead.contact_name and top_lead.contact_email:
+                    contact_str = f" Email {top_lead.contact_name} at {top_lead.contact_email} today."
+                elif top_lead.contact_name:
+                    contact_str = f" Key contact: {top_lead.contact_name} ({top_lead.contact_title or 'decision maker'})."
+                key_recommendations.append(
+                    f"#1 Action: Reach out to {top_lead.company_name} — {top_lead.overall_score:.0%} ICP fit.{trigger_str}{contact_str}"
+                )
+            else:
+                key_recommendations.append(
+                    "No leads auto-discovered — add a website URL or known competitors to improve lead generation"
+                )
+
+            # Revenue projection — consistent ACV matches pipeline card in UI
+            if result.leads:
+                total_pipeline = sum(lead.overall_score * avg_acv_sgd for lead in result.leads)
+                key_recommendations.append(
+                    f"Pipeline value: {len(result.leads)} scored leads × SGD {avg_acv_sgd:,} ACV = SGD {total_pipeline:,.0f} weighted pipeline"
+                )
+
+            # Competitor positioning
+            if result.competitor_analysis:
+                weakness_str = ""
+                if top_competitor and top_competitor.weaknesses:
+                    weakness_str = f" Lead with: {top_competitor.weaknesses[0][:120]}."
+                key_recommendations.append(
+                    f"Differentiate against {len(result.competitor_analysis)} competitors identified.{weakness_str}"
+                )
+            else:
+                key_recommendations.append(
+                    "Provide known competitors to enable SWOT analysis and positioning recommendations"
+                )
+
+            # Market insight action
+            if top_insight and top_insight.recommendations:
+                key_recommendations.append(
+                    f"Market action: {top_insight.recommendations[0][:200]}"
+                )
+            elif top_insight:
+                key_recommendations.append(
+                    f"Market signal: {top_insight.summary[:200]}"
+                )
+
+            # Campaign action
+            if result.campaign_brief and result.campaign_brief.email_templates:
+                key_recommendations.append(
+                    f"Campaign ready: use the '{result.campaign_brief.name}' email sequence — first template ready to personalise and send"
+                )
+
+            result.key_recommendations = key_recommendations
 
             # Save to database
             analysis.status = DBAnalysisStatus.COMPLETED
             analysis.progress = 100
             analysis.current_agent = None
-            analysis.completed_agents = completed_agents
+            analysis.completed_agents = list(completed_agents)
             analysis.executive_summary = result.executive_summary
             analysis.key_recommendations = result.key_recommendations
             analysis.market_insights = (
-                [m.model_dump() for m in result.market_insights] if result.market_insights else []
+                [m.model_dump(mode="json") for m in result.market_insights] if result.market_insights else []
             )
-            analysis.competitor_analysis = result.competitor_analysis
+            analysis.competitor_analysis = (
+                [c.model_dump(mode="json") if hasattr(c, "model_dump") else c for c in result.competitor_analysis]
+                if result.competitor_analysis
+                else []
+            )
             analysis.customer_personas = (
-                [p.model_dump() for p in result.customer_personas]
+                [p.model_dump(mode="json") for p in result.customer_personas]
                 if result.customer_personas
                 else []
             )
-            analysis.leads = [lead.model_dump() for lead in result.leads] if result.leads else []
+            analysis.leads = [lead.model_dump(mode="json") for lead in result.leads] if result.leads else []
+
+            # Persist leads to the Lead table so workspace pages can read them
+            for lead_profile in result.leads:
+                db.add(Lead(
+                    company_id=analysis.company_id,
+                    lead_company_name=lead_profile.company_name,
+                    lead_company_website=lead_profile.website,
+                    lead_company_industry=lead_profile.industry.value if hasattr(lead_profile.industry, "value") else str(lead_profile.industry),
+                    lead_company_description=lead_profile.recommended_approach,
+                    contact_name=lead_profile.contact_name,
+                    contact_title=lead_profile.contact_title,
+                    contact_email=lead_profile.contact_email,
+                    contact_linkedin=lead_profile.contact_linkedin,
+                    fit_score=int(lead_profile.fit_score * 100),
+                    intent_score=int(lead_profile.intent_score * 100),
+                    overall_score=int(lead_profile.overall_score * 100),
+                ))
+
+            # Materialize market insights → MarketInsight table (powers /insights page)
+            for insight in result.market_insights:
+                confidence = insight.confidence or 0.0
+                impact = "high" if confidence >= 0.7 else "medium" if confidence >= 0.4 else "low"
+                db.add(DBMarketInsight(
+                    company_id=analysis.company_id,
+                    insight_type=insight.category or "trend",
+                    category=insight.category or "market",
+                    title=insight.title,
+                    summary=insight.summary,
+                    full_content="\n".join(
+                        (insight.key_findings or []) + (insight.implications or [])
+                    ),
+                    relevance_score=confidence,
+                    impact_level=impact,
+                    recommended_actions=insight.recommendations or [],
+                    source_name=insight.sources[0] if insight.sources else None,
+                    related_agents=["market-intelligence"],
+                ))
+
+            # Materialize campaign brief → Campaign table (powers /campaigns page)
+            if result.campaign_brief:
+                cb = result.campaign_brief
+                db.add(DBCampaign(
+                    company_id=analysis.company_id,
+                    name=cb.name,
+                    description=cb.objective,
+                    objective=cb.objective,
+                    status=CampaignStatus.DRAFT,
+                    target_personas=[cb.target_persona] if cb.target_persona else [],
+                    target_industries=[
+                        i.value if hasattr(i, "value") else str(i)
+                        for i in (cb.target_industries or [])
+                    ],
+                    key_messages=cb.key_messages or [],
+                    value_propositions=cb.value_propositions or [],
+                    call_to_action=cb.call_to_action,
+                    channels=cb.channels or [],
+                    email_templates=[{"body": t} for t in (cb.email_templates or [])],
+                    linkedin_posts=[{"content": p} for p in (cb.linkedin_posts or [])],
+                    budget=cb.budget_sgd,
+                    currency="SGD",
+                ))
+
             analysis.campaign_brief = (
-                result.campaign_brief.model_dump()
+                result.campaign_brief.model_dump(mode="json")
                 if hasattr(result.campaign_brief, "model_dump")
                 else result.campaign_brief
             )
@@ -833,6 +1311,17 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
             analysis.processing_time_seconds = result.processing_time_seconds
             analysis.agents_used = result.agents_used
             await db.commit()
+
+            # Mark GTM Strategist as complete before broadcasting analysis_completed
+            await send_agent_update(
+                analysis_id=analysis_id,
+                update_type="agent_completed",
+                agent_id="gtm-strategist",
+                agent_name="GTM Strategist",
+                status="complete",
+                progress=1.0,
+                message=f"Strategy complete — {len(result.leads)} leads, {len(result.competitor_analysis)} competitors analysed",
+            )
 
             # Send final completion
             await send_agent_update(
@@ -859,15 +1348,28 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
             )
 
         except Exception as e:
+            full_tb = traceback.format_exc()
             logger.error(
                 "analysis_failed",
                 analysis_id=str(analysis_id),
                 error=str(e),
+                traceback=full_tb,
             )
+            # Always rollback first — the session may be in a broken state if the
+            # main try block's db.commit() was what raised. Without rollback, any
+            # subsequent commit raises InvalidRequestError and the analysis is
+            # permanently stuck as RUNNING.
+            try:
+                await db.rollback()
+            except Exception:
+                pass
             analysis.status = DBAnalysisStatus.FAILED
-            analysis.error = str(e)
+            analysis.error = full_tb
             analysis.current_agent = None
-            await db.commit()
+            try:
+                await db.commit()
+            except Exception as commit_err:
+                logger.error("failed_status_commit_failed", error=str(commit_err))
 
             await send_agent_update(
                 analysis_id=analysis_id,
@@ -901,14 +1403,20 @@ async def run_analysis_sync(request: AnalysisRequest) -> GTMAnalysisResult:
         agent = LeadHunterAgent()
         lead_context = {
             **context,
+            "analysis_id": result.id,  # scope any bus operations to this analysis
             "target_industries": [request.industry.value],
             "target_count": min(request.lead_count, 5),
         }
-        lead_result = await agent.run(
-            f"Find qualified leads in {request.industry.value}",
-            context=lead_context,
-        )
-        result.leads = lead_result.qualified_leads
+        try:
+            async with asyncio.timeout(60):
+                lead_result = await agent.run(
+                    f"Find qualified leads in {request.industry.value}",
+                    context=lead_context,
+                )
+            result.leads = lead_result.qualified_leads
+        except (TimeoutError, MaxIterationsExceededError, AgentError) as e:
+            logger.warning("quick_analysis_lead_hunter_failed", error=str(e))
+            result.leads = []
 
     result.agents_used = ["lead-hunter"]
     result.total_confidence = 0.7

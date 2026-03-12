@@ -12,7 +12,7 @@ API Documentation: https://learn.microsoft.com/en-us/dynamics365/customerengagem
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -107,7 +107,7 @@ class DynamicsMCPServer(APIBasedMCPServer):
     async def _ensure_authenticated(self) -> bool:
         """Ensure we have a valid access token."""
         if self._access_token and self._token_expires_at:
-            if datetime.utcnow() < self._token_expires_at - timedelta(minutes=5):
+            if datetime.now(UTC) < self._token_expires_at - timedelta(minutes=5):
                 return True
         return await self._authenticate()
 
@@ -131,7 +131,7 @@ class DynamicsMCPServer(APIBasedMCPServer):
                 data = response.json()
                 self._access_token = data.get("access_token")
                 expires_in = data.get("expires_in", 3600)
-                self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+                self._token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
                 self._logger.info("dynamics_authenticated", environment=self._environment)
                 return True

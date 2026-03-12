@@ -40,9 +40,10 @@ export function transformLead(backend: BackendLead): Lead {
     triggerEvents: backend.trigger_events,
     recommendedApproach: backend.recommended_approach,
     source: backend.source,
-    // Determine scoring method based on source
-    scoringMethod: backend.source === 'algorithm' ? 'algorithm' : 'algorithm', // Default to algorithm
-    expectedValue: Math.round(backend.overall_score * 50000), // Estimated value based on score
+    scoringMethod: backend.source || 'unknown',
+    verifiedEmail: backend.verified_email,
+    emailDomainValid: backend.email_domain_valid,
+    buyingCycleStage: backend.buying_cycle_stage ?? undefined,
   };
 }
 
@@ -118,8 +119,9 @@ export function transformAnalysisResult(
   const leads = backend.leads.map(transformLead);
 
   // Calculate total pipeline value
+  const BASE_ACV_SGD = 15000; // Conservative SME SaaS ACV
   const totalPipelineValue = leads.reduce(
-    (sum, lead) => sum + (lead.expectedValue || 0),
+    (sum, lead) => sum + (lead.overallScore ?? 0) * BASE_ACV_SGD,
     0
   );
 
@@ -157,33 +159,29 @@ export function transformAnalysisResult(
       determinismRatio: decisionData.determinismRatio,
       breakdown: [
         // Generate breakdown based on actual decisions
-        ...leads.map((lead, index) => ({
+        ...leads.map((lead) => ({
           layer: 'analytical' as const,
           component: 'ICP Scorer',
           decision: `Fit score: ${lead.fitScore.toFixed(2)}`,
           confidence: lead.fitScore,
-          executionTimeMs: 2.0 + index * 0.1, // Deterministic based on index
         })),
         {
           layer: 'operational' as const,
           component: 'Company Enrichment',
           decision: `Enriched ${leads.length} companies`,
           confidence: 1.0,
-          executionTimeMs: 200 + leads.length * 10, // Deterministic based on lead count
         },
         {
           layer: 'cognitive' as const,
           component: 'LLM Synthesis',
           decision: 'Generated market insights',
           confidence: backend.total_confidence,
-          executionTimeMs: 1500, // Fixed value
         },
         {
           layer: 'governance' as const,
           component: 'PDPA Checker',
           decision: 'Data compliant',
           confidence: 1.0,
-          executionTimeMs: 1.2,
         },
       ],
     };
@@ -205,6 +203,47 @@ export function transformAnalysisResult(
     campaignBrief: backend.campaign_brief
       ? transformCampaignBrief(backend.campaign_brief)
       : undefined,
+    marketSizing: backend.market_sizing ? (() => {
+      const ms = backend.market_sizing as Record<string, unknown>;
+      return {
+        tamDescription: (ms.tam_description as string) ?? '',
+        samDescription: (ms.sam_description as string) ?? '',
+        somDescription: (ms.som_description as string) ?? '',
+        tamSgdEstimate: ms.tam_sgd_estimate as string | undefined,
+        samSgdEstimate: ms.sam_sgd_estimate as string | undefined,
+        somSgdEstimate: ms.som_sgd_estimate as string | undefined,
+        assumptions: (ms.assumptions as string[]) ?? [],
+      };
+    })() : undefined,
+    salesMotion: backend.sales_motion ? (() => {
+      const sm = backend.sales_motion as Record<string, unknown>;
+      return {
+        primaryMotion: (sm.primary_motion as string) ?? '',
+        dealSizeSgd: (sm.deal_size_sgd as string) ?? '',
+        salesCycleDays: sm.sales_cycle_days as number | undefined,
+        keyObjections: (sm.key_objections as string[]) ?? [],
+        winThemes: (sm.win_themes as string[]) ?? [],
+        recommendedFirst90Days: (sm.recommended_first_90_days as string[]) ?? [],
+      };
+    })() : undefined,
+    outreachSequences: (backend.outreach_sequences ?? []).map((seq) => {
+      const s = seq as Record<string, unknown>;
+      return {
+        name: (s.name as string) ?? '',
+        targetPersona: s.target_persona as string | undefined,
+        steps: ((s.steps as unknown[]) ?? []).map((step) => {
+          const st = step as Record<string, unknown>;
+          return {
+            stepNumber: (st.step_number as number) ?? (st.day as number) ?? 0,
+            channelType: (st.channel_type as string) ?? (st.channel as string) ?? '',
+            subjectLine: (st.subject_line as string) ?? '',
+            timing: (st.timing as string) ?? (st.timing_description as string) ?? '',
+          };
+        }),
+      };
+    }),
+    successMetrics: backend.success_metrics ?? [],
+    complianceFlags: backend.compliance_flags ?? [],
     totalPipelineValue,
     decisionAttribution,
   };

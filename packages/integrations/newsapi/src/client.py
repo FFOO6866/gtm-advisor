@@ -7,7 +7,7 @@ Useful for market research, competitor monitoring, and trend analysis.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -237,7 +237,7 @@ class NewsAPIClient:
             Market news results
         """
         query = f"{industry} {region} market startup business"
-        from_date = datetime.utcnow() - timedelta(days=days_back)
+        from_date = datetime.now(UTC) - timedelta(days=days_back)
 
         return await self.search(
             query=query,
@@ -260,7 +260,7 @@ class NewsAPIClient:
         Returns:
             Competitor news results
         """
-        from_date = datetime.utcnow() - timedelta(days=days_back)
+        from_date = datetime.now(UTC) - timedelta(days=days_back)
 
         return await self.search(
             query=f'"{competitor_name}"',

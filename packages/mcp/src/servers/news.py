@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from xml.etree import ElementTree
 
@@ -246,7 +246,7 @@ class NewsAggregatorMCPServer(APIBasedMCPServer):
         facts = []
 
         try:
-            from_date = datetime.utcnow() - timedelta(days=days_back)
+            from_date = datetime.now(UTC) - timedelta(days=days_back)
             result = await self._newsapi.search(
                 query=query,
                 from_date=from_date,

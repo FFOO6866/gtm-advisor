@@ -26,17 +26,19 @@ import structlog
 
 from packages.mcp.src.registry import MCPRegistry
 from packages.mcp.src.servers.acra import ACRAMCPServer
+from packages.mcp.src.servers.dynamics import DynamicsMCPServer
 from packages.mcp.src.servers.eodhd import EODHDMCPServer
-from packages.mcp.src.servers.news import NewsAggregatorMCPServer
-from packages.mcp.src.servers.web_scraper import WebScraperMCPServer
+
 # CRM integrations
 from packages.mcp.src.servers.hubspot import HubSpotMCPServer
-from packages.mcp.src.servers.salesforce import SalesforceMCPServer
-from packages.mcp.src.servers.dynamics import DynamicsMCPServer
-from packages.mcp.src.servers.sugarcrm import SugarCRMMCPServer
+
 # Email services
 from packages.mcp.src.servers.mailgun import MailgunMCPServer
+from packages.mcp.src.servers.news import NewsAggregatorMCPServer
+from packages.mcp.src.servers.salesforce import SalesforceMCPServer
 from packages.mcp.src.servers.sendgrid import SendGridMCPServer
+from packages.mcp.src.servers.sugarcrm import SugarCRMMCPServer
+from packages.mcp.src.servers.web_scraper import WebScraperMCPServer
 from packages.mcp.src.types import (
     EvidencedFact,
     FactType,
@@ -306,6 +308,45 @@ class AgentMCPClient:
 
         return facts
 
+    async def discover_local_companies(
+        self,
+        keyword: str,
+        exclude_name: str = "",
+        limit: int = 8,
+    ) -> list[str]:
+        """Discover active Singapore-registered companies in a given service category.
+
+        Delegates to the ACRA MCP server using a full-text search across company
+        names and SSIC industry descriptions.  Returns plain company-name strings,
+        deduplicated and filtered to active entities only.
+
+        Args:
+            keyword: Service-category search term (e.g. "marketing consulting")
+            exclude_name: Client's own company name — excluded from results
+            limit: Maximum names to return
+
+        Returns:
+            List of company name strings (may be empty if ACRA is unavailable)
+        """
+        acra_server = self._registry.get_server("ACRA Singapore")
+        if not isinstance(acra_server, ACRAMCPServer):
+            return []
+        try:
+            records = await acra_server.search_active_companies(keyword, limit=limit + 5)
+        except Exception as e:
+            self._logger.debug("acra_discover_failed", keyword=keyword, error=str(e))
+            return []
+
+        exclude_lower = exclude_name.strip().lower()
+        names: list[str] = []
+        for rec in records:
+            name = rec.get("name", "").strip()
+            if name and name.lower() != exclude_lower:
+                names.append(name)
+            if len(names) >= limit:
+                break
+        return names
+
     async def find_market_news(
         self,
         industry: str,
@@ -488,11 +529,7 @@ class AgentMCPClient:
         try:
             if crm_type == "hubspot":
                 return await server.create_contact(lead_data)
-            elif crm_type == "salesforce":
-                return await server.create_lead(lead_data)
-            elif crm_type == "dynamics":
-                return await server.create_lead(lead_data)
-            elif crm_type == "sugarcrm":
+            elif crm_type == "salesforce" or crm_type == "dynamics" or crm_type == "sugarcrm":
                 return await server.create_lead(lead_data)
         except Exception as e:
             self._logger.error("crm_sync_failed", crm_type=crm_type, error=str(e))

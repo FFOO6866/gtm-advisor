@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -71,7 +71,7 @@ class ConsentRecord:
         """Check if consent is still valid."""
         if self.withdrawn_at:
             return False
-        if self.expires_at and datetime.utcnow() > self.expires_at:
+        if self.expires_at and datetime.now(UTC) > self.expires_at:
             return False
         return True
 
@@ -206,8 +206,8 @@ class PDPAChecker:
             id=str(uuid.uuid4()),
             data_subject_id=subject_id,
             purposes=purposes,
-            granted_at=datetime.utcnow(),
-            expires_at=datetime.utcnow() + timedelta(days=expires_in_days),
+            granted_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(days=expires_in_days),
             source=source,
             ip_address=ip_address,
         )
@@ -232,10 +232,10 @@ class PDPAChecker:
                 # Withdraw specific purposes
                 record.purposes = [p for p in record.purposes if p not in purposes]
                 if not record.purposes:
-                    record.withdrawn_at = datetime.utcnow()
+                    record.withdrawn_at = datetime.now(UTC)
             else:
                 # Withdraw all
-                record.withdrawn_at = datetime.utcnow()
+                record.withdrawn_at = datetime.now(UTC)
 
         return True
 
@@ -251,7 +251,7 @@ class PDPAChecker:
         for record in records:
             if record.withdrawn_at:
                 return ConsentStatus.WITHDRAWN
-            if record.expires_at and datetime.utcnow() > record.expires_at:
+            if record.expires_at and datetime.now(UTC) > record.expires_at:
                 continue  # Check other records
             if purpose in record.purposes:
                 return ConsentStatus.GRANTED
@@ -401,7 +401,7 @@ class PDPAChecker:
             }
 
         expires_at = collected_at + timedelta(days=field_def.retention_days)
-        should_delete = datetime.utcnow() > expires_at
+        should_delete = datetime.now(UTC) > expires_at
 
         return {
             "field": field,
@@ -409,7 +409,7 @@ class PDPAChecker:
             "retention_days": field_def.retention_days,
             "expires_at": expires_at.isoformat(),
             "should_delete": should_delete,
-            "days_remaining": max(0, (expires_at - datetime.utcnow()).days),
+            "days_remaining": max(0, (expires_at - datetime.now(UTC)).days),
         }
 
     def _hash_identifier(self, identifier: str) -> str:
@@ -465,7 +465,7 @@ class PDPAChecker:
             ]
 
         return {
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "total_data_subjects": len(self._consent_records),
             "total_consent_records": total_consents,
             "active_consents": active_consents,

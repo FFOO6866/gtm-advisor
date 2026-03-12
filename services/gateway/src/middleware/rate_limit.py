@@ -7,6 +7,7 @@ Uses Redis for distributed rate limiting in production.
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException, Request
@@ -20,6 +21,10 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+# ContextVar to carry the current request into limit functions.
+# slowapi calls limit callables with no arguments; we use this to bridge the gap.
+_current_request: ContextVar[Request | None] = ContextVar("_current_request", default=None)
 
 # Key prefix for rate limiter to avoid conflicts with other Redis data
 RATE_LIMIT_KEY_PREFIX = "gtm:ratelimit:"
@@ -52,8 +57,15 @@ def _get_tier_name(user: object | None) -> str:
 def get_user_tier_key(request: Request) -> str:
     """Get rate limit key based on user's subscription tier.
 
+    Also stores the request in _current_request ContextVar so the no-arg
+    limit functions (get_rate_limit_for_request, get_analysis_limit_for_request)
+    can read it — slowapi calls limit callables with no arguments.
+
     Returns a key in format: "prefix:user:user_id" or "prefix:ip:address" for anonymous.
     """
+    # Store request so no-arg limit callables can access it
+    _current_request.set(request)
+
     user = getattr(request.state, "user", None)
 
     if user:
@@ -65,28 +77,31 @@ def get_user_tier_key(request: Request) -> str:
     return f"{RATE_LIMIT_KEY_PREFIX}ip:{ip}"
 
 
-def get_rate_limit_for_request(request: Request) -> str:
-    """Get the appropriate rate limit string for a request.
+def get_rate_limit_for_request() -> str:
+    """Get the appropriate rate limit string for the current request.
 
-    Reads limits from configuration at request time.
+    Slowapi calls limit callables with no arguments; the request is read from
+    _current_request ContextVar set by the key_func (get_user_tier_key) call or
+    by AuthMiddleware.
     """
+    request = _current_request.get()
     config = get_config()
-    user = getattr(request.state, "user", None)
+    user = getattr(request.state, "user", None) if request else None
     tier_name = _get_tier_name(user)
-
     limit = config.get_rate_limit_requests(tier_name)
     return f"{limit}/day"
 
 
-def get_analysis_limit_for_request(request: Request) -> str:
-    """Get analysis-specific rate limit for a request.
+def get_analysis_limit_for_request() -> str:
+    """Get analysis-specific rate limit for the current request.
 
-    Reads limits from configuration at request time.
+    Slowapi calls limit callables with no arguments; the request is read from
+    _current_request ContextVar.
     """
+    request = _current_request.get()
     config = get_config()
-    user = getattr(request.state, "user", None)
+    user = getattr(request.state, "user", None) if request else None
     tier_name = _get_tier_name(user)
-
     limit = config.get_rate_limit_analyses(tier_name)
     return f"{limit}/day"
 
@@ -206,7 +221,7 @@ def analysis_limit():
 def free_tier_limit():
     """Rate limit decorator for free tier endpoints."""
 
-    def _get_free_limit(_request: Request) -> str:
+    def _get_free_limit() -> str:
         config = get_config()
         return f"{config.rate_limit_free_requests}/day"
 

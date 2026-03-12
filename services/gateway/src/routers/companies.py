@@ -190,6 +190,7 @@ class CompanyResponse(BaseModel):
     tech_stack: list[str] = []
     enrichment_confidence: float = 0.0
     last_enriched_at: str | None = None
+    context_sources: list[dict] = []
     created_at: str
     updated_at: str | None = None
 
@@ -222,7 +223,10 @@ def company_to_response(company: Company) -> CompanyResponse:
         headquarters=company.headquarters,
         employee_count=company.employee_count,
         founded_year=company.founded_year,
-        products=company.products or [],
+        products=[
+            p if isinstance(p, str) else (p.get("name", str(p)) if isinstance(p, dict) else str(p))
+            for p in (company.products or [])
+        ],
         target_markets=company.target_markets or [],
         value_proposition=company.value_proposition,
         challenges=company.challenges or [],
@@ -231,6 +235,7 @@ def company_to_response(company: Company) -> CompanyResponse:
         tech_stack=company.tech_stack or [],
         enrichment_confidence=company.enrichment_confidence or 0.0,
         last_enriched_at=company.last_enriched_at.isoformat() if company.last_enriched_at else None,
+        context_sources=company.context_sources or [],
         created_at=company.created_at.isoformat()
         if company.created_at
         else datetime.now(UTC).isoformat(),

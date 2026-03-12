@@ -17,6 +17,7 @@ import re
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
+import certifi
 import httpx
 from bs4 import BeautifulSoup
 
@@ -117,9 +118,11 @@ class WebScraperMCPServer(WebScrapingMCPServer):
     def __init__(self, config: MCPServerConfig) -> None:
         """Initialize web scraper."""
         super().__init__(config)
+        # Use certifi CA bundle so HTTPS works on macOS/Linux without system cert config
         self._http = httpx.AsyncClient(
             timeout=config.timeout_seconds,
             follow_redirects=True,
+            verify=certifi.where(),
         )
 
     @classmethod
@@ -194,6 +197,7 @@ class WebScraperMCPServer(WebScrapingMCPServer):
             # Scrape homepage
             await self._respect_rate_limit()
             homepage_content, homepage_headers = await self._fetch_page(url)
+            company_name: str | None = None  # initialise before conditional block
 
             if homepage_content:
                 # Extract company name from title/meta
@@ -264,8 +268,18 @@ class WebScraperMCPServer(WebScrapingMCPServer):
         return result
 
     def _normalize_url(self, query: str) -> str | None:
-        """Normalize URL/domain to full URL."""
+        """Normalize URL/domain to full URL.
+
+        Returns None if the query is a plain company name (no dot / no valid
+        hostname) to avoid wasting HTTP calls on bogus addresses.
+        """
         query = query.strip()
+
+        # Reject queries that look like plain company names (contain spaces,
+        # have no dot, or look like natural language).
+        # Minimum viable domain must contain at least one dot and no spaces.
+        if " " in query and not query.startswith(("http://", "https://")):
+            return None
 
         # Add protocol if missing
         if not query.startswith(("http://", "https://")):
@@ -274,9 +288,10 @@ class WebScraperMCPServer(WebScrapingMCPServer):
         # Validate URL
         try:
             parsed = urlparse(query)
-            if not parsed.netloc:
+            netloc = parsed.netloc
+            if not netloc or " " in netloc or "." not in netloc:
                 return None
-            return f"{parsed.scheme}://{parsed.netloc}"
+            return f"{parsed.scheme}://{netloc}"
         except Exception:
             return None
 

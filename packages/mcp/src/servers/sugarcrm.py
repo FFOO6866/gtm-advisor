@@ -12,7 +12,7 @@ API Documentation: https://support.sugarcrm.com/documentation/sugar_developer/su
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -98,7 +98,7 @@ class SugarCRMMCPServer(APIBasedMCPServer):
     async def _ensure_authenticated(self) -> bool:
         """Ensure we have a valid access token."""
         if self._access_token and self._token_expires_at:
-            if datetime.utcnow() < self._token_expires_at - timedelta(minutes=5):
+            if datetime.now(UTC) < self._token_expires_at - timedelta(minutes=5):
                 return True
 
         # Try refresh token first
@@ -128,7 +128,7 @@ class SugarCRMMCPServer(APIBasedMCPServer):
                 self._access_token = data.get("access_token")
                 self._refresh_token = data.get("refresh_token")
                 expires_in = data.get("expires_in", 3600)
-                self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+                self._token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
 
                 self._logger.info("sugarcrm_authenticated", url=self._base_url)
                 return True
@@ -163,7 +163,7 @@ class SugarCRMMCPServer(APIBasedMCPServer):
                 self._access_token = data.get("access_token")
                 self._refresh_token = data.get("refresh_token")
                 expires_in = data.get("expires_in", 3600)
-                self._token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+                self._token_expires_at = datetime.now(UTC) + timedelta(seconds=expires_in)
                 return True
             else:
                 return False

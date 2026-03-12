@@ -56,6 +56,7 @@ class GTMConfig(BaseSettings):
     perplexity_api_key: str | None = Field(default=None, alias="PERPLEXITY_API_KEY")
     newsapi_api_key: str | None = Field(default=None, alias="NEWSAPI_API_KEY")
     eodhd_api_key: str | None = Field(default=None, alias="EODHD_API_KEY")
+    hunter_api_key: str | None = Field(default=None, alias="HUNTER_API_KEY")
 
     # Infrastructure
     postgres_url: str | None = Field(
@@ -176,7 +177,7 @@ class GTMConfig(BaseSettings):
 
         # Required API keys
         if not self.openai_api_key and not self.anthropic_api_key:
-            errors.append("At least one LLM API key (OpenAI or Anthropic) is required")
+            errors.append("At least one LLM API key (OPENAI_API_KEY or ANTHROPIC_API_KEY) is required")
 
         return errors
 

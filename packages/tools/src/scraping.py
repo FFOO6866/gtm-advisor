@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
@@ -301,7 +301,7 @@ class WebScraperTool(BaseTool):
             h1_tags=h1_tags,
             links=links,
             text_content=text[:5000],
-            scraped_at=datetime.utcnow(),
+            scraped_at=datetime.now(UTC),
             status_code=status_code,
         )
 
@@ -488,7 +488,7 @@ class NewsScraperTool(BaseTool):
 
         async with httpx.AsyncClient() as client:
             try:
-                from_date = (datetime.utcnow() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+                from_date = (datetime.now(UTC) - timedelta(days=days_back)).strftime("%Y-%m-%d")
                 response = await client.get(
                     "https://newsapi.org/v2/everything",
                     params={
@@ -541,7 +541,7 @@ class NewsScraperTool(BaseTool):
                 url="https://example.com/news/1",
                 title=f"{query} announces expansion in Southeast Asia",
                 source="TechCrunch",
-                published_at=datetime.utcnow(),
+                published_at=datetime.now(UTC),
                 author="Jane Reporter",
                 content_preview=f"Singapore-based {query} has announced plans to expand...",
                 sentiment="positive",
@@ -550,7 +550,7 @@ class NewsScraperTool(BaseTool):
                 url="https://example.com/news/2",
                 title=f"Market analysis: {query} in the Singapore startup ecosystem",
                 source="Business Times",
-                published_at=datetime.utcnow(),
+                published_at=datetime.now(UTC),
                 author="John Analyst",
                 content_preview=f"An in-depth look at how {query} is positioned...",
                 sentiment="neutral",
@@ -559,7 +559,7 @@ class NewsScraperTool(BaseTool):
                 url="https://example.com/news/3",
                 title=f"{query} raises Series B funding",
                 source="e27",
-                published_at=datetime.utcnow(),
+                published_at=datetime.now(UTC),
                 author="Startup Reporter",
                 content_preview=f"{query} has secured additional funding to fuel growth...",
                 sentiment="positive",

@@ -14,6 +14,7 @@ export interface CompanyInfo {
   competitors: string[];
   targetMarkets: string[];
   valueProposition?: string;
+  documentContext?: string;  // Raw extracted text from uploaded document
 }
 
 export interface Message {
@@ -64,8 +65,12 @@ export interface Lead {
   recommendedApproach: string | null;
   source: string;
   // UI display fields
-  scoringMethod?: 'algorithm' | 'llm';
+  scoringMethod?: string;
   expectedValue?: number;
+  // Enrichment fields
+  verifiedEmail?: boolean;
+  emailDomainValid?: boolean;
+  buyingCycleStage?: string;
 }
 
 // Market insight from backend
@@ -138,7 +143,7 @@ export interface DecisionBreakdown {
   component: string;
   decision: string;
   confidence: number;
-  executionTimeMs: number;
+  executionTimeMs?: number;
 }
 
 // Campaign for display (simplified)
@@ -167,6 +172,34 @@ export interface AnalysisResult {
   personas?: CustomerPersona[];
   campaigns: Campaign[];
   campaignBrief?: CampaignBrief;
+
+  // GTM Strategist outputs
+  marketSizing?: {
+    tamDescription: string;
+    samDescription: string;
+    somDescription: string;
+    tamSgdEstimate?: string;
+    samSgdEstimate?: string;
+    somSgdEstimate?: string;
+    assumptions: string[];
+  };
+  salesMotion?: {
+    primaryMotion: string;
+    dealSizeSgd: string;
+    salesCycleDays?: number;
+    keyObjections: string[];
+    winThemes: string[];
+    recommendedFirst90Days: string[];
+  };
+
+  // Campaign Architect outputs
+  outreachSequences?: Array<{
+    name: string;
+    targetPersona?: string;
+    steps: Array<{ stepNumber: number; channelType: string; subjectLine: string; timing: string }>;
+  }>;
+  successMetrics?: string[];
+  complianceFlags?: string[];
 
   // Metrics
   totalPipelineValue?: number;

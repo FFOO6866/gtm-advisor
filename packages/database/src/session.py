@@ -22,28 +22,38 @@ AsyncSessionLocal: async_sessionmaker[AsyncSession] | None = None
 
 
 def get_engine():
-    """Get or create the async database engine."""
+    """Get or create the async database engine.
+
+    In development, falls back to a local SQLite file (gtm_dev.db) when
+    GTM_POSTGRES_URL is not configured.
+    """
     global _engine
     if _engine is None:
         config = get_config()
         database_url = config.postgres_url
 
         if not database_url:
-            raise RuntimeError(
-                "Database URL not configured. Set GTM_POSTGRES_URL environment variable."
-            )
+            if config.is_production:
+                raise RuntimeError(
+                    "Database URL not configured. Set GTM_POSTGRES_URL environment variable."
+                )
+            # Development fallback: local SQLite file
+            database_url = "sqlite+aiosqlite:///./gtm_dev.db"
 
         # Convert postgresql:// to postgresql+asyncpg://
         if database_url.startswith("postgresql://"):
             database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-        _engine = create_async_engine(
-            database_url,
-            echo=config.is_development,  # Log SQL in dev
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True,  # Verify connections before use
-        )
+        is_sqlite = database_url.startswith("sqlite")
+        engine_kwargs: dict = {"echo": config.is_development}
+        if is_sqlite:
+            # SQLite: set busy_timeout so concurrent writers wait instead of failing immediately
+            engine_kwargs["connect_args"] = {"timeout": 30}
+        else:
+            # Connection pool settings not supported by SQLite
+            engine_kwargs.update({"pool_size": 5, "max_overflow": 10, "pool_pre_ping": True})
+
+        _engine = create_async_engine(database_url, **engine_kwargs)
     return _engine
 
 

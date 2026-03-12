@@ -291,6 +291,57 @@ class ACRAMCPServer(APIBasedMCPServer):
 
         return result
 
+    async def search_active_companies(
+        self,
+        keyword: str,
+        limit: int = 10,
+    ) -> list[dict[str, str]]:
+        """Search for active Singapore-registered companies matching a keyword.
+
+        Performs a full-text search across company names and SSIC industry
+        descriptions, then filters out struck-off / inactive entities.
+        Used for competitor discovery: returns plain dicts with keys
+        ``name``, ``uen``, ``ssic_code``.
+
+        Args:
+            keyword: Search term (e.g. "marketing consulting", "payroll software")
+            limit: Maximum number of active companies to return
+
+        Returns:
+            List of dicts, one per distinct active company
+        """
+        # Fetch extra records to allow for status filtering and deduplication.
+        result = await self.search(keyword, limit=min(limit * 3, 50))
+
+        seen: set[str] = set()
+        companies: list[dict[str, str]] = []
+
+        for fact in result.facts:
+            extracted: dict[str, Any] = fact.extracted_data or {}
+            name: str = (extracted.get("company_name") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+
+            status: str = (extracted.get("status") or "").lower()
+            # Skip companies whose status is known to be inactive
+            if status and not any(
+                s in status for s in ["live", "active", "registered", "existing"]
+            ):
+                continue
+
+            companies.append(
+                {
+                    "name": name,
+                    "uen": extracted.get("uen") or "",
+                    "ssic_code": extracted.get("ssic_code") or "",
+                }
+            )
+            if len(companies) >= limit:
+                break
+
+        return companies
+
     def _parse_company_record(
         self, record: dict[str, Any]
     ) -> tuple[list, EntityReference | None]:

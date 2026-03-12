@@ -3,6 +3,8 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
+
 from packages.database.src.models import SubscriptionTier
 from services.gateway.src.auth.utils import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -16,6 +18,7 @@ from services.gateway.src.auth.utils import (
 )
 
 
+@pytest.mark.unit
 class TestPasswordHashing:
     """Tests for password hashing utilities."""
 
@@ -51,6 +54,7 @@ class TestPasswordHashing:
         assert verify_password("", hashed) is False
 
 
+@pytest.mark.unit
 class TestAccessToken:
     """Tests for access token creation and decoding."""
 
@@ -156,6 +160,7 @@ class TestAccessToken:
         assert abs((token_data.exp - expected).total_seconds()) < 5
 
 
+@pytest.mark.unit
 class TestRefreshToken:
     """Tests for refresh token creation and decoding."""
 
@@ -227,6 +232,7 @@ class TestRefreshToken:
         assert refresh_data.exp > access_data.exp
 
 
+@pytest.mark.unit
 class TestTokenJTI:
     """Tests for token JTI (unique identifier) functionality."""
 
@@ -268,6 +274,7 @@ class TestTokenJTI:
         assert jti is None
 
 
+@pytest.mark.unit
 class TestTokenDecodeEdgeCases:
     """Tests for edge cases in token decoding."""
 

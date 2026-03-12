@@ -16,7 +16,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -197,7 +197,7 @@ class AuditLogger:
         event = AuditEvent(
             id=str(uuid.uuid4()),
             event_type=event_type,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             agent_id=agent_id,
             user_id=user_id,
             session_id=self._session_id,

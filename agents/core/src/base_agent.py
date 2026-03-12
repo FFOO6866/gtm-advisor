@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime
-from typing import Any, Generic, TypeVar
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from packages.database.src.models import SubscriptionTier
 
 import structlog
 
-from packages.core.src.errors import AgentError, MaxIterationsExceededError
+from packages.core.src.errors import AgentError, BudgetExceededError, MaxIterationsExceededError
 from packages.core.src.types import (
     AgentStatus,
     ExecutionMode,
@@ -98,6 +101,7 @@ class BaseGTMAgent(ABC, Generic[T]):
         capabilities: list[AgentCapability] | None = None,
         fast_path_config: FastPathConfig | None = None,
         llm_manager: LLMManager | None = None,
+        tier: SubscriptionTier | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -111,6 +115,7 @@ class BaseGTMAgent(ABC, Generic[T]):
             capabilities: List of agent capabilities
             fast_path_config: Configuration for fast execution
             llm_manager: Optional LLM manager instance
+            tier: Subscription tier for per-run budget enforcement
         """
         self.name = name
         self.description = description
@@ -120,6 +125,7 @@ class BaseGTMAgent(ABC, Generic[T]):
         self.model = model
         self.capabilities = capabilities or []
         self.fast_path_config = fast_path_config
+        self.tier = tier
 
         self._llm_manager = llm_manager or get_llm_manager()
         self._status = AgentStatus.IDLE
@@ -162,6 +168,18 @@ class BaseGTMAgent(ABC, Generic[T]):
         context = context or {}
         start_time = time.time()
 
+        # Set up budget tracker from tier if not provided
+        budget_tracker: RuntimeBudgetTracker | None = kwargs.pop("budget_tracker", None)
+        if budget_tracker is None and self.tier is not None:
+            from packages.governance.src.constraint_envelope import (
+                ConstraintEnvelope,
+                RuntimeBudgetTracker,
+            )
+            budget_tracker = RuntimeBudgetTracker(
+                envelope=ConstraintEnvelope.for_tier(self.tier),
+                agent_name=self.name,
+            )
+
         self._logger.info(
             "agent_started",
             task_id=task_id,
@@ -172,7 +190,7 @@ class BaseGTMAgent(ABC, Generic[T]):
         self._current_state = PDCAState(
             phase=PDCAPhase.PLAN,
             iteration=0,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
         self._status = AgentStatus.PLANNING
 
@@ -203,6 +221,10 @@ class BaseGTMAgent(ABC, Generic[T]):
                     result.model_dump() if hasattr(result, "model_dump") else {}
                 )
 
+                # Track LLM spend per iteration
+                if budget_tracker is not None:
+                    budget_tracker.charge(llm_calls=1)
+
                 # CHECK
                 self._status = AgentStatus.CHECKING
                 self._current_state.phase = PDCAPhase.CHECK
@@ -224,7 +246,7 @@ class BaseGTMAgent(ABC, Generic[T]):
                     # Accept result
                     result = await self._act(result, confidence)
                     self._status = AgentStatus.COMPLETED
-                    self._current_state.completed_at = datetime.utcnow()
+                    self._current_state.completed_at = datetime.now(UTC)
 
                     elapsed = time.time() - start_time
                     self._logger.info(
@@ -256,7 +278,7 @@ class BaseGTMAgent(ABC, Generic[T]):
                 threshold=self.min_confidence,
             )
 
-        except MaxIterationsExceededError:
+        except (MaxIterationsExceededError, BudgetExceededError):
             raise
         except Exception as e:
             self._status = AgentStatus.FAILED

@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuroraBackground } from './components/AuroraBackground';
 import { AgentNetwork } from './components/AgentNetwork';
@@ -14,6 +14,7 @@ import { ConversationPanel } from './components/ConversationPanel';
 import { ResultsPanel } from './components/ResultsPanel';
 import { Header } from './components/Header';
 import { OnboardingModal } from './components/OnboardingModal';
+import { AppShell } from './components/AppShell';
 import { AgentActivity, Message, AnalysisResult, CompanyInfo, AGENTS } from './types';
 import {
   startAnalysis,
@@ -26,7 +27,7 @@ import {
 import { transformAnalysisResult } from './api/transforms';
 
 // Import context providers
-import { CompanyProvider, useCompany, createCompanyFromForm } from './context/CompanyContext';
+import { CompanyProvider, useCompany, useCompanyId, createCompanyFromForm } from './context/CompanyContext';
 import { ToastProvider } from './components/common';
 
 // Import agent workspace pages
@@ -39,14 +40,42 @@ import {
   CompetitorWorkspace,
   CustomerWorkspace,
   EnricherWorkspace,
+  WorkforceWorkspace,
+  LeadsPipeline,
+  ApprovalsInbox,
+  SignalsFeed,
+  WhyUsPage,
+  DashboardPage,
+  SequencesPage,
+  PlaybooksPage,
+  SettingsPage,
+  TodayPage,
+  CampaignsPage,
+  ContentPage,
+  ResultsPage,
+  LoginPage,
+  RegisterPage,
 } from './pages';
+
+/** Wrapper that pulls companyId from context and analysisId from ?analysisId=… */
+function WorkforceWorkspacePage() {
+  const companyId = useCompanyId() ?? '';
+  const [searchParams] = useSearchParams();
+  const analysisId = searchParams.get('analysisId') ?? undefined;
+  return <WorkforceWorkspace companyId={companyId} analysisId={analysisId} />;
+}
 
 function App() {
   return (
     <CompanyProvider>
       <ToastProvider>
         <Routes>
+          {/* Public routes */}
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route path="/" element={<Dashboard />} />
+
+          {/* Agent workspace pages — own full-screen layout, no auth required */}
           <Route path="/agent/market-intelligence" element={<IntelligenceWorkspace />} />
           <Route path="/agent/campaign-architect" element={<CampaignWorkspace />} />
           <Route path="/agent/lead-hunter" element={<DemandWorkspace />} />
@@ -55,6 +84,26 @@ function App() {
           <Route path="/agent/customer-profiler" element={<CustomerWorkspace />} />
           <Route path="/agent/company-enricher" element={<EnricherWorkspace />} />
           <Route path="/agent/:agentId" element={<GenericAgentWorkspace />} />
+
+          {/* Authenticated app — AppShell provides Header + SidebarNav + Aurora */}
+          <Route element={<AppShell />}>
+            <Route path="/today" element={<TodayPage />} />
+            <Route path="/campaigns" element={<CampaignsPage />} />
+            <Route path="/prospects" element={<LeadsPipeline />} />
+            <Route path="/content" element={<ContentPage />} />
+            <Route path="/insights" element={<SignalsFeed />} />
+            <Route path="/results" element={<ResultsPage />} />
+            {/* Operational / legacy routes */}
+            <Route path="/leads" element={<LeadsPipeline />} />
+            <Route path="/approvals" element={<ApprovalsInbox />} />
+            <Route path="/signals" element={<SignalsFeed />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/sequences" element={<SequencesPage />} />
+            <Route path="/playbooks" element={<PlaybooksPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/workforce" element={<WorkforceWorkspacePage />} />
+            <Route path="/why-us" element={<WhyUsPage />} />
+          </Route>
         </Routes>
       </ToastProvider>
     </CompanyProvider>
@@ -64,16 +113,26 @@ function App() {
 // Session storage keys
 const STORAGE_KEYS = {
   companyInfo: 'gtm_company_info',
-  hasOnboarded: 'gtm_has_onboarded',
+  analysisId: 'gtm_analysis_id',
 };
 
 function Dashboard() {
   const navigate = useNavigate();
   const { setCompany } = useCompany();
 
-  // Initialize state from sessionStorage to persist across navigation
+  // Default: always show the modal (sign-out, direct visit, cache-clear all land here).
+  // Exception: if the user clicked an agent node and navigated back, skip the modal
+  // so they see the network + results they left. This is signalled by 'gtm_agent_back'
+  // which handleAgentClick writes and we clear immediately here (one-shot flag).
   const [showOnboarding, setShowOnboarding] = useState(() => {
-    return sessionStorage.getItem(STORAGE_KEYS.hasOnboarded) !== 'true';
+    const comingBack = !!sessionStorage.getItem('gtm_agent_back');
+    if (comingBack) {
+      sessionStorage.removeItem('gtm_agent_back');
+      const hasCompany = !!sessionStorage.getItem(STORAGE_KEYS.companyInfo);
+      const hasAnalysis = !!sessionStorage.getItem(STORAGE_KEYS.analysisId);
+      return !(hasCompany && hasAnalysis);
+    }
+    return true;
   });
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(() => {
     const stored = sessionStorage.getItem(STORAGE_KEYS.companyInfo);
@@ -85,7 +144,7 @@ function Dashboard() {
   const [results, setResults] = useState<AnalysisResult | null>(null);
   const [activeConnections, setActiveConnections] = useState<[string, string][]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [isBackendAvailable, setIsBackendAvailable] = useState<boolean | null>(null);
+  const [isBackendAvailable, setIsBackendAvailable] = useState<boolean>(true);
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
@@ -114,10 +173,29 @@ function Dashboard() {
     };
   }, []);
 
-  // Handle agent click - navigate to workspace
   const handleAgentClick = useCallback((agentId: string) => {
+    sessionStorage.setItem('gtm_agent_back', 'true');
     navigate(`/agent/${agentId}`);
   }, [navigate]);
+
+  // Reset everything and show onboarding again
+  const handleNewAnalysis = useCallback(() => {
+    sessionStorage.removeItem(STORAGE_KEYS.companyInfo);
+    sessionStorage.removeItem(STORAGE_KEYS.analysisId);
+    sessionStorage.removeItem('gtm_agent_back');
+    setShowOnboarding(true);
+    setCompanyInfo(null);
+    setMessages([]);
+    setResults(null);
+    setAgentActivities([]);
+    setActiveConnections([]);
+    setError(null);
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    analysisIdRef.current = null;
+  }, []);
 
   // Handle WebSocket messages for real-time updates
   const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
@@ -207,6 +285,12 @@ function Dashboard() {
       case 'analysis_completed':
         setIsAnalyzing(false);
         setActiveConnections([]);
+        // Sweep any agent still showing "thinking" → "complete"
+        setAgentActivities((prev) =>
+          prev.map((a) =>
+            a.status === 'thinking' ? { ...a, status: 'complete' as const, progress: 100 } : a
+          )
+        );
 
         // Fetch full results
         if (analysisIdRef.current) {
@@ -235,7 +319,7 @@ function Dashboard() {
             });
         }
 
-        // Add final message
+        // Add a clear "what's next" completion message
         setMessages((prev) => [
           ...prev,
           {
@@ -243,9 +327,8 @@ function Dashboard() {
             role: 'agent',
             agentId: 'gtm-strategist',
             agentName: 'GTM Strategist',
-            content:
-              message.message ||
-              'Analysis complete! Check the results panel for detailed findings.',
+            content: message.message ||
+              'Analysis complete! Your results are ready in the panel on the right. Click any agent node to explore its detailed findings, or scroll through the results panel to review leads, competitors, and campaign recommendations.',
             timestamp: new Date(),
           },
         ]);
@@ -352,17 +435,39 @@ function Dashboard() {
           competitors: company.competitors,
           target_markets: company.targetMarkets || ['Singapore'],
           value_proposition: company.valueProposition,
+          additional_context: company.documentContext,
           include_market_research: true,
           include_competitor_analysis: true,  // Always include - A2A may discover competitors
           include_customer_profiling: true,
           include_lead_generation: true,
           include_campaign_planning: true,
-          lead_count: 10,
+          lead_count: 25,
         };
 
         // Start analysis
         const status = await startAnalysis(request);
         analysisIdRef.current = status.analysis_id;
+        sessionStorage.setItem(STORAGE_KEYS.analysisId, status.analysis_id);
+
+        // Update company context with real backend company_id
+        if (status.company_id) {
+          const realCompanyId = status.company_id;
+          sessionStorage.setItem('gtm_company_id', realCompanyId);
+          // Also persist to localStorage so AppShell can hydrate after login
+          localStorage.setItem('gtm_company_id', realCompanyId);
+          const updatedCompany = createCompanyFromForm({
+            name: company.name,
+            website: company.website,
+            description: company.description,
+            industry: company.industry,
+            goals: company.goals,
+            challenges: company.challenges,
+            competitors: company.competitors,
+            targetMarkets: company.targetMarkets,
+            valueProposition: company.valueProposition,
+          }, realCompanyId);
+          setCompany(updatedCompany);
+        }
 
         // Connect WebSocket for real-time updates
         const ws = connectToAnalysis(
@@ -385,21 +490,22 @@ function Dashboard() {
         setIsAnalyzing(false);
       }
     },
-    [handleWebSocketMessage]
+    [handleWebSocketMessage, setCompany]
   );
 
   const handleCompanySubmit = useCallback(
     (companyData: CompanyInfo) => {
+      // Clear stale analysis ID so previous results don't leak into a new run.
+      sessionStorage.removeItem(STORAGE_KEYS.analysisId);
       setCompanyInfo(companyData);
       setShowOnboarding(false);
 
-      // Persist to sessionStorage so we can restore after navigation
       sessionStorage.setItem(STORAGE_KEYS.companyInfo, JSON.stringify(companyData));
-      sessionStorage.setItem(STORAGE_KEYS.hasOnboarded, 'true');
 
       // Set company in context for workspace pages
-      // Generate a company ID for the context (in production this would come from API)
+      // Temporary ID — will be replaced with real backend company_id when analysis starts
       const companyId = `company_${Date.now()}`;
+      sessionStorage.setItem('gtm_company_id', companyId);
       const contextCompany = createCompanyFromForm({
         name: companyData.name,
         website: companyData.website,
@@ -499,7 +605,7 @@ function Dashboard() {
     ) : null;
 
   // Show loading state while checking backend
-  if (isBackendAvailable === null) {
+  if (isBackendAvailable === false) {
     return (
       <div className="min-h-screen bg-surface flex items-center justify-center">
         <div className="text-center">
@@ -521,43 +627,47 @@ function Dashboard() {
       {/* Main Layout */}
       <div className="relative z-10 flex flex-col h-screen">
         {/* Header */}
-        <Header companyName={companyInfo?.name} />
+        <Header companyName={companyInfo?.name} onNewAnalysis={handleNewAnalysis} teaser />
 
         {/* Main Content */}
         <main className="flex-1 flex overflow-hidden">
-          {/* Left: Conversation Panel */}
-          <ConversationPanel
-            messages={messages}
-            onSendMessage={handleSendMessage}
-            isAnalyzing={isAnalyzing}
-            agentActivities={agentActivities}
-          />
-
-          {/* Center: Agent Network Visualization */}
-          <div className="flex-1 relative">
-            <AgentNetwork
-              activities={agentActivities}
-              activeConnections={activeConnections}
+          {/* 3-panel analysis layout */}
+          <div className="flex-1 flex overflow-hidden">
+            {/* Left: Conversation Panel */}
+            <ConversationPanel
+              messages={messages}
+              onSendMessage={handleSendMessage}
               isAnalyzing={isAnalyzing}
-              onAgentClick={handleAgentClick}
+              agentActivities={agentActivities}
+              onStart={() => setShowOnboarding(true)}
             />
-            {/* Click hint */}
-            {!isAnalyzing && !showOnboarding && (
-              <motion.div
-                className="absolute bottom-20 left-1/2 -translate-x-1/2 text-center"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 1 }}
-              >
-                <p className="text-white/40 text-sm">Click any agent to explore its workspace</p>
-              </motion.div>
-            )}
-          </div>
 
-          {/* Right: Results Panel */}
-          <AnimatePresence>
-            {results && <ResultsPanel results={results} />}
-          </AnimatePresence>
+            {/* Center: Agent Network Visualization */}
+            <div className="flex-1 relative">
+              <AgentNetwork
+                activities={agentActivities}
+                activeConnections={activeConnections}
+                isAnalyzing={isAnalyzing}
+                onAgentClick={handleAgentClick}
+              />
+              {/* Click hint */}
+              {!isAnalyzing && !showOnboarding && (
+                <motion.div
+                  className="absolute bottom-20 left-1/2 -translate-x-1/2 text-center"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 1 }}
+                >
+                  <p className="text-white/40 text-sm">Click any agent to explore its workspace</p>
+                </motion.div>
+              )}
+            </div>
+
+            {/* Right: Results Panel */}
+            <AnimatePresence>
+              {results && <ResultsPanel results={results} />}
+            </AnimatePresence>
+          </div>
         </main>
       </div>
 

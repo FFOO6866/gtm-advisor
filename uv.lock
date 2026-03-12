@@ -21,20 +21,30 @@ members = [
     "gtm-advisor-campaign-architect",
     "gtm-advisor-competitor-analyst",
     "gtm-advisor-core",
+    "gtm-advisor-crm-sync",
     "gtm-advisor-customer-profiler",
     "gtm-advisor-dashboard",
     "gtm-advisor-database",
+    "gtm-advisor-documents",
     "gtm-advisor-gateway",
     "gtm-advisor-governance",
     "gtm-advisor-gtm-strategist",
     "gtm-advisor-integrations",
+    "gtm-advisor-lead-enrichment",
     "gtm-advisor-lead-hunter",
     "gtm-advisor-llm",
     "gtm-advisor-market-intelligence",
     "gtm-advisor-mcp",
     "gtm-advisor-observability",
+    "gtm-advisor-outreach-executor",
+    "gtm-advisor-scoring",
+    "gtm-advisor-signal-monitor",
     "gtm-advisor-tools",
+    "gtm-advisor-workforce-architect",
     "gtm-company-enricher",
+    "intelligence",
+    "knowledge",
+    "vector-store",
 ]
 
 [[package]]
@@ -215,6 +225,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/96/f0/5eb65b2bb0d09ac6776f2eb54adee6abe8228ea05b20a5ad0e4945de8aac/anyio-4.12.1.tar.gz", hash = "sha256:41cfcc3a4c85d3f05c932da7c26d0201ac36f72abd4435ba90d0464a3ffed703", size = 228685, upload-time = "2026-01-06T11:45:21.246Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/38/0e/27be9fdef66e72d64c0cdc3cc2823101b80585f8119b5c112c2e8f5f7dab/anyio-4.12.1-py3-none-any.whl", hash = "sha256:d405828884fc140aa80a3c667b8beed277f1dfedec42ba031bd6ac3db606ab6c", size = 113592, upload-time = "2026-01-06T11:45:19.497Z" },
+]
+
+[[package]]
+name = "apscheduler"
+version = "3.11.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzlocal" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/12/3e4389e5920b4c1763390c6d371162f3784f86f85cd6d6c1bfe68eef14e2/apscheduler-3.11.2.tar.gz", hash = "sha256:2a9966b052ec805f020c8c4c3ae6e6a06e24b1bf19f2e11d91d8cca0473eef41", size = 108683, upload-time = "2025-12-22T00:39:34.884Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9f/64/2e54428beba8d9992aa478bb8f6de9e4ecaa5f8f513bcfd567ed7fb0262d/apscheduler-3.11.2-py3-none-any.whl", hash = "sha256:ce005177f741409db4e4dd40a7431b76feb856b9dd69d57e0da49d6715bfd26d", size = 64439, upload-time = "2025-12-22T00:39:33.303Z" },
 ]
 
 [[package]]
@@ -1098,14 +1120,22 @@ name = "gtm-advisor"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "aiosqlite" },
     { name = "alembic" },
+    { name = "apscheduler" },
     { name = "httpx" },
+    { name = "intelligence" },
+    { name = "knowledge" },
+    { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pypdf" },
+    { name = "python-docx" },
     { name = "python-dotenv" },
     { name = "slowapi" },
     { name = "structlog" },
+    { name = "vector-store" },
 ]
 
 [package.optional-dependencies]
@@ -1211,9 +1241,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.9" },
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "alembic", specifier = ">=1.18.2" },
     { name = "anthropic", marker = "extra == 'llm'", specifier = ">=0.25" },
+    { name = "apscheduler", specifier = ">=3.11.2" },
     { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.29" },
     { name = "bcrypt", marker = "extra == 'api'", specifier = ">=4.0" },
     { name = "beautifulsoup4", marker = "extra == 'mcp'", specifier = ">=4.12" },
@@ -1225,10 +1257,13 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "hubspot-api-client", marker = "extra == 'crm'", specifier = ">=8.0" },
     { name = "instructor", marker = "extra == 'llm'", specifier = ">=1.0" },
+    { name = "intelligence", editable = "packages/intelligence" },
+    { name = "knowledge", editable = "packages/knowledge" },
     { name = "lxml", marker = "extra == 'mcp'", specifier = ">=5.0" },
     { name = "msal", marker = "extra == 'crm'", specifier = ">=1.24" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "newsapi-python", marker = "extra == 'newsapi'", specifier = ">=0.2" },
+    { name = "openai", specifier = ">=2.15.0" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.30" },
     { name = "openai", marker = "extra == 'perplexity'", specifier = ">=1.30" },
     { name = "opentelemetry-api", marker = "extra == 'observability'", specifier = ">=1.25" },
@@ -1238,9 +1273,11 @@ requires-dist = [
     { name = "prometheus-client", marker = "extra == 'observability'", specifier = ">=0.20" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "pypdf", specifier = ">=6.8.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
+    { name = "python-docx", specifier = ">=1.2.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-jose", extras = ["cryptography"], marker = "extra == 'api'", specifier = ">=3.3" },
     { name = "python-multipart", marker = "extra == 'api'", specifier = ">=0.0.9" },
@@ -1255,6 +1292,7 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'postgres'", specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.30" },
+    { name = "vector-store", editable = "packages/vector_store" },
 ]
 provides-extras = ["mcp", "llm", "perplexity", "newsapi", "eodhd", "crm", "email", "api", "redis", "postgres", "observability", "vectors", "all", "dev"]
 
@@ -1349,6 +1387,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "gtm-advisor-crm-sync"
+version = "0.1.0"
+source = { editable = "agents/crm_sync" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "structlog", specifier = ">=24.0" },
+]
+
+[[package]]
 name = "gtm-advisor-customer-profiler"
 version = "0.1.0"
 source = { editable = "agents/customer_profiler" }
@@ -1366,7 +1419,7 @@ requires-dist = [
 [[package]]
 name = "gtm-advisor-dashboard"
 version = "0.1.0"
-source = { editable = "services/dashboard" }
+source = { virtual = "services/dashboard" }
 
 [[package]]
 name = "gtm-advisor-database"
@@ -1386,10 +1439,26 @@ requires-dist = [
 ]
 
 [[package]]
+name = "gtm-advisor-documents"
+version = "0.1.0"
+source = { editable = "packages/documents" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pypdf" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pypdf", specifier = ">=6.8.0" },
+]
+
+[[package]]
 name = "gtm-advisor-gateway"
 version = "0.1.0"
 source = { editable = "services/gateway" }
 dependencies = [
+    { name = "apscheduler" },
     { name = "bcrypt" },
     { name = "email-validator" },
     { name = "fastapi" },
@@ -1404,6 +1473,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "apscheduler", specifier = ">=3.10" },
     { name = "bcrypt", specifier = ">=4.0" },
     { name = "email-validator", specifier = ">=2.0" },
     { name = "fastapi", specifier = ">=0.111" },
@@ -1477,6 +1547,21 @@ requires-dist = [
     { name = "structlog", specifier = ">=24.0" },
 ]
 provides-extras = ["eodhd", "newsapi", "perplexity"]
+
+[[package]]
+name = "gtm-advisor-lead-enrichment"
+version = "0.1.0"
+source = { editable = "agents/lead_enrichment" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "structlog", specifier = ">=24.0" },
+]
 
 [[package]]
 name = "gtm-advisor-lead-hunter"
@@ -1569,6 +1654,51 @@ requires-dist = [
 provides-extras = ["full"]
 
 [[package]]
+name = "gtm-advisor-outreach-executor"
+version = "0.1.0"
+source = { editable = "agents/outreach_executor" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "structlog", specifier = ">=24.0" },
+]
+
+[[package]]
+name = "gtm-advisor-scoring"
+version = "0.1.0"
+source = { editable = "packages/scoring" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "structlog", specifier = ">=24.0" },
+]
+
+[[package]]
+name = "gtm-advisor-signal-monitor"
+version = "0.1.0"
+source = { editable = "agents/signal_monitor" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "structlog", specifier = ">=24.0" },
+]
+
+[[package]]
 name = "gtm-advisor-tools"
 version = "0.1.0"
 source = { editable = "packages/tools" }
@@ -1581,6 +1711,21 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "structlog", specifier = ">=24.0" },
+]
+
+[[package]]
+name = "gtm-advisor-workforce-architect"
+version = "0.1.0"
+source = { editable = "agents/workforce_architect" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24.0" },
 ]
@@ -1821,6 +1966,25 @@ wheels = [
 ]
 
 [[package]]
+name = "intelligence"
+version = "0.1.0"
+source = { editable = "packages/intelligence" }
+dependencies = [
+    { name = "gtm-advisor-core" },
+    { name = "gtm-advisor-database" },
+    { name = "gtm-advisor-documents" },
+    { name = "vector-store" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gtm-advisor-core", editable = "packages/core" },
+    { name = "gtm-advisor-database", editable = "packages/database" },
+    { name = "gtm-advisor-documents", editable = "packages/documents" },
+    { name = "vector-store", editable = "packages/vector_store" },
+]
+
+[[package]]
 name = "isodate"
 version = "0.7.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1988,6 +2152,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/99/dd/841e9a66c4715477ea0abc78da039832fbb09dac5c35c58dc4c41a407b8a/kiwisolver-1.4.9-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:aedff62918805fb62d43a4aa2ecd4482c380dc76cd31bd7c8878588a61bd0369", size = 2391835, upload-time = "2025-08-10T21:27:34.23Z" },
     { url = "https://files.pythonhosted.org/packages/0c/28/4b2e5c47a0da96896fdfdb006340ade064afa1e63675d01ea5ac222b6d52/kiwisolver-1.4.9-cp314-cp314t-win_amd64.whl", hash = "sha256:1fa333e8b2ce4d9660f2cda9c0e1b6bafcfb2457a9d259faa82289e73ec24891", size = 79988, upload-time = "2025-08-10T21:27:35.587Z" },
     { url = "https://files.pythonhosted.org/packages/80/be/3578e8afd18c88cdf9cb4cffde75a96d2be38c5a903f1ed0ceec061bd09e/kiwisolver-1.4.9-cp314-cp314t-win_arm64.whl", hash = "sha256:4a48a2ce79d65d363597ef7b567ce3d14d68783d2b2263d98db3d9477805ba32", size = 70260, upload-time = "2025-08-10T21:27:36.606Z" },
+]
+
+[[package]]
+name = "knowledge"
+version = "0.1.0"
+source = { editable = "packages/knowledge" }
+dependencies = [
+    { name = "openai" },
+    { name = "pypdf" },
+    { name = "vector-store" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "openai", specifier = ">=2.15.0" },
+    { name = "pypdf", specifier = ">=6.8.0" },
+    { name = "vector-store", editable = "packages/vector_store" },
 ]
 
 [[package]]
@@ -3228,6 +3409,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pypdf"
+version = "6.8.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/a3/e705b0805212b663a4c27b861c8a603dba0f8b4bb281f96f8e746576a50d/pypdf-6.8.0.tar.gz", hash = "sha256:cb7eaeaa4133ce76f762184069a854e03f4d9a08568f0e0623f7ea810407833b", size = 5307831, upload-time = "2026-03-09T13:37:40.591Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8c/ec/4ccf3bb86b1afe5d7176e1c8abcdbf22b53dd682ec2eda50e1caadcf6846/pypdf-6.8.0-py3-none-any.whl", hash = "sha256:2a025080a8dd73f48123c89c57174a5ff3806c71763ee4e49572dc90454943c7", size = 332177, upload-time = "2026-03-09T13:37:38.774Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "9.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -3280,6 +3470,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
+]
+
+[[package]]
+name = "python-docx"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lxml" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/f7/eddfe33871520adab45aaa1a71f0402a2252050c14c7e3009446c8f4701c/python_docx-1.2.0.tar.gz", hash = "sha256:7bc9d7b7d8a69c9c02ca09216118c86552704edc23bac179283f2e38f86220ce", size = 5723256, upload-time = "2025-06-16T20:46:27.921Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/00/1e03a4989fa5795da308cd774f05b704ace555a70f9bf9d3be057b680bcf/python_docx-1.2.0-py3-none-any.whl", hash = "sha256:3fd478f3250fbbbfd3b94fe1e985955737c145627498896a8a6bf81f4baf66c7", size = 252987, upload-time = "2025-06-16T20:46:22.506Z" },
 ]
 
 [[package]]
@@ -4016,6 +4219,8 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/d3/54/a2ba279afcca44bbd320d4e73675b282fcee3d81400ea1b53934efca6462/torch-2.10.0-2-cp312-none-macosx_11_0_arm64.whl", hash = "sha256:13ec4add8c3faaed8d13e0574f5cd4a323c11655546f91fbe6afa77b57423574", size = 79498202, upload-time = "2026-02-10T21:44:52.603Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/23/2c9fe0c9c27f7f6cb865abcea8a4568f29f00acaeadfc6a37f6801f84cb4/torch-2.10.0-2-cp313-none-macosx_11_0_arm64.whl", hash = "sha256:e521c9f030a3774ed770a9c011751fb47c4d12029a3d6522116e48431f2ff89e", size = 79498254, upload-time = "2026-02-10T21:44:44.095Z" },
     { url = "https://files.pythonhosted.org/packages/cc/af/758e242e9102e9988969b5e621d41f36b8f258bb4a099109b7a4b4b50ea4/torch-2.10.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:5fd4117d89ffd47e3dcc71e71a22efac24828ad781c7e46aaaf56bf7f2796acf", size = 145996088, upload-time = "2026-01-21T16:24:44.171Z" },
     { url = "https://files.pythonhosted.org/packages/23/8e/3c74db5e53bff7ed9e34c8123e6a8bfef718b2450c35eefab85bb4a7e270/torch-2.10.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:787124e7db3b379d4f1ed54dd12ae7c741c16a4d29b49c0226a89bea50923ffb", size = 915711952, upload-time = "2026-01-21T16:23:53.503Z" },
     { url = "https://files.pythonhosted.org/packages/6e/01/624c4324ca01f66ae4c7cd1b74eb16fb52596dce66dbe51eff95ef9e7a4c/torch-2.10.0-cp312-cp312-win_amd64.whl", hash = "sha256:2c66c61f44c5f903046cc696d088e21062644cbe541c7f1c4eaae88b2ad23547", size = 113757972, upload-time = "2026-01-21T16:24:39.516Z" },
@@ -4153,6 +4358,18 @@ wheels = [
 ]
 
 [[package]]
+name = "tzlocal"
+version = "5.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8b/2e/c14812d3d4d9cd1773c6be938f89e5735a1f11a9f184ac3639b93cef35d5/tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd", size = 30761, upload-time = "2025-03-05T21:17:41.549Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c2/14/e2a54fabd4f08cd7af1c07030603c3356b74da07f7cc056e600436edfa17/tzlocal-5.3.1-py3-none-any.whl", hash = "sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d", size = 18026, upload-time = "2025-03-05T21:17:39.857Z" },
+]
+
+[[package]]
 name = "urllib3"
 version = "2.6.3"
 source = { registry = "https://pypi.org/simple" }
@@ -4215,6 +4432,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c1/37/945b4ca0ac27e3dc4952642d4c900edd030b3da6c9634875af6e13ae80e5/uvloop-0.22.1-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b91328c72635f6f9e0282e4a57da7470c7350ab1c9f48546c0f2866205349d21", size = 4467065, upload-time = "2025-10-16T22:16:58.206Z" },
     { url = "https://files.pythonhosted.org/packages/97/cc/48d232f33d60e2e2e0b42f4e73455b146b76ebe216487e862700457fbf3c/uvloop-0.22.1-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:daf620c2995d193449393d6c62131b3fbd40a63bf7b307a1527856ace637fe88", size = 4328384, upload-time = "2025-10-16T22:16:59.36Z" },
     { url = "https://files.pythonhosted.org/packages/e4/16/c1fd27e9549f3c4baf1dc9c20c456cd2f822dbf8de9f463824b0c0357e06/uvloop-0.22.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:6cde23eeda1a25c75b2e07d39970f3374105d5eafbaab2a4482be82f272d5a5e", size = 4296730, upload-time = "2025-10-16T22:17:00.744Z" },
+]
+
+[[package]]
+name = "vector-store"
+version = "0.1.0"
+source = { editable = "packages/vector_store" }
+dependencies = [
+    { name = "numpy" },
+    { name = "qdrant-client" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "qdrant-client", extras = ["async"], specifier = ">=1.7" },
 ]
 
 [[package]]

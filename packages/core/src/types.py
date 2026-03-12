@@ -5,7 +5,7 @@ Domain-specific types for GTM advisory platform.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -122,7 +122,7 @@ class PDCAState(BaseModel):
     phase: PDCAPhase = Field(default=PDCAPhase.PLAN)
     iteration: int = Field(default=0, ge=0)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = Field(default=None)
     plan: dict[str, Any] | None = Field(default=None)
     result: dict[str, Any] | None = Field(default=None)
@@ -189,8 +189,8 @@ class CompanyProfile(BaseModel):
     competitors: list[str] = Field(default_factory=list)
 
     # Metadata
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class UserProfile(BaseModel):
@@ -208,7 +208,7 @@ class UserProfile(BaseModel):
     total_requests: int = Field(default=0, ge=0)
     last_request_at: datetime | None = Field(default=None)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # =============================================================================
@@ -247,7 +247,13 @@ class LeadProfile(BaseModel):
     source: str = Field(default="platform")
     source_url: str | None = Field(default=None)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    # Enrichment status (populated by Lead Enrichment agent)
+    verified_email: bool = Field(default=False)
+    email_domain_valid: bool = Field(default=False)
+    buying_cycle_stage: str | None = Field(default=None)  # "awareness"|"consideration"|"evaluation"|"negotiation"
+    last_enriched_at: datetime | None = Field(default=None)
+
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class CampaignBrief(BaseModel):
@@ -277,7 +283,7 @@ class CampaignBrief(BaseModel):
     email_templates: list[str] = Field(default_factory=list)
     linkedin_posts: list[str] = Field(default_factory=list)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # =============================================================================
@@ -306,7 +312,28 @@ class MarketInsight(BaseModel):
     relevant_industries: list[IndustryVertical] = Field(default_factory=list)
     relevant_to_company: bool = Field(default=True)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class CompetitorPricing(BaseModel):
+    """Structured pricing tier for a competitor."""
+
+    tier_name: str = Field(default="")  # "Starter", "Professional", "Enterprise", "Usage-based"
+    price_sgd: float | None = Field(default=None)  # Monthly price in SGD (None if undisclosed)
+    price_usd: float | None = Field(default=None)  # Monthly price in USD
+    frequency: str = Field(default="monthly")  # "monthly" | "annual" | "usage" | "custom"
+    features_summary: str = Field(default="")  # Key features at this tier
+    source: str = Field(default="")  # Where pricing was found
+
+
+class CompetitorFundingRound(BaseModel):
+    """Latest known funding round."""
+
+    round_type: str = Field(default="")  # "Series A", "Series B", "Seed", "IPO", "Bootstrapped"
+    amount_usd: float | None = Field(default=None)
+    announced_date: str | None = Field(default=None)  # ISO date string
+    investors: list[str] = Field(default_factory=list)
+    use_of_funds: str = Field(default="")  # "Product expansion", "APAC expansion", etc.
 
 
 class CompetitorAnalysis(BaseModel):
@@ -320,7 +347,7 @@ class CompetitorAnalysis(BaseModel):
     description: str = Field(default="")
     founded_year: int | None = Field(default=None)
     employee_count: int | None = Field(default=None)
-    funding_raised: float | None = Field(default=None)
+    funding_raised: float | None = Field(default=None)  # Deprecated — use latest_funding.amount_usd
     headquarters: str | None = Field(default=None)
 
     # Analysis
@@ -343,9 +370,16 @@ class CompetitorAnalysis(BaseModel):
     recent_news: list[str] = Field(default_factory=list)
     strategic_moves: list[str] = Field(default_factory=list)
 
+    # Structured pricing & funding intelligence
+    pricing_tiers: list[CompetitorPricing] = Field(default_factory=list)
+    latest_funding: CompetitorFundingRound | None = Field(default=None)
+    employee_count_estimate: int | None = Field(default=None)
+    hiring_velocity: str = Field(default="")  # "growing fast", "stable", "contracting"
+    recent_executive_moves: list[str] = Field(default_factory=list)  # e.g. "New CTO hired from Google, Jan 2025"
+
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     sources: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class CustomerPersona(BaseModel):
@@ -382,7 +416,7 @@ class CustomerPersona(BaseModel):
     content_preferences: list[str] = Field(default_factory=list)
     messaging_tone: str | None = Field(default=None)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # =============================================================================
@@ -400,7 +434,7 @@ class AgentTask(BaseModel):
     status: TaskStatus = Field(default=TaskStatus.PENDING)
     result: dict[str, Any] | None = Field(default=None)
     error: str | None = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = Field(default=None)
 
 
@@ -413,7 +447,7 @@ class AgentMessage(BaseModel):
     message_type: str = Field(...)  # request, response, notification
     payload: dict[str, Any] = Field(default_factory=dict)
     correlation_id: UUID | None = Field(default=None)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # =============================================================================
@@ -434,6 +468,15 @@ class GTMAnalysisResult(BaseModel):
     leads: list[LeadProfile] = Field(default_factory=list)
     campaign_brief: CampaignBrief | None = Field(default=None)
 
+    # GTM Strategist outputs (TAM/SAM/SOM + sales motion)
+    market_sizing: dict[str, Any] | None = Field(default=None)
+    sales_motion: dict[str, Any] | None = Field(default=None)
+
+    # Campaign Architect outputs
+    outreach_sequences: list[dict[str, Any]] = Field(default_factory=list)
+    success_metrics: list[str] = Field(default_factory=list)
+    compliance_flags: list[str] = Field(default_factory=list)
+
     # Summary
     executive_summary: str = Field(default="")
     key_recommendations: list[str] = Field(default_factory=list)
@@ -443,7 +486,7 @@ class GTMAnalysisResult(BaseModel):
     total_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     processing_time_seconds: float = Field(default=0.0)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # =============================================================================

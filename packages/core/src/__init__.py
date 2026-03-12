@@ -26,12 +26,22 @@ from .protocols import (
     IntegrationProtocol,
     TaskProtocol,
 )
+from .signatures import (
+    AgentSignature,
+    get_signature,
+    list_signatures,
+    register_signature,
+    reset_signature_registry,
+    validate_publish,
+)
 from .types import (
     AgentStatus,
     CampaignBrief,
     # Domain Types
     CompanyProfile,
     CompetitorAnalysis,
+    CompetitorFundingRound,
+    CompetitorPricing,
     ConfidenceLevel,
     CustomerPersona,
     # Enums
@@ -46,6 +56,7 @@ from .types import (
     PDCAState,
     TaskStatus,
 )
+from .vertical import detect_vertical_slug
 
 __all__ = [
     # Config
@@ -78,6 +89,8 @@ __all__ = [
     "CampaignBrief",
     "MarketInsight",
     "CompetitorAnalysis",
+    "CompetitorPricing",
+    "CompetitorFundingRound",
     "CustomerPersona",
     # Protocols
     "AgentProtocol",
@@ -89,4 +102,13 @@ __all__ = [
     "DiscoveryType",
     "get_agent_bus",
     "reset_agent_bus",
+    # Agent Signatures
+    "AgentSignature",
+    "register_signature",
+    "get_signature",
+    "list_signatures",
+    "validate_publish",
+    "reset_signature_registry",
+    # Vertical Detection
+    "detect_vertical_slug",
 ]

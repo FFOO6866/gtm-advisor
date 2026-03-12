@@ -7,12 +7,18 @@ interface BackButtonProps {
   label?: string;
 }
 
-export function BackButton({ to = '/', label = 'Back to Command Center' }: BackButtonProps) {
+export function BackButton({ to, label = 'Back to Command Center' }: BackButtonProps) {
   const navigate = useNavigate();
 
   return (
     <motion.button
-      onClick={() => navigate(to)}
+      onClick={() => {
+        if (to) {
+          navigate(to);
+        } else {
+          navigate(-1);
+        }
+      }}
       className="flex items-center gap-2 text-white/60 hover:text-white transition-colors"
       whileHover={{ x: -2 }}
     >

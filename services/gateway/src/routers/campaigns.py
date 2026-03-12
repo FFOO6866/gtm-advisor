@@ -1,6 +1,6 @@
 """Campaign management API endpoints."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
@@ -227,7 +227,7 @@ async def activate_campaign(
 
     campaign.status = CampaignStatus.ACTIVE
     if not campaign.start_date:
-        campaign.start_date = datetime.utcnow()
+        campaign.start_date = datetime.now(UTC)
 
     await db.flush()
 
@@ -270,7 +270,7 @@ async def complete_campaign(
 
     campaign.status = CampaignStatus.COMPLETED
     if not campaign.end_date:
-        campaign.end_date = datetime.utcnow()
+        campaign.end_date = datetime.now(UTC)
 
     await db.flush()
 
@@ -546,7 +546,7 @@ async def generate_content(
         target_persona=request.target_persona,
     )
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     target_persona = request.target_persona or "Business Decision Makers"
 
     # Try AI generation first

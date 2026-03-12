@@ -1,0 +1,13 @@
+[project]
+name = "gtm-advisor-workforce-architect"
+version = "0.1.0"
+description = "Workforce Architect Agent - Designs AI Digital Workforces"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "structlog>=24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

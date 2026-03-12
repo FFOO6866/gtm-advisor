@@ -44,19 +44,27 @@ from .middleware.rate_limit import limiter  # noqa: E402
 from .routers import (  # noqa: E402
     agents,
     analysis,
+    approvals,
+    attribution,
     auth,
     campaigns,
     companies,
     company_agents,
     competitors,
+    documents,
     exports,
     health,
     icps,
     insights,
     leads,
+    playbooks,
+    sequences,
     settings,
+    signals,
     strategy,
+    webhooks,
     websocket,
+    workforce,
 )
 
 logger = structlog.get_logger()
@@ -98,7 +106,80 @@ async def lifespan(_app: FastAPI):
         logger.error("cache_initialization_failed", error=str(e))
         raise
 
+    # Seed built-in playbook templates
+    try:
+        from packages.database.src.session import async_session_factory
+        from services.gateway.src.services.playbook_service import PlaybookService
+        async with async_session_factory() as seed_db:
+            await PlaybookService(seed_db).seed_built_in_playbooks()
+        logger.info("playbooks_seeded")
+    except Exception as e:
+        logger.error("playbook_seed_failed", error=str(e))
+        # Non-fatal — playbooks can be seeded later
+
+    # Seed market verticals (idempotent)
+    try:
+        from packages.database.src.session import async_session_factory
+        from packages.database.src.vertical_seeds import seed_verticals
+        async with async_session_factory() as db:
+            count = await seed_verticals(db)
+            await db.commit()
+            if count:
+                logger.info("verticals_seeded", count=count)
+    except Exception as e:
+        logger.error("vertical_seed_failed", error=str(e))
+        # Non-fatal — verticals can be seeded later
+
+    # Recover any analyses orphaned by a previous server crash/reload.
+    # Any analysis still in RUNNING state has no active background task — mark FAILED.
+    # Retry up to 3 times with a short delay to handle SQLite WAL lock from prior process.
+    try:
+        import asyncio as _asyncio
+
+        from sqlalchemy import update
+
+        from packages.database.src.models import Analysis
+        from packages.database.src.models import AnalysisStatus as DBAnalysisStatus
+        from packages.database.src.session import async_session_factory
+        for _attempt in range(3):
+            try:
+                async with async_session_factory() as db:
+                    result = await db.execute(
+                        update(Analysis)
+                        .where(Analysis.status == DBAnalysisStatus.RUNNING)
+                        .values(
+                            status=DBAnalysisStatus.FAILED,
+                            error="Server restarted while analysis was in progress. Please try again.",
+                            current_agent=None,
+                        )
+                    )
+                    await db.commit()
+                    if result.rowcount > 0:
+                        logger.warning("orphaned_analyses_recovered", count=result.rowcount)
+                break
+            except Exception as _e:
+                if _attempt < 2:
+                    await _asyncio.sleep(1.0)
+                else:
+                    raise _e
+    except Exception as e:
+        logger.error("orphan_recovery_failed", error=str(e))
+        # Non-fatal — app continues
+
+    # Start background scheduler (signal monitor, sequence runner, enrichment)
+    from .scheduler import start_scheduler
+    try:
+        await start_scheduler()
+        logger.info("scheduler_started")
+    except Exception as e:
+        logger.error("scheduler_start_failed", error=str(e))
+        # Non-fatal — app continues without scheduler
+
     yield
+
+    # Stop scheduler
+    from .scheduler import stop_scheduler
+    await stop_scheduler()
 
     # Shutdown
     logger.info("gtm_advisor_stopping")
@@ -124,7 +205,13 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS configuration
+# Authentication middleware (sets request.state.user)
+# Added FIRST so it is innermost — CORS headers are added on all responses,
+# including 401s, because CORSMiddleware runs as the outermost layer.
+app.add_middleware(AuthMiddleware)
+
+# CORS must be added LAST (outermost) so it wraps AuthMiddleware and adds
+# Access-Control-Allow-Origin headers even when auth rejects a request.
 config = get_config()
 app.add_middleware(
     CORSMiddleware,
@@ -133,9 +220,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Authentication middleware (sets request.state.user)
-app.add_middleware(AuthMiddleware)
 
 # Register all error handlers for consistent error responses
 register_error_handlers(app)
@@ -158,6 +242,14 @@ app.include_router(strategy.router, prefix="/api/v1/companies", tags=["Strategy"
 app.include_router(company_agents.router, prefix="/api/v1/companies", tags=["Company Agents"])
 app.include_router(exports.router, prefix="/api/v1/exports", tags=["Exports"])
 app.include_router(settings.router, prefix="/api/v1/settings", tags=["Settings"])
+app.include_router(workforce.router, prefix="/api/v1/companies", tags=["Workforce"])
+app.include_router(signals.router, prefix="/api/v1/companies", tags=["Signals"])
+app.include_router(sequences.router, prefix="/api/v1/companies", tags=["Sequences"])
+app.include_router(approvals.router, prefix="/api/v1/companies", tags=["Approvals"])
+app.include_router(playbooks.router, prefix="/api/v1/companies", tags=["Playbooks"])
+app.include_router(attribution.router, prefix="/api/v1/companies", tags=["Attribution"])
+app.include_router(webhooks.router, prefix="/api/v1", tags=["Webhooks"])
+app.include_router(documents.router, tags=["Documents"])
 
 
 @app.get("/")

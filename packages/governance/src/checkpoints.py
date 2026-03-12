@@ -16,7 +16,7 @@ import asyncio
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -55,7 +55,7 @@ class ApprovalRequest:
     options: list[str] | None = None  # For SELECTION type
     urgency: str = "normal"  # low, normal, high, critical
     status: ApprovalStatus = ApprovalStatus.PENDING
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     expires_at: datetime | None = None
     decided_at: datetime | None = None
     decided_by: str | None = None
@@ -85,7 +85,7 @@ class ApprovalRequest:
     @property
     def is_expired(self) -> bool:
         """Check if request has expired."""
-        if self.expires_at and datetime.utcnow() > self.expires_at:
+        if self.expires_at and datetime.now(UTC) > self.expires_at:
             return True
         return False
 
@@ -215,7 +215,7 @@ class CheckpointManager:
         # Calculate expiry
         expires_at = None
         if checkpoint.auto_approve_after:
-            expires_at = datetime.utcnow() + checkpoint.auto_approve_after
+            expires_at = datetime.now(UTC) + checkpoint.auto_approve_after
 
         request = ApprovalRequest(
             id=str(uuid.uuid4()),
@@ -250,7 +250,7 @@ class CheckpointManager:
             raise ValueError(f"Request is not pending: {request.status.value}")
 
         request.status = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
-        request.decided_at = datetime.utcnow()
+        request.decided_at = datetime.now(UTC)
         request.decided_by = decided_by
         request.decision = decision or ("approved" if approved else "rejected")
         request.notes = notes

@@ -1,6 +1,6 @@
 """Export API endpoints for PDF and JSON reports."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
@@ -45,7 +45,7 @@ async def export_analysis_json(
 
     export_data = {
         "export_type": "gtm_analysis",
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "company": {
             "name": company.name if company else "Unknown",
             "website": company.website if company else None,
@@ -102,7 +102,7 @@ async def export_competitors_json(
 
     export_data = {
         "export_type": "competitor_analysis",
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "company": company.name if company else "Unknown",
         "total_competitors": len(competitors),
         "competitors": [
@@ -175,7 +175,7 @@ async def export_battlecards_json(
 
     export_data = {
         "export_type": "battle_cards",
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "company": company.name if company else "Unknown",
         "battle_cards": battle_cards,
     }
@@ -207,7 +207,7 @@ async def export_icps_json(
 
     export_data = {
         "export_type": "icps_and_personas",
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "company": company.name if company else "Unknown",
         "icps": [
             {
@@ -281,7 +281,7 @@ async def export_leads_json(
 
     export_data = {
         "export_type": "leads",
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "company": company.name if company else "Unknown",
         "total_leads": len(leads),
         "filters_applied": {
@@ -339,7 +339,7 @@ async def export_campaign_json(
 
     export_data = {
         "export_type": "campaign",
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "company": company.name if company else "Unknown",
         "campaign": {
             "name": campaign.name,
@@ -442,7 +442,7 @@ async def export_full_report_json(
 
     export_data = {
         "export_type": "full_gtm_report",
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "company_profile": {
             "name": company.name,
             "website": company.website,

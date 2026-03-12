@@ -38,6 +38,8 @@ from .compliance import (
     DataCategory,
     PDPAChecker,
 )
+from .constraint_envelope import ConstraintEnvelope, RuntimeBudgetTracker
+from .trust import ApprovalGate, TrustContext, TrustPosture
 
 __all__ = [
     # Access Control
@@ -63,4 +65,11 @@ __all__ = [
     "PDPAChecker",
     "DataCategory",
     "ConsentStatus",
+    # Constraint Envelopes
+    "ConstraintEnvelope",
+    "RuntimeBudgetTracker",
+    # Trust Postures
+    "TrustPosture",
+    "TrustContext",
+    "ApprovalGate",
 ]

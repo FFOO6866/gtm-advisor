@@ -6,7 +6,7 @@ Knowledge Web architecture. Every fact must have provenance.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -125,7 +125,7 @@ class EvidencedFact(BaseModel):
         default=None, description="When the source was published"
     )
     captured_at: datetime = Field(
-        default_factory=datetime.utcnow, description="When we captured this fact"
+        default_factory=lambda: datetime.now(UTC), description="When we captured this fact"
     )
     valid_from: datetime | None = Field(
         default=None, description="When this fact became true"
@@ -205,7 +205,7 @@ class MCPHealthStatus(BaseModel):
 
     server_name: str
     is_healthy: bool
-    last_check: datetime = Field(default_factory=datetime.utcnow)
+    last_check: datetime = Field(default_factory=lambda: datetime.now(UTC))
     error_message: str | None = None
 
     # Usage stats
@@ -296,4 +296,4 @@ class CompetitorAlert(BaseModel):
     response_options: list[str] = Field(default_factory=list)
     recommended_action: str | None = None
 
-    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

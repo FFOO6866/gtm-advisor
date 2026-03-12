@@ -12,9 +12,14 @@ Tables:
 - leads: Generated leads
 - campaigns: Campaign briefs and content
 - market_insights: Market intelligence data
+- workforce_configs: Digital Workforce configurations
+- execution_runs: Workforce execution cycles
+- execution_metrics: KPI snapshots per execution run
+- sg_knowledge_articles: Singapore government reference data (grants, regulations, enforcement)
 """
 
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime
 from enum import Enum as PyEnum
 from uuid import uuid4
 
@@ -30,9 +35,10 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -118,8 +124,8 @@ class User(Base):
     preferences = Column(JSON, default=dict)  # UI settings, notifications, etc.
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     companies = relationship("Company", back_populates="owner")
@@ -158,13 +164,18 @@ class Company(Base):
     target_markets = Column(JSON, default=list)  # List of markets
     value_proposition = Column(Text)
 
+    # Persistent context sources — uploaded docs, website scrapes, etc.
+    # List of {type, name, text, chars, added_at} dicts.
+    # Agents receive all sources joined into a single additional_context string.
+    context_sources = Column(JSON, nullable=True, default=list)
+
     # Enrichment metadata
     enrichment_confidence = Column(Float, default=0.0)
     last_enriched_at = Column(DateTime)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     owner = relationship("User", back_populates="companies")
@@ -219,7 +230,7 @@ class Analysis(Base):
     tool_calls = Column(Integer, default=0)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     completed_at = Column(DateTime)
 
     # Relationships
@@ -267,11 +278,11 @@ class Competitor(Base):
 
     # Tracking
     is_active = Column(Boolean, default=True)
-    last_updated = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=lambda: datetime.now(UTC))
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     company = relationship("Company", back_populates="tracked_competitors")
@@ -306,7 +317,7 @@ class CompetitorAlert(Base):
     is_dismissed = Column(Boolean, default=False)
 
     # Timestamps
-    detected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    detected_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     read_at = Column(DateTime)
 
     # Relationships
@@ -349,8 +360,8 @@ class ICP(Base):
     is_active = Column(Boolean, default=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     company = relationship("Company", back_populates="icps")
@@ -394,8 +405,8 @@ class Persona(Base):
     is_active = Column(Boolean, default=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     icp = relationship("ICP", back_populates="personas")
@@ -447,8 +458,8 @@ class Lead(Base):
     tags = Column(JSON, default=list)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
     contacted_at = Column(DateTime)
     converted_at = Column(DateTime)
 
@@ -510,8 +521,8 @@ class Campaign(Base):
     metrics = Column(JSON, default=dict)  # impressions, clicks, leads, etc.
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     company = relationship("Company", back_populates="campaigns")
@@ -558,7 +569,7 @@ class MarketInsight(Base):
     is_archived = Column(Boolean, default=False)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     expires_at = Column(DateTime)  # When insight becomes stale
 
     # Relationships
@@ -592,7 +603,7 @@ class Consent(Base):
     ip_address = Column(String(45))  # IPv4 or IPv6
 
     # Validity
-    granted_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    granted_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     expires_at = Column(DateTime)
     revoked_at = Column(DateTime)
 
@@ -634,7 +645,7 @@ class AuditLog(Base):
     duration_ms = Column(Float)
 
     # Timestamps
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    timestamp = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True)
 
     __table_args__ = (
         Index("ix_audit_logs_user_event", "user_id", "event_type"),
@@ -694,7 +705,7 @@ class StrategyRun(Base):
     execution_time_ms = Column(Float, default=0.0)
 
     # Timestamps
-    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     completed_at = Column(DateTime)
 
     # Relationships
@@ -754,8 +765,8 @@ class StrategyRecommendation(Base):
     status = Column(Enum(RecommendationStatus), default=RecommendationStatus.PENDING)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     strategy_run = relationship("StrategyRun", back_populates="recommendations")
@@ -782,7 +793,7 @@ class AgentActivity(Base):
     icon = Column(String(10))
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
     # Relationships
     strategy_run = relationship("StrategyRun", back_populates="activities")
@@ -828,7 +839,7 @@ class AgentRun(Base):
     result_summary = Column(Text)
 
     # Timestamps
-    started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     completed_at = Column(DateTime)
 
     __table_args__ = (
@@ -864,7 +875,7 @@ class GeneratedContent(Base):
     include_cta = Column(Boolean, default=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
     __table_args__ = (
         Index("ix_generated_content_company_id", "company_id"),
@@ -963,7 +974,7 @@ class EvidencedFact(Base):
 
     # Temporal context
     published_at = Column(DateTime)  # When the source was published
-    captured_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    captured_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     valid_from = Column(DateTime)  # When fact became true
     valid_until = Column(DateTime)  # When fact stopped being true (if known)
 
@@ -981,8 +992,8 @@ class EvidencedFact(Base):
     is_stale = Column(Boolean, default=False)  # Marked as outdated
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     entity_links = relationship(
@@ -1028,7 +1039,7 @@ class Entity(Base):
 
     # Confidence and freshness
     confidence = Column(Float, default=0.8)
-    last_updated = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, default=lambda: datetime.now(UTC))
     fact_count = Column(Integer, default=0)  # Number of facts about this entity
 
     # Status
@@ -1036,8 +1047,8 @@ class Entity(Base):
     merged_into_id = Column(UUID(as_uuid=True))  # If entity was merged/deduplicated
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     fact_links = relationship(
@@ -1094,8 +1105,8 @@ class EntityRelation(Base):
     is_current = Column(Boolean, default=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     source_entity = relationship(
@@ -1138,7 +1149,7 @@ class FactEntityLink(Base):
     relevance = Column(Float, default=1.0)  # How relevant the fact is to the entity
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
     # Relationships
     fact = relationship("EvidencedFact", back_populates="entity_links")
@@ -1166,7 +1177,7 @@ class FactRelationLink(Base):
     is_primary_evidence = Column(Boolean, default=False)  # Is this the main evidence?
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
     # Relationships
     fact = relationship("EvidencedFact", back_populates="relation_links")
@@ -1206,8 +1217,8 @@ class LeadJustification(Base):
     evidence_summary = Column(Text)  # Human-readable summary of evidence
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    detected_at = Column(DateTime, default=datetime.utcnow)  # When signal was detected
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    detected_at = Column(DateTime, default=lambda: datetime.now(UTC))  # When signal was detected
 
     __table_args__ = (
         Index("ix_lead_justifications_lead", "lead_id"),
@@ -1250,8 +1261,8 @@ class CompetitorSignal(Base):
     response_status = Column(String(20))  # pending, in_progress, addressed, ignored
 
     # Timestamps
-    detected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    detected_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
     __table_args__ = (
         Index("ix_competitor_signals_competitor", "competitor_id"),
@@ -1297,8 +1308,8 @@ class MCPDataSource(Base):
     rate_limit_reset_at = Column(DateTime)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     __table_args__ = (
         Index("ix_mcp_data_sources_name", "name"),
@@ -1308,3 +1319,875 @@ class MCPDataSource(Base):
 
     def __repr__(self) -> str:
         return f"<MCPDataSource {self.name}>"
+
+
+# =============================================================================
+# Digital Workforce models
+# =============================================================================
+
+
+class WorkforceStatus(str, PyEnum):
+    """Status of a digital workforce configuration."""
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ARCHIVED = "archived"
+    FAILED = "failed"  # Design run failed — see config.definition["error"]
+
+
+class ExecutionRunStatus(str, PyEnum):
+    """Status of a single workforce execution run."""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    PARTIAL = "partial"
+    FAILED = "failed"
+
+
+class WorkforceConfig(Base):
+    """Digital Workforce configuration for a company.
+
+    Created by WorkforceArchitectAgent from completed analysis.
+    Stores the full WorkforceDefinition as JSON plus approval state.
+    """
+
+    __tablename__ = "workforce_configs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+    analysis_id = Column(UUID(as_uuid=True), ForeignKey("analyses.id"), nullable=True)
+
+    status = Column(Enum(WorkforceStatus), default=WorkforceStatus.DRAFT, nullable=False)
+
+    # Full WorkforceDefinition JSON (agent_roster, value_chain, kpis, etc.)
+    definition = Column(JSON, nullable=False, default=dict)
+
+    # Subset of agent_types the user has approved for execution
+    approved_agents = Column(JSON, default=list)
+
+    # Summary fields for quick display (denormalised from definition)
+    executive_summary = Column(Text)
+    estimated_weekly_hours_saved = Column(Float, default=0.0)
+    estimated_monthly_revenue_impact_sgd = Column(Float, default=0.0)
+    agent_count = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+
+    # Relationships
+    company = relationship("Company")
+    execution_runs = relationship("ExecutionRun", back_populates="workforce_config", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_workforce_configs_company_id", "company_id"),
+        Index("ix_workforce_configs_status", "status"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<WorkforceConfig {self.id} ({self.status.value})>"
+
+
+class ExecutionRun(Base):
+    """One execution cycle of the digital workforce.
+
+    Created each time the workforce is triggered (manual or scheduled).
+    Tracks step-by-step progress and aggregates metrics.
+    """
+
+    __tablename__ = "execution_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    workforce_config_id = Column(UUID(as_uuid=True), ForeignKey("workforce_configs.id"), nullable=False)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+
+    status = Column(Enum(ExecutionRunStatus), default=ExecutionRunStatus.PENDING, nullable=False)
+    trigger = Column(String(50), default="manual")     # "manual", "scheduled", "event"
+    trigger_event = Column(String(200))                # e.g. "lead_qualified:uuid"
+
+    # Progress counters
+    steps_total = Column(Integer, default=0)
+    steps_completed = Column(Integer, default=0)
+    steps_failed = Column(Integer, default=0)
+
+    # Execution outcomes
+    emails_sent = Column(Integer, default=0)
+    crm_records_updated = Column(Integer, default=0)
+    leads_contacted = Column(Integer, default=0)
+
+    # Error info
+    error_summary = Column(Text)
+
+    # Step-level log (list of dicts: {step, agent, status, result_summary, duration_ms})
+    execution_log = Column(JSON, default=list)
+
+    # Timestamps
+    started_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    completed_at = Column(DateTime)
+
+    # Relationships
+    workforce_config = relationship("WorkforceConfig", back_populates="execution_runs")
+    metrics = relationship("ExecutionMetric", back_populates="execution_run", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("ix_execution_runs_company_id", "company_id"),
+        Index("ix_execution_runs_workforce_config_id", "workforce_config_id"),
+        Index("ix_execution_runs_status", "status"),
+        Index("ix_execution_runs_started_at", "started_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ExecutionRun {self.id} ({self.status.value})>"
+
+
+class ExecutionMetric(Base):
+    """KPI snapshot captured during or after an execution run.
+
+    Used for time-series monitoring dashboards. One row per metric per run.
+    """
+
+    __tablename__ = "execution_metrics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    execution_run_id = Column(UUID(as_uuid=True), ForeignKey("execution_runs.id"), nullable=False)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id"), nullable=False)
+
+    # Metric identity
+    metric_name = Column(String(100), nullable=False)     # "email_open_rate", "deals_created"
+    metric_source = Column(String(50), nullable=False)    # "sendgrid", "hubspot", "internal"
+
+    # Values
+    value = Column(Float, nullable=False)
+    target_value = Column(Float)
+    unit = Column(String(30))           # "%", "count", "SGD"
+    delta_from_previous = Column(Float) # change vs last run
+
+    # Context
+    step_name = Column(String(200))
+    agent_type = Column(String(100))
+    notes = Column(Text)
+
+    captured_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+
+    # Relationships
+    execution_run = relationship("ExecutionRun", back_populates="metrics")
+
+    __table_args__ = (
+        Index("ix_execution_metrics_run_id", "execution_run_id"),
+        Index("ix_execution_metrics_company_id", "company_id"),
+        Index("ix_execution_metrics_name_time", "metric_name", "captured_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ExecutionMetric {self.metric_name}={self.value}>"
+
+
+# ---------------------------------------------------------------------------
+# Signal Intelligence Models
+# ---------------------------------------------------------------------------
+
+class SignalType(str, PyEnum):
+    """Type of market signal detected."""
+    FUNDING = "funding"
+    ACQUISITION = "acquisition"
+    PRODUCT_LAUNCH = "product_launch"
+    REGULATION = "regulation"
+    EXPANSION = "expansion"
+    HIRING = "hiring"
+    LAYOFF = "layoff"
+    PARTNERSHIP = "partnership"
+    MARKET_TREND = "market_trend"
+    COMPETITOR_NEWS = "competitor_news"
+    GENERAL_NEWS = "general_news"
+
+
+class SignalUrgency(str, PyEnum):
+    IMMEDIATE = "immediate"      # Act within 24 hours
+    THIS_WEEK = "this_week"      # Act within 7 days
+    THIS_MONTH = "this_month"    # Monitor and act this month
+    MONITOR = "monitor"          # Background signal, low priority
+
+
+class SignalEvent(Base):
+    """A market or competitor signal detected by the Signal Monitor Agent."""
+    __tablename__ = "signal_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    signal_type: Mapped[SignalType] = mapped_column(Enum(SignalType), nullable=False, index=True)
+    urgency: Mapped[SignalUrgency] = mapped_column(Enum(SignalUrgency), nullable=False, default=SignalUrgency.MONITOR)
+    headline: Mapped[str] = mapped_column(String(500), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(100), nullable=True)  # "NewsAPI", "Perplexity", "EODHD"
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    relevance_score: Mapped[float] = mapped_column(Float, default=0.0)
+    competitors_mentioned: Mapped[list] = mapped_column(JSON, default=list)
+    recommended_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_actioned: Mapped[bool] = mapped_column(Boolean, default=False)
+    actioned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    company: Mapped["Company"] = relationship("Company", lazy="select")
+
+
+# ---------------------------------------------------------------------------
+# Outreach Sequence Models
+# ---------------------------------------------------------------------------
+
+class SequenceTemplate(Base):
+    """A reusable multi-step outreach sequence template."""
+    __tablename__ = "sequence_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=True, index=True)
+    # NULL company_id = system/built-in template
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    playbook_type: Mapped[str] = mapped_column(String(50), nullable=False)  # PlaybookType enum value
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    total_steps: Mapped[int] = mapped_column(Integer, default=0)
+    total_duration_days: Mapped[int] = mapped_column(Integer, default=14)
+    is_system_template: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    # Relationships
+    steps: Mapped[list["SequenceStep"]] = relationship("SequenceStep", back_populates="template", order_by="SequenceStep.step_number", cascade="all, delete-orphan")
+    enrollments: Mapped[list["SequenceEnrollment"]] = relationship("SequenceEnrollment", back_populates="template")
+
+
+class SequenceStep(Base):
+    """A single step within a sequence template."""
+    __tablename__ = "sequence_steps"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    template_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sequence_templates.id", ondelete="CASCADE"), nullable=False, index=True)
+    step_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    day_offset: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # Days from enrollment date
+    step_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "cold_intro", "followup", "breakup" etc.
+    subject_pattern: Mapped[str] = mapped_column(String(300), nullable=False)  # Template with {first_name} etc.
+    body_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)  # Prompt context for personalisation
+    channel: Mapped[str] = mapped_column(String(20), default="email")
+    requires_approval: Mapped[bool] = mapped_column(Boolean, default=True)  # Always True
+
+    # Relationships
+    template: Mapped["SequenceTemplate"] = relationship("SequenceTemplate", back_populates="steps")
+
+
+class EnrollmentStatus(str, PyEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"       # Replied or manually paused
+    COMPLETED = "completed"  # All steps sent
+    REJECTED = "rejected"    # Approval rejected
+    OPTED_OUT = "opted_out"  # Unsubscribed
+
+
+class SequenceEnrollment(Base):
+    """A lead enrolled in a specific sequence template."""
+    __tablename__ = "sequence_enrollments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    lead_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
+    template_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sequence_templates.id"), nullable=False)
+    status: Mapped[EnrollmentStatus] = mapped_column(Enum(EnrollmentStatus), default=EnrollmentStatus.ACTIVE, nullable=False, index=True)
+    current_step: Mapped[int] = mapped_column(Integer, default=0)  # 0-indexed
+    next_step_due: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    enrolled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pause_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    emails_sent: Mapped[int] = mapped_column(Integer, default=0)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    trigger_signal_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("signal_events.id"), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    # Relationships
+    lead: Mapped["Lead"] = relationship("Lead", lazy="select")
+    template: Mapped["SequenceTemplate"] = relationship("SequenceTemplate", back_populates="enrollments")
+
+
+# ---------------------------------------------------------------------------
+# Approval Queue
+# ---------------------------------------------------------------------------
+
+class ApprovalStatus(str, PyEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EDITED_APPROVED = "edited_approved"  # User edited the content then approved
+
+
+class ApprovalQueueItem(Base):
+    """A pending outreach action awaiting human approval."""
+    __tablename__ = "approval_queue"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    enrollment_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("sequence_enrollments.id", ondelete="CASCADE"), nullable=False)
+    step_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    lead_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("leads.id"), nullable=False)
+    status: Mapped[ApprovalStatus] = mapped_column(Enum(ApprovalStatus), default=ApprovalStatus.PENDING, nullable=False, index=True)
+    # Proposed email content
+    proposed_subject: Mapped[str] = mapped_column(String(500), nullable=False)
+    proposed_body: Mapped[str] = mapped_column(Text, nullable=False)
+    final_subject: Mapped[str | None] = mapped_column(String(500), nullable=True)   # After edit
+    final_body: Mapped[str | None] = mapped_column(Text, nullable=True)              # After edit
+    to_email: Mapped[str] = mapped_column(String(300), nullable=False)
+    to_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    sequence_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(200), nullable=True)     # User email
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # Auto-expire stale items
+    scheduled_send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    message_id: Mapped[str | None] = mapped_column(String(200), nullable=True)     # SendGrid message ID
+
+
+# ---------------------------------------------------------------------------
+# Attribution & ROI Tracking
+# ---------------------------------------------------------------------------
+
+class AttributionEvent(Base):
+    """Tracks the journey from outreach action to business outcome."""
+    __tablename__ = "attribution_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    lead_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("leads.id"), nullable=False, index=True)
+    approval_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("approval_queue.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    # event_type values: "email_sent", "email_opened", "email_clicked", "reply_received",
+    #                    "meeting_booked", "meeting_held", "proposal_sent", "deal_closed"
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    pipeline_value_sgd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    recorded_by: Mapped[str] = mapped_column(String(50), default="system")  # "system" or user email
+
+
+# ---------------------------------------------------------------------------
+# Playbook Templates (built-in + custom)
+# ---------------------------------------------------------------------------
+
+class PlaybookTemplate(Base):
+    """Pre-built GTM playbook configurations."""
+    __tablename__ = "playbook_templates"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    playbook_type: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    best_for: Mapped[str] = mapped_column(Text, nullable=False)
+    steps_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    success_rate_benchmark: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    sequence_config: Mapped[dict] = mapped_column(JSON, default=dict)  # Full step config
+    scoring_weights: Mapped[dict] = mapped_column(JSON, default=dict)  # PlaybookFitScorer weights
+    is_singapore_specific: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# Market Intelligence Database — Phase 3
+# ---------------------------------------------------------------------------
+
+
+class CompanyListingType(str, PyEnum):
+    """Type of listed instrument."""
+    COMMON_STOCK = "common_stock"
+    REIT = "reit"
+    ETF = "etf"
+    BUSINESS_TRUST = "business_trust"
+    PREFERRED = "preferred"
+
+
+class FinancialPeriodType(str, PyEnum):
+    """Annual or quarterly financial period."""
+    ANNUAL = "annual"
+    QUARTERLY = "quarterly"
+
+
+class MarketVertical(Base):
+    """Singapore industry vertical taxonomy — SSIC-anchored.
+
+    12 primary verticals mapped to SSIC 2020 section codes.
+    Used as the spine for all benchmarking and signal classification.
+    """
+    __tablename__ = "market_verticals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    slug: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    ssic_sections: Mapped[list] = mapped_column(JSON, default=list)    # e.g. ["K", "J"]
+    ssic_codes: Mapped[list] = mapped_column(JSON, default=list)       # specific 5-digit codes
+    gics_sectors: Mapped[list] = mapped_column(JSON, default=list)     # EODHD GicsSector values
+    keywords: Mapped[list] = mapped_column(JSON, default=list)         # for news classification
+    is_reit_vertical: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    listed_companies: Mapped[list["ListedCompany"]] = relationship(
+        "ListedCompany", back_populates="vertical", lazy="select"
+    )
+    benchmarks: Mapped[list["VerticalBenchmark"]] = relationship(
+        "VerticalBenchmark", back_populates="vertical", lazy="select"
+    )
+
+    def __repr__(self) -> str:
+        return f"<MarketVertical {self.slug}>"
+
+
+class ListedCompany(Base):
+    """SGX-listed or overseas-listed Singapore company.
+
+    Populated from EODHD exchange-symbol-list/SG and a curated list
+    of SG-founded companies on US/HK exchanges.
+
+    Does NOT store individual contacts (no PDPA concern — B2B company data).
+    """
+    __tablename__ = "listed_companies"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    exchange: Mapped[str] = mapped_column(String(10), nullable=False)  # SG, US, HK, etc.
+    isin: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    listing_type: Mapped[CompanyListingType] = mapped_column(
+        Enum(CompanyListingType), default=CompanyListingType.COMMON_STOCK, nullable=False
+    )
+    currency: Mapped[str] = mapped_column(String(5), default="SGD")
+    vertical_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_verticals.id"), nullable=True, index=True
+    )
+
+    # EODHD General fields
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    employees: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    gics_sector: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    gics_industry: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Snapshot financials (from Highlights — refreshed with each sync)
+    market_cap_sgd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ev_ebitda: Mapped[float | None] = mapped_column(Float, nullable=True)
+    revenue_ttm_sgd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gross_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    profit_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    roe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dividend_yield: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # REIT-specific (null for non-REITs)
+    nav_per_unit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dpu_ttm: Mapped[float | None] = mapped_column(Float, nullable=True)       # Distribution per unit
+    gearing_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)  # % debt/assets
+
+    # Metadata
+    is_sg_incorporated: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    vertical: Mapped["MarketVertical | None"] = relationship("MarketVertical", back_populates="listed_companies")
+    financial_snapshots: Mapped[list["CompanyFinancialSnapshot"]] = relationship(
+        "CompanyFinancialSnapshot", back_populates="company", lazy="select"
+    )
+
+    __table_args__ = (
+        Index("ix_listed_companies_ticker_exchange", "ticker", "exchange", unique=True),
+        Index("ix_listed_companies_vertical", "vertical_id"),
+        Index("ix_listed_companies_market_cap", "market_cap_sgd"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ListedCompany {self.ticker}.{self.exchange} ({self.name})>"
+
+
+class CompanyFinancialSnapshot(Base):
+    """Income statement, balance sheet, and cash flow for a listed company.
+
+    One row per company per period (annual or quarterly).
+    All monetary values normalised to SGD using exchange rate at period end.
+
+    Source: EODHD fundamentals API → Financials.Income_Statement,
+    Balance_Sheet, Cash_Flow sections.
+    """
+    __tablename__ = "company_financial_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("listed_companies.id"), nullable=False, index=True
+    )
+    period_type: Mapped[FinancialPeriodType] = mapped_column(
+        Enum(FinancialPeriodType), nullable=False
+    )
+    period_end_date: Mapped[str] = mapped_column(String(10), nullable=False)   # YYYY-MM-DD
+    filing_currency: Mapped[str] = mapped_column(String(5), default="SGD")
+    fx_to_sgd: Mapped[float] = mapped_column(Float, default=1.0)               # multiplier to SGD
+
+    # Income Statement (in SGD)
+    revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gross_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ebitda: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ebit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_income: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eps: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Computed margins (0–1 float, null if revenue = 0)
+    gross_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ebitda_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # YoY growth rates (null for oldest period)
+    revenue_growth_yoy: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_income_growth_yoy: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Balance Sheet (in SGD)
+    total_assets: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_equity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_debt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cash_and_equivalents: Mapped[float | None] = mapped_column(Float, nullable=True)
+    net_debt: Mapped[float | None] = mapped_column(Float, nullable=True)       # total_debt - cash
+
+    # Derived ratios
+    roe: Mapped[float | None] = mapped_column(Float, nullable=True)            # net_income / equity
+    net_debt_ebitda: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Cash Flow (in SGD)
+    operating_cash_flow: Mapped[float | None] = mapped_column(Float, nullable=True)
+    capex: Mapped[float | None] = mapped_column(Float, nullable=True)
+    free_cash_flow: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Metadata
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    company: Mapped["ListedCompany"] = relationship("ListedCompany", back_populates="financial_snapshots")
+
+    __table_args__ = (
+        Index(
+            "ix_financial_snapshots_company_period",
+            "company_id", "period_type", "period_end_date",
+            unique=True,
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CompanyFinancialSnapshot {self.company_id} {self.period_type} {self.period_end_date}>"
+
+
+class VerticalBenchmark(Base):
+    """Precomputed percentile benchmarks for a vertical + period.
+
+    Updated by the weekly financial sync job.
+    Gives: P25/P50/P75/P90 for each key metric within the vertical.
+
+    Example: for Fintech, annual 2024:
+      revenue_growth_yoy: P25=0.05, P50=0.15, P75=0.35, P90=0.60
+      gross_margin:       P25=0.40, P50=0.55, P75=0.65, P90=0.75
+    """
+    __tablename__ = "vertical_benchmarks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    vertical_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_verticals.id"), nullable=False, index=True
+    )
+    period_type: Mapped[FinancialPeriodType] = mapped_column(Enum(FinancialPeriodType), nullable=False)
+    period_label: Mapped[str] = mapped_column(String(20), nullable=False)      # e.g. "2024", "2024-Q3"
+    company_count: Mapped[int] = mapped_column(Integer, nullable=False)        # N companies in sample
+
+    # Percentile distributions stored as JSON: {"p25": x, "p50": x, "p75": x, "p90": x}
+    revenue_growth_yoy: Mapped[dict] = mapped_column(JSON, default=dict)
+    gross_margin: Mapped[dict] = mapped_column(JSON, default=dict)
+    ebitda_margin: Mapped[dict] = mapped_column(JSON, default=dict)
+    net_margin: Mapped[dict] = mapped_column(JSON, default=dict)
+    roe: Mapped[dict] = mapped_column(JSON, default=dict)
+    net_debt_ebitda: Mapped[dict] = mapped_column(JSON, default=dict)
+    revenue_ttm_sgd: Mapped[dict] = mapped_column(JSON, default=dict)         # Revenue scale distribution
+
+    # Leader / laggard snapshots (top 3 and bottom 3 by revenue growth)
+    leaders: Mapped[list] = mapped_column(JSON, default=list)                 # [{"ticker", "name", "metric", "value"}]
+    laggards: Mapped[list] = mapped_column(JSON, default=list)
+
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    vertical: Mapped["MarketVertical"] = relationship("MarketVertical", back_populates="benchmarks")
+
+    __table_args__ = (
+        Index(
+            "ix_vertical_benchmarks_vertical_period",
+            "vertical_id", "period_type", "period_label",
+            unique=True,
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<VerticalBenchmark {self.vertical_id} {self.period_label}>"
+
+
+class MarketArticle(Base):
+    """RSS/news article ingested from Singapore business publications.
+
+    Sources: Business Times, e27, Tech in Asia, Vulcan Post, Deal Street Asia,
+    MAS press releases, EnterpriseSG announcements, SGX RegNet.
+
+    Embeddings stored as JSON text (serialised list of 1536 floats from
+    OpenAI text-embedding-3-small). This works in both SQLite (dev) and
+    PostgreSQL (prod). On PostgreSQL, a pgvector index can be added via
+    raw SQL migration for ANN search.
+    """
+    __tablename__ = "market_articles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    source_url: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)           # First 500 chars of content
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+    # Classification (LLM-assigned)
+    vertical_slug: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    signal_type: Mapped[str | None] = mapped_column(String(50), nullable=True)  # funding, acquisition, etc.
+    sentiment: Mapped[str | None] = mapped_column(String(20), nullable=True)    # positive, neutral, negative
+    mentioned_tickers: Mapped[list] = mapped_column(JSON, default=list)         # [{"ticker", "exchange"}]
+
+    # Vector embedding — JSON array of 1536 floats (text-embedding-3-small)
+    # Null if embedding not yet computed or OpenAI unavailable
+    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Metadata
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    is_classified: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (
+        Index("ix_market_articles_published_vertical", "published_at", "vertical_slug"),
+        Index("ix_market_articles_source_published", "source_name", "published_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<MarketArticle {self.source_name}: {self.title[:60]}>"
+
+
+class DocumentType(str, PyEnum):
+    """Type of corporate document."""
+    ANNUAL_REPORT = "annual_report"
+    SUSTAINABILITY_REPORT = "sustainability_report"
+    EARNINGS_RELEASE = "earnings_release"
+    MATERIAL_ANNOUNCEMENT = "material_announcement"
+    PRESS_RELEASE = "press_release"
+    INVESTOR_PRESENTATION = "investor_presentation"
+    CIRCULAR = "circular"
+
+
+class CompanyDocument(Base):
+    """Corporate document (PDF or HTML) filed by a listed company.
+
+    Populated from SGX RegNet announcements API and company IR pages.
+    Tracks download status and processing state (chunked for RAG).
+
+    Storage: local filesystem at DOCUMENT_STORE_PATH/{company_id}/{type}/{filename}
+    For production: swap file_path for an S3 object key.
+    """
+    __tablename__ = "company_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    listed_company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("listed_companies.id"), nullable=False, index=True
+    )
+    document_type: Mapped[DocumentType] = mapped_column(Enum(DocumentType), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    source_url: Mapped[str] = mapped_column(String(2000), nullable=False, unique=True)
+    file_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)   # local path after download
+    file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    published_date: Mapped[str | None] = mapped_column(String(10), nullable=True)  # YYYY-MM-DD
+    fiscal_year: Mapped[str | None] = mapped_column(String(4), nullable=True)      # e.g. "2024"
+
+    # Processing state
+    is_downloaded: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_chunked: Mapped[bool] = mapped_column(Boolean, default=False)           # RAG chunks created
+    download_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # SGX RegNet reference (if sourced from SGX)
+    sgx_announcement_id: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    sgx_category: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    listed_company: Mapped["ListedCompany"] = relationship("ListedCompany")
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        "DocumentChunk", back_populates="document", cascade="all, delete-orphan", lazy="select"
+    )
+
+    __table_args__ = (
+        Index("ix_company_documents_company_type", "listed_company_id", "document_type"),
+        Index("ix_company_documents_fiscal_year", "listed_company_id", "fiscal_year"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CompanyDocument {self.document_type.value}: {self.title[:60]}>"
+
+
+class DocumentChunk(Base):
+    """A text chunk extracted from a CompanyDocument, with embedding.
+
+    Chunks are created by the document processing pipeline:
+      1. PDF → full text (pypdf)
+      2. Section detection (heuristic headers)
+      3. Chunk into ~400 token segments with 50-token overlap
+      4. Embed with OpenAI text-embedding-3-small → JSON in `embedding`
+
+    Used for RAG: agents query chunks semantically to answer questions
+    like "what is DBS's digital strategy?" or "what ESG targets did Keppel set?"
+    """
+    __tablename__ = "document_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("company_documents.id"), nullable=False, index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)            # 0-based order within doc
+    section_name: Mapped[str | None] = mapped_column(String(200), nullable=True) # detected section header
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Embedding: JSON-serialised list of 1536 floats (text-embedding-3-small)
+    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    document: Mapped["CompanyDocument"] = relationship("CompanyDocument", back_populates="chunks")
+
+    __table_args__ = (
+        Index("ix_document_chunks_document_index", "document_id", "chunk_index", unique=True),
+    )
+
+    def __repr__(self) -> str:
+        return f"<DocumentChunk doc={self.document_id} [{self.chunk_index}] {self.section_name}>"
+
+
+class CompanyExecutive(Base):
+    """Executive / board member at a listed company.
+
+    Populated from EODHD General.Officers JSON field.
+    Supplemented by SGX board-change announcements.
+
+    Used for executive news monitoring: the news pipeline queries each
+    executive's name in NewsAPI/RSS to surface their public statements,
+    interviews, and market-relevant announcements.
+
+    NOTE: No LinkedIn / social scraping. Sources are:
+      - EODHD company data (name, title, since-date, age)
+      - SGX change-in-director filings (real-time appointment/resignation)
+      - NewsAPI mentions by full name + company
+    """
+    __tablename__ = "company_executives"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    listed_company_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("listed_companies.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    is_ceo: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_cfo: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_chair: Mapped[bool] = mapped_column(Boolean, default=False)
+    since_date: Mapped[str | None] = mapped_column(String(10), nullable=True)   # YYYY-MM-DD
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)                # EODHD bio if available
+
+    # News monitoring state
+    last_news_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    listed_company: Mapped["ListedCompany"] = relationship("ListedCompany")
+
+    __table_args__ = (
+        Index("ix_company_executives_company_name", "listed_company_id", "name", unique=True),
+        Index("ix_company_executives_company_ceo", "listed_company_id", "is_ceo"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Layer — Research Cache
+# ---------------------------------------------------------------------------
+
+
+class ResearchCache(Base):
+    """Staging table for real-time research results before embedding into Qdrant.
+
+    Agents (Market Intelligence, Competitor Analyst, etc.) write raw Perplexity/
+    NewsAPI research here during _act(). A background job embeds and upserts
+    public rows to the research_cache_sg Qdrant collection.
+
+    Privacy: rows with company_id set are private to that company and NEVER
+    upserted to the shared Qdrant index (is_public stays False).
+    """
+
+    __tablename__ = "research_cache"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)  # "perplexity" | "newsapi"
+    query: Mapped[str] = mapped_column(String(500), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    vertical_slug: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
+    analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_embedded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON float array
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_research_cache_public_unembedded", "is_public", "is_embedded"),
+        Index("ix_research_cache_vertical", "vertical_slug"),
+    )
+
+
+class SgKnowledgeArticle(Base):
+    """Singapore government reference data: grants, regulations, enforcement decisions.
+
+    Populated by the SgReferenceScraper scheduler job (weekly Sunday 04:00 SGT).
+    Used by KnowledgeMCPServer.get_sg_reference() to ground agents in live
+    Singapore market context.
+
+    Privacy: Contains only publicly available government data — no personal data.
+    """
+    __tablename__ = "sg_knowledge_articles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    category_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
+    effective_date: Mapped[str | None] = mapped_column(String(20), nullable=True)   # ISO date string
+    last_verified: Mapped[str | None] = mapped_column(String(20), nullable=True)    # ISO date string
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    is_embedded: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON float array
+
+    __table_args__ = (
+        Index("ix_sg_knowledge_source_type", "source", "category_type"),
+        Index("ix_sg_knowledge_unembedded", "is_embedded"),
+    )

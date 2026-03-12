@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -84,7 +84,7 @@ class UsageTracker:
     ) -> None:
         """Record usage."""
         record = UsageRecord(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             agent_id=agent_id,
             tool_name=tool_name,
             usage_type=usage_type,
@@ -102,7 +102,7 @@ class UsageTracker:
         tool_name: str | None = None,
     ) -> float:
         """Get total usage for a period."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         # Calculate period start
         if period == BudgetPeriod.HOURLY:
@@ -137,7 +137,7 @@ class UsageTracker:
         period: BudgetPeriod,
     ) -> dict[str, float]:
         """Get usage breakdown by agent."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         if period == BudgetPeriod.HOURLY:
             period_start = now - timedelta(hours=1)
@@ -162,7 +162,7 @@ class UsageTracker:
 
     def clear_old_records(self, older_than_days: int = 30) -> int:
         """Clear records older than specified days."""
-        cutoff = datetime.utcnow() - timedelta(days=older_than_days)
+        cutoff = datetime.now(UTC) - timedelta(days=older_than_days)
         with self._lock:
             original_count = len(self._records)
             self._records = [r for r in self._records if r.timestamp >= cutoff]

@@ -125,6 +125,11 @@ MODEL_PROVIDER_MAP: dict[str, ProviderType] = {
     "claude-3-sonnet-20240229": ProviderType.ANTHROPIC,
     "claude-3-haiku-20240307": ProviderType.ANTHROPIC,
     # Perplexity models
+    "sonar-pro": ProviderType.PERPLEXITY,
+    "sonar": ProviderType.PERPLEXITY,
+    "sonar-reasoning-pro": ProviderType.PERPLEXITY,
+    "sonar-reasoning": ProviderType.PERPLEXITY,
+    # Legacy Perplexity model names (deprecated)
     "llama-3.1-sonar-small-128k-online": ProviderType.PERPLEXITY,
     "llama-3.1-sonar-large-128k-online": ProviderType.PERPLEXITY,
     "llama-3.1-sonar-huge-128k-online": ProviderType.PERPLEXITY,

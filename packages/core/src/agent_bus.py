@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import UUID, uuid4
@@ -56,6 +56,10 @@ class DiscoveryType(str, Enum):
     # Campaign insights
     CHANNEL_RECOMMENDED = "channel_recommended"
     MESSAGE_CRAFTED = "message_crafted"
+    CAMPAIGN_READY = "campaign_ready"
+
+    # Workforce insights
+    WORKFORCE_READY = "workforce_ready"
 
     # Knowledge Web - Evidence-backed discoveries
     EVIDENCED_FACT = "evidenced_fact"
@@ -75,7 +79,7 @@ class EvidenceSource(BaseModel):
     source_type: str = Field(..., description="Type of source (acra, newsapi, etc.)")
     source_name: str = Field(..., description="Name of the source")
     source_url: str | None = Field(default=None, description="URL to the source")
-    captured_at: datetime = Field(default_factory=datetime.utcnow)
+    captured_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
 
 
@@ -89,7 +93,7 @@ class EvidencedDiscovery(BaseModel):
     """
 
     id: UUID = Field(default_factory=uuid4)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # The claim being made
     claim: str = Field(..., description="The factual claim")
@@ -134,7 +138,7 @@ class AgentMessage(BaseModel):
     """A message exchanged between agents."""
 
     id: UUID = Field(default_factory=uuid4)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     # Routing
     from_agent: str = Field(..., description="Source agent ID")
@@ -183,12 +187,14 @@ class AgentBus:
         )
     """
 
-    def __init__(self) -> None:
-        # Subscriptions: {discovery_type: {agent_id: [handlers]}}
-        self._subscriptions: dict[DiscoveryType, dict[str, list[Callable]]] = {}
+    _MAX_ANALYSES_IN_HISTORY = 50
 
-        # All subscriptions regardless of type: {agent_id: [handlers]}
-        self._wildcard_subscriptions: dict[str, list[Callable]] = {}
+    def __init__(self) -> None:
+        # Subscriptions: {discovery_type: {agent_id: handler}}
+        self._subscriptions: dict[DiscoveryType, dict[str, Callable]] = {}
+
+        # All subscriptions regardless of type: {agent_id: handler}
+        self._wildcard_subscriptions: dict[str, Callable] = {}
 
         # Message history for the current analysis
         self._message_history: list[AgentMessage] = []
@@ -217,17 +223,14 @@ class AgentBus:
             handler: Async callback when discovery is published
         """
         if discovery_type is None:
-            # Wildcard subscription
-            if agent_id not in self._wildcard_subscriptions:
-                self._wildcard_subscriptions[agent_id] = []
-            self._wildcard_subscriptions[agent_id].append(handler)
+            # Wildcard subscription — overwrite any existing handler for this agent
+            self._wildcard_subscriptions[agent_id] = handler
             logger.debug("agent_subscribed_wildcard", agent_id=agent_id)
         else:
             if discovery_type not in self._subscriptions:
                 self._subscriptions[discovery_type] = {}
-            if agent_id not in self._subscriptions[discovery_type]:
-                self._subscriptions[discovery_type][agent_id] = []
-            self._subscriptions[discovery_type][agent_id].append(handler)
+            # Overwrite any existing handler for this (discovery_type, agent_id) pair
+            self._subscriptions[discovery_type][agent_id] = handler
             logger.debug(
                 "agent_subscribed",
                 agent_id=agent_id,
@@ -284,6 +287,21 @@ class AgentBus:
         Returns:
             The published message
         """
+        if content is None:
+            raise ValueError(
+                f"bus.publish() content must be a dict, not None "
+                f"(from_agent={from_agent!r}, type={discovery_type.value!r})"
+            )
+
+        # Validate against registered agent signature (soft validation — logs warnings)
+        try:
+            from packages.core.src.signatures import validate_publish
+            sig_errors = validate_publish(from_agent, discovery_type, content)
+            for err in sig_errors:
+                logger.warning("signature_violation", error=err)
+        except ImportError:
+            pass
+
         message = AgentMessage(
             from_agent=from_agent,
             to_agent=to_agent,
@@ -328,8 +346,8 @@ class AgentBus:
         if message.to_agent:
             # Check type-specific subscriptions
             if message.discovery_type in self._subscriptions:
-                handlers = self._subscriptions[message.discovery_type].get(message.to_agent, [])
-                for handler in handlers:
+                handler = self._subscriptions[message.discovery_type].get(message.to_agent)
+                if handler is not None:
                     try:
                         await handler(message)
                         handlers_called += 1
@@ -341,8 +359,8 @@ class AgentBus:
                         )
 
             # Check wildcard subscriptions
-            handlers = self._wildcard_subscriptions.get(message.to_agent, [])
-            for handler in handlers:
+            handler = self._wildcard_subscriptions.get(message.to_agent)
+            if handler is not None:
                 try:
                     await handler(message)
                     handlers_called += 1
@@ -355,26 +373,10 @@ class AgentBus:
         else:
             # Broadcast to all subscribers of this type
             if message.discovery_type in self._subscriptions:
-                for agent_id, handlers in self._subscriptions[message.discovery_type].items():
+                for agent_id, handler in self._subscriptions[message.discovery_type].items():
                     # Don't send back to sender
                     if agent_id == message.from_agent:
                         continue
-                    for handler in handlers:
-                        try:
-                            await handler(message)
-                            handlers_called += 1
-                        except Exception as e:
-                            logger.error(
-                                "handler_error",
-                                agent_id=agent_id,
-                                error=str(e),
-                            )
-
-            # Also notify wildcard subscribers
-            for agent_id, handlers in self._wildcard_subscriptions.items():
-                if agent_id == message.from_agent:
-                    continue
-                for handler in handlers:
                     try:
                         await handler(message)
                         handlers_called += 1
@@ -384,6 +386,20 @@ class AgentBus:
                             agent_id=agent_id,
                             error=str(e),
                         )
+
+            # Also notify wildcard subscribers
+            for agent_id, handler in self._wildcard_subscriptions.items():
+                if agent_id == message.from_agent:
+                    continue
+                try:
+                    await handler(message)
+                    handlers_called += 1
+                except Exception as e:
+                    logger.error(
+                        "handler_error",
+                        agent_id=agent_id,
+                        error=str(e),
+                    )
 
         logger.debug(
             "message_routed",
@@ -635,6 +651,18 @@ class AgentBus:
             self._message_history = [
                 m for m in self._message_history if m.analysis_id != analysis_id
             ]
+            # Evict oldest analysis_ids if history exceeds _MAX_ANALYSES_IN_HISTORY
+            # Walk messages in order to build an ordered set of unique analysis_ids
+            seen: dict[UUID | None, None] = {}
+            for m in self._message_history:
+                seen[m.analysis_id] = None
+            unique_ids = list(seen.keys())
+            if len(unique_ids) > self._MAX_ANALYSES_IN_HISTORY:
+                # Evict the oldest (earliest in history) until within limit
+                to_evict = set(unique_ids[: len(unique_ids) - self._MAX_ANALYSES_IN_HISTORY])
+                self._message_history = [
+                    m for m in self._message_history if m.analysis_id not in to_evict
+                ]
         else:
             self._message_history.clear()
 

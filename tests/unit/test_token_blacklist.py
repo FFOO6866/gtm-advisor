@@ -13,6 +13,7 @@ from services.gateway.src.auth.utils import (
 from services.gateway.src.cache import InMemoryCache, TokenBlacklist
 
 
+@pytest.mark.unit
 class TestTokenBlacklist:
     """Tests for TokenBlacklist class."""
 
@@ -51,6 +52,7 @@ class TestTokenBlacklist:
         assert await blacklist.is_blacklisted(jti) is True
 
 
+@pytest.mark.unit
 class TestBlacklistTokenFunction:
     """Tests for blacklist_token utility function."""
 
@@ -69,7 +71,7 @@ class TestBlacklistTokenFunction:
         # For now, just verify the function doesn't crash without cache
         result = await blacklist_token(token)
         # Without cache initialized, returns False
-        assert result in (True, False)
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_blacklist_invalid_token(self):
@@ -78,6 +80,7 @@ class TestBlacklistTokenFunction:
         assert result is False
 
 
+@pytest.mark.unit
 class TestIsTokenBlacklisted:
     """Tests for is_token_blacklisted utility function."""
 

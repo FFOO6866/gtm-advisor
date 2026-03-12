@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
 from packages.core.src.agent_bus import (
@@ -22,7 +22,54 @@ from packages.core.src.agent_bus import (
     get_agent_bus,
 )
 from packages.core.src.types import IndustryVertical
+from packages.knowledge.src.knowledge_mcp import get_knowledge_mcp
 from packages.llm.src import get_llm_manager
+
+# SSIC description keyword → IndustryVertical mapping (text-based, no section letter lookup)
+_SSIC_DESC_TO_VERTICAL: list[tuple[str, IndustryVertical]] = [
+    ("financial", IndustryVertical.FINTECH),
+    ("fintech", IndustryVertical.FINTECH),
+    ("insurance", IndustryVertical.FINTECH),
+    ("banking", IndustryVertical.FINTECH),
+    ("information technology", IndustryVertical.SAAS),
+    ("software", IndustryVertical.SAAS),
+    ("computer", IndustryVertical.SAAS),
+    ("data processing", IndustryVertical.SAAS),
+    ("information and communication", IndustryVertical.SAAS),
+    ("telecommunication", IndustryVertical.SAAS),
+    ("retail", IndustryVertical.ECOMMERCE),
+    ("wholesale", IndustryVertical.ECOMMERCE),
+    ("e-commerce", IndustryVertical.ECOMMERCE),
+    ("health", IndustryVertical.HEALTHTECH),
+    ("medical", IndustryVertical.HEALTHTECH),
+    ("hospital", IndustryVertical.HEALTHTECH),
+    ("pharmaceutical", IndustryVertical.HEALTHTECH),
+    ("education", IndustryVertical.EDTECH),
+    ("training", IndustryVertical.EDTECH),
+    ("real estate", IndustryVertical.PROPTECH),
+    ("property", IndustryVertical.PROPTECH),
+    ("construction", IndustryVertical.PROPTECH),
+    ("transport", IndustryVertical.LOGISTICS),
+    ("logistics", IndustryVertical.LOGISTICS),
+    ("storage", IndustryVertical.LOGISTICS),
+    ("freight", IndustryVertical.LOGISTICS),
+    ("manufacturing", IndustryVertical.MANUFACTURING),
+    ("professional", IndustryVertical.PROFESSIONAL_SERVICES),
+    ("consulting", IndustryVertical.PROFESSIONAL_SERVICES),
+    ("legal", IndustryVertical.PROFESSIONAL_SERVICES),
+    ("accounting", IndustryVertical.PROFESSIONAL_SERVICES),
+]
+
+
+def _vertical_from_ssic_desc(ssic_desc: str) -> IndustryVertical | None:
+    """Map SSIC description text to the nearest IndustryVertical, or None if no match."""
+    if not ssic_desc:
+        return None
+    lower = ssic_desc.lower()
+    for keyword, vertical in _SSIC_DESC_TO_VERTICAL:
+        if keyword in lower:
+            return vertical
+    return None
 
 
 class ProductService(BaseModel):
@@ -92,9 +139,32 @@ class CompanyEnrichmentOutput(BaseModel):
     contact_email: str | None = Field(default=None)
     social_links: dict[str, str] = Field(default_factory=dict)
 
+    # Singapore Government Data
+    acra_data: dict | None = Field(
+        default=None,
+        description=(
+            "Government-sourced company facts from ACRA (Singapore company registry). "
+            "Present when the company is found in the registry. "
+            "Keys: uen, entity_name, entity_type, status, registration_date, "
+            "ssic_code, ssic_description."
+        ),
+    )
+
     # Metadata
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     sources_analyzed: list[str] = Field(default_factory=list)
+
+    # Private — NOT sent to LLM schema. Populated after structured completion
+    # by the Perplexity path so run_analysis can persist website context.
+    _raw_website_context: str | None = PrivateAttr(default=None)
+
+    @property
+    def raw_website_context(self) -> str | None:
+        return self._raw_website_context
+
+    @raw_website_context.setter
+    def raw_website_context(self, value: str | None) -> None:
+        self._raw_website_context = value
 
 
 class CompanyEnricherAgent(BaseGTMAgent[CompanyEnrichmentOutput]):
@@ -159,7 +229,7 @@ class CompanyEnricherAgent(BaseGTMAgent[CompanyEnrichmentOutput]):
         self._analysis_id = analysis_id
 
     def get_system_prompt(self) -> str:
-        return """You are the Company Enricher Agent, a specialist in extracting structured company information from websites.
+        base = """You are the Company Enricher Agent, a specialist in extracting structured company information from websites.
 
 Your role is to analyze company websites and extract:
 1. Basic company information (name, description, tagline)
@@ -181,6 +251,10 @@ When analyzing:
 - Extract unique selling points from hero sections
 
 Be specific. "AI-powered analytics platform" is better than "technology company"."""
+        sg_hint = getattr(self, "_sg_hint", "")
+        if sg_hint:
+            return base + f"\n\n{sg_hint}"
+        return base
 
     async def _plan(
         self,
@@ -191,11 +265,14 @@ Be specific. "AI-powered analytics platform" is better than "technology company"
         """Plan website analysis."""
         context = context or {}
 
-        website = context.get("website")
+        website = context.get("website") or ""
+        # Normalise website URL — add scheme if missing
+        if website and not website.startswith(("http://", "https://")):
+            website = f"https://{website}"
         company_name = context.get("company_name", "")
 
         plan = {
-            "website": website,
+            "website": website or None,
             "company_name": company_name,
             "pages_to_analyze": ["home", "about", "products", "team", "pricing"],
             "use_perplexity": self._perplexity.is_configured,
@@ -211,27 +288,268 @@ Be specific. "AI-powered analytics platform" is better than "technology company"
     ) -> CompanyEnrichmentOutput:
         """Execute website analysis."""
         context = context or {}
+
+        # Fetch Singapore market context for better vertical detection
+        sg_verticals_hint = ""
+        try:
+            kmcp = get_knowledge_mcp()
+            sg_raw = await kmcp.get_singapore_context()
+            sectors = sg_raw.get("market_overview", {}).get("key_sectors", [])
+            if isinstance(sectors, list) and sectors:
+                vert_names = [str(s) for s in sectors[:8]]
+                sg_verticals_hint = (
+                    f"Singapore key sectors: {', '.join(vert_names)}. "
+                    "For companies in these sectors, prioritise accurate vertical detection."
+                )
+        except Exception as e:
+            self._logger.debug("company_enricher_sg_context_failed", error=str(e))
+        self._sg_hint = sg_verticals_hint
+
         website = plan.get("website") or context.get("website")
         company_name = plan.get("company_name") or context.get("company_name", "Unknown")
 
-        # If no website, use Perplexity to research the company
-        if not website:
-            return await self._research_company_without_website(company_name, context)
+        # Step 0: ACRA government lookup (Singapore company registry)
+        acra_data = await self._lookup_acra(company_name)
 
-        # Analyze website using Perplexity
-        if plan.get("use_perplexity"):
-            return await self._analyze_with_perplexity(website, company_name, context)
+        # If no website but document text available, extract directly from document
+        if not website and context.get("additional_context"):
+            result = await self._analyze_from_document(company_name, context)
+        elif not website:
+            # If no website and no document, use Perplexity to research the company
+            result = await self._research_company_without_website(company_name, context)
+        elif plan.get("use_perplexity"):
+            result = await self._analyze_with_perplexity(website, company_name, context)
         else:
-            return await self._analyze_with_llm(website, company_name, context)
+            result = await self._analyze_with_llm(website, company_name, context)
+
+        # Merge ACRA data into result
+        if acra_data:
+            result.acra_data = acra_data
+            # Patch in government-authoritative fields only when the LLM left them blank
+            if not result.company_name or result.company_name == "Unknown":
+                entity_name = acra_data.get("entity_name")
+                if entity_name:
+                    result.company_name = entity_name
+            # Apply SSIC → vertical if the LLM defaulted to OTHER
+            if result.industry == IndustryVertical.OTHER:
+                ssic_desc = acra_data.get("ssic_description", "")
+                inferred = _vertical_from_ssic_desc(ssic_desc)
+                if inferred is not None:
+                    result.industry = inferred
+            # Record ACRA as an additional source
+            if "acra_singapore" not in result.sources_analyzed:
+                result.sources_analyzed.append("acra_singapore")
+
+        return result
+
+    @staticmethod
+    def _name_similarity(a: str, b: str) -> float:
+        """Return a simple token-overlap similarity in [0, 1] between two strings.
+
+        Used to select the best-matching ACRA record when the API returns
+        multiple companies for a query (e.g. "Grab" matches "GrabCar Pte Ltd",
+        "GrabFood Pte Ltd", "Grab Holdings Pte Ltd", …).  We want the record
+        whose registered name most closely matches what the caller supplied.
+
+        The metric is |query_tokens ∩ candidate_tokens| / |query_tokens| so
+        that a query like "Grab" scores 1.0 against "Grab Holdings Pte Ltd"
+        (all query tokens found) but also 1.0 against "GrabCar Pte Ltd"
+        (same denominator).  Tiebreaking is handled by preferring longer
+        candidate names, which are less likely to be wholly different entities.
+        """
+        stop = {"pte", "ltd", "llp", "co", "sdn", "bhd", "inc", "corp", "the", "and", "&"}
+        a_tokens = {t for t in a.lower().split() if t not in stop and len(t) > 1}
+        b_tokens = {t for t in b.lower().split() if t not in stop and len(t) > 1}
+        if not a_tokens:
+            return 0.0
+        return len(a_tokens & b_tokens) / len(a_tokens)
+
+    async def _lookup_acra(self, company_name: str) -> dict:
+        """Query the ACRA MCP server for Singapore government company data.
+
+        Returns a dict of extracted fields, or an empty dict if the company is
+        not found, does not match well enough, or the API is unavailable.
+
+        Name-matching safeguard
+        -----------------------
+        ACRA full-text search may return several companies whose names share a
+        common word with *company_name* (e.g. querying "Grab" returns
+        "GrabCar", "GrabFood", …).  We score each candidate entity against the
+        query and only proceed if the best score meets a minimum threshold
+        (0.5).  This also acts as a country guard: an overseas company that
+        happens to share a keyword with a Singapore-registered entity will
+        typically score below 0.5 against the full query name and be skipped.
+        """
+        _MIN_NAME_SCORE = 0.5
+
+        try:
+            from packages.mcp.src.servers.acra import ACRAMCPServer
+
+            acra = ACRAMCPServer.create()
+            search_result = await acra.search(company_name, limit=5)
+
+            if not search_result.facts:
+                return {}
+
+            # --- Name-matching: pick the best-fitting entity ---
+            # Group facts by the entity (UEN) they belong to so we can pick
+            # the registration fact (COMPANY_INFO type, has "uen" key) for the
+            # entity that best matches the query name.
+            best_entity_name: str | None = None
+            best_score: float = 0.0
+
+            for entity in search_result.entities:
+                score = self._name_similarity(company_name, entity.name)
+                if score > best_score:
+                    best_score = score
+                    best_entity_name = entity.name
+
+            if best_score < _MIN_NAME_SCORE:
+                self._logger.info(
+                    "acra_lookup_no_match",
+                    company=company_name,
+                    best_score=round(best_score, 2),
+                    best_candidate=best_entity_name,
+                )
+                return {}
+
+            # Find the registration fact (the COMPANY_INFO fact that carries
+            # "uen") for the best-matching entity.
+            registration_fact = None
+            for fact in search_result.facts:
+                ed = fact.extracted_data
+                candidate_name = ed.get("company_name", "")
+                if (
+                    candidate_name
+                    and self._name_similarity(company_name, candidate_name) >= _MIN_NAME_SCORE
+                    and ed.get("uen")
+                ):
+                    registration_fact = fact
+                    break
+
+            if registration_fact is None:
+                return {}
+
+            acra_data: dict = dict(registration_fact.extracted_data)
+
+            # Normalise key: the registration fact stores the name under
+            # "company_name"; downstream code expects "entity_name".
+            if not acra_data.get("entity_name"):
+                acra_data["entity_name"] = acra_data.get("company_name", best_entity_name)
+
+            # If we have a UEN, fetch full details and merge in SSIC description
+            uen = acra_data.get("uen")
+            if uen:
+                detail_result = await acra.get_company_details(uen)
+                for fact in detail_result.facts:
+                    ed = fact.extracted_data
+                    if ed.get("ssic_code"):
+                        acra_data.setdefault("ssic_code", ed["ssic_code"])
+                    if ed.get("ssic_description"):
+                        acra_data.setdefault("ssic_description", ed["ssic_description"])
+                    if ed.get("industry"):
+                        acra_data.setdefault("industry_label", ed["industry"])
+                    if ed.get("status"):
+                        acra_data.setdefault("status", ed["status"])
+                    if ed.get("is_active") is not None:
+                        acra_data.setdefault("is_active", ed["is_active"])
+
+            self._logger.info(
+                "acra_lookup_success",
+                company=company_name,
+                matched_name=acra_data.get("entity_name"),
+                match_score=round(best_score, 2),
+                uen=acra_data.get("uen"),
+                status=acra_data.get("status"),
+            )
+            return acra_data
+
+        except Exception as exc:
+            # ACRA offline or company not found — degrade gracefully
+            self._logger.info("acra_lookup_skipped", company=company_name, reason=str(exc))
+            return {}
+
+    async def _analyze_from_document(
+        self,
+        company_name: str,
+        context: dict[str, Any],
+    ) -> CompanyEnrichmentOutput:
+        """Extract company profile directly from uploaded document text."""
+        self._logger.info("analyzing_company_from_document", company_name=company_name)
+        doc_text = context["additional_context"]
+        # Truncate to avoid blowing token budget (document already truncated upstream)
+        doc_excerpt = doc_text[:8000] if len(doc_text) > 8000 else doc_text
+
+        messages = [
+            {"role": "system", "content": self.get_system_prompt()},
+            {
+                "role": "user",
+                "content": f"""Extract structured company information from this uploaded document:
+
+Company Name: {company_name}
+Industry Hint: {context.get("industry", "Not specified")}
+
+DOCUMENT TEXT:
+{doc_excerpt}
+
+Extract as much concrete information as possible: products, team, target markets, tech stack, competitors mentioned, differentiators, business model, and funding. Confidence should reflect the richness of the document.""",
+            },
+        ]
+
+        result = await self._complete_structured(
+            response_model=CompanyEnrichmentOutput,
+            messages=messages,
+        )
+        result.company_name = company_name
+        result.website = ""
+        result.sources_analyzed = ["uploaded_document"]
+        return result
 
     async def _research_company_without_website(
         self,
         company_name: str,
         context: dict[str, Any],
     ) -> CompanyEnrichmentOutput:
-        """Research company using just the name (no website provided)."""
+        """Research company using just the name — tries Perplexity first, then LLM fallback."""
         self._logger.info("researching_company_without_website", company_name=company_name)
 
+        # Try Perplexity for real-time web research first
+        if self._perplexity.is_configured:
+            try:
+                research_query = (
+                    f"Company information about {company_name}: "
+                    f"what they do, products, target market, competitors, Singapore/APAC presence"
+                )
+                perplexity_response = await self._perplexity.search(
+                    query=research_query,
+                    focus="internet",
+                )
+                messages = [
+                    {"role": "system", "content": self.get_system_prompt()},
+                    {
+                        "role": "user",
+                        "content": f"""Based on this research about {company_name}:
+
+{perplexity_response}
+
+Industry Hint: {context.get("industry", "Not specified")}
+Description Hint: {context.get("description", "Not specified")}
+
+Extract structured company information. Confidence should reflect how much concrete data was found.""",
+                    },
+                ]
+                result = await self._complete_structured(
+                    response_model=CompanyEnrichmentOutput,
+                    messages=messages,
+                )
+                result.company_name = company_name
+                result.website = ""
+                result.sources_analyzed = ["perplexity_web_search"]
+                return result
+            except Exception as e:
+                self._logger.warning("perplexity_company_research_failed", error=str(e))
+
+        # LLM-only fallback (confidence will be penalised in _check)
         messages = [
             {"role": "system", "content": self.get_system_prompt()},
             {
@@ -242,13 +560,13 @@ Company Name: {company_name}
 Industry Hint: {context.get("industry", "Not specified")}
 Description Hint: {context.get("description", "Not specified")}
 
-Without a website, use the company name and hints to:
-1. Try to identify what they do
-2. Infer target markets
-3. Identify potential competitors
-4. Determine likely business model
+Without a website or live data, use the company name and hints to infer:
+1. What they likely do
+2. Target markets
+3. Potential competitors
+4. Likely business model
 
-Note: Without a website, confidence should be lower (0.4-0.6).""",
+Note: This is inference only — confidence should be low (0.2-0.4).""",
             },
         ]
 
@@ -259,7 +577,7 @@ Note: Without a website, confidence should be lower (0.4-0.6).""",
 
         result.company_name = company_name
         result.website = ""
-        result.sources_analyzed = ["company_name_inference"]
+        result.sources_analyzed = ["llm_inference_only"]
 
         return result
 
@@ -321,6 +639,12 @@ Note: Without a website, confidence should be lower (0.4-0.6).""",
             )
 
             # Now use GPT-4 to structure the response
+            doc_text = context.get("additional_context", "")
+            doc_section = (
+                f"\n\nUploaded Document (primary source — takes precedence over web research):\n{doc_text[:4000]}"
+                if doc_text
+                else ""
+            )
             messages = [
                 {"role": "system", "content": self.get_system_prompt()},
                 {
@@ -331,7 +655,7 @@ Note: Without a website, confidence should be lower (0.4-0.6).""",
 
 Additional context from user:
 - Industry: {context.get("industry", "Not specified")}
-- Description: {context.get("description", "Not specified")}
+- Description: {context.get("description", "Not specified")}{doc_section}
 
 Extract and structure the company information.
 Confidence should reflect how much concrete data was found.""",
@@ -346,6 +670,7 @@ Confidence should reflect how much concrete data was found.""",
             result.company_name = company_name
             result.website = website
             result.sources_analyzed = ["perplexity_web_search", website]
+            result.raw_website_context = perplexity_response
 
             return result
 
@@ -376,7 +701,7 @@ User's Description: {context.get("description", "Not specified")}
 Based on the company name, website domain, and provided description,
 extract as much structured information as possible.
 
-Note: This is inference-based analysis, so confidence should be moderate (0.5-0.7).""",
+Note: No live data was fetched — this is domain/name inference only. Confidence should be low (0.3-0.5).""",
             },
         ]
 
@@ -387,13 +712,13 @@ Note: This is inference-based analysis, so confidence should be moderate (0.5-0.
 
         result.company_name = company_name
         result.website = website
-        result.sources_analyzed = ["user_provided_context"]
+        result.sources_analyzed = ["llm_domain_inference"]
 
         return result
 
     async def _check(self, result: CompanyEnrichmentOutput) -> float:
         """Validate enrichment quality."""
-        score = 0.3  # Base score for completing
+        score = 0.2  # Base score — must earn via real data, not just LLM completion
 
         # Check basic info
         if result.description and len(result.description) > 50:
@@ -428,6 +753,15 @@ Note: This is inference-based analysis, so confidence should be moderate (0.5-0.
         # Check sources
         if result.sources_analyzed and len(result.sources_analyzed) >= 2:
             score += 0.05
+
+        # Government-verified bonus: ACRA confirmed active Singapore company
+        acra = result.acra_data or {}
+        status = acra.get("status", "")
+        is_live = acra.get("is_active") or any(
+            s in status.lower() for s in ("live", "active", "registered", "existing")
+        )
+        if acra and is_live:
+            score += 0.10
 
         return min(score, 1.0)
 
@@ -502,7 +836,8 @@ Note: This is inference-based analysis, so confidence should be moderate (0.5-0.
                     discovery_type=DiscoveryType.COMPETITOR_FOUND,
                     title=f"Competitor mentioned: {competitor}",
                     content={
-                        "competitor_name": competitor,
+                        "name": competitor,              # matches signature spec
+                        "competitor_name": competitor,   # kept for _on_competitor_discovered()
                         "source": "company_website",
                         "context": f"Mentioned on {result.website}",
                     },
@@ -532,10 +867,17 @@ Note: This is inference-based analysis, so confidence should be moderate (0.5-0.
                 analysis_id=self._analysis_id,
             )
 
+        discoveries_count = (
+            1  # always: company_profile
+            + (1 if result.products else 0)
+            + (1 if result.tech_stack else 0)
+            + (len(result.mentioned_competitors) if result.mentioned_competitors else 0)
+            + (1 if result.target_markets or result.products else 0)
+        )
         self._logger.info(
             "discoveries_published",
             company=result.company_name,
-            discoveries_count=5 if result.mentioned_competitors else 4,
+            discoveries_count=discoveries_count,
         )
 
     async def enrich_company(
@@ -544,6 +886,7 @@ Note: This is inference-based analysis, so confidence should be moderate (0.5-0.
         website: str | None = None,
         industry: IndustryVertical | None = None,
         description: str | None = None,
+        additional_context: str | None = None,
         analysis_id: UUID | None = None,
     ) -> CompanyEnrichmentOutput:
         """Convenience method to enrich a company profile.
@@ -553,6 +896,7 @@ Note: This is inference-based analysis, so confidence should be moderate (0.5-0.
             website: Company website URL
             industry: Industry hint
             description: Description hint
+            additional_context: Raw text from uploaded document (corporate profile, business plan)
             analysis_id: Analysis session ID for discovery publishing
 
         Returns:
@@ -566,6 +910,7 @@ Note: This is inference-based analysis, so confidence should be moderate (0.5-0.
             "website": website,
             "industry": industry.value if industry else "other",
             "description": description or "",
+            "additional_context": additional_context,
         }
 
         return await self.run(

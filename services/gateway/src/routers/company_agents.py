@@ -5,7 +5,7 @@ Provides company-scoped endpoints for:
 - Getting agent status
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
@@ -91,7 +91,7 @@ async def run_agent_task(
             if not company:
                 agent_run.status = AgentRunStatus.ERROR
                 agent_run.error_message = "Company not found"
-                agent_run.completed_at = datetime.utcnow()
+                agent_run.completed_at = datetime.now(UTC)
                 await db.commit()
                 return
 
@@ -100,7 +100,7 @@ async def run_agent_task(
             if not agent_class:
                 agent_run.status = AgentRunStatus.ERROR
                 agent_run.error_message = "Agent not available"
-                agent_run.completed_at = datetime.utcnow()
+                agent_run.completed_at = datetime.now(UTC)
                 await db.commit()
                 return
 
@@ -117,14 +117,14 @@ async def run_agent_task(
                 "goals": company.goals or [],
                 "challenges": company.challenges or [],
                 "target_markets": company.target_markets or [],
-                "triggered_at": datetime.utcnow().isoformat(),
+                "triggered_at": datetime.now(UTC).isoformat(),
             }
 
             result = await agent.run(task, context=context)
 
             # Update with success
             agent_run.status = AgentRunStatus.COMPLETED
-            agent_run.completed_at = datetime.utcnow()
+            agent_run.completed_at = datetime.now(UTC)
             agent_run.confidence = getattr(result, "confidence", None)
 
             # Store summary of result
@@ -154,7 +154,7 @@ async def run_agent_task(
 
             # Update with error - don't expose internal details to users
             agent_run.status = AgentRunStatus.ERROR
-            agent_run.completed_at = datetime.utcnow()
+            agent_run.completed_at = datetime.now(UTC)
             agent_run.error_message = "Agent execution failed. Please try again."
             await db.commit()
 
@@ -194,7 +194,7 @@ async def trigger_agent(
             status_code=409, detail=f"Agent '{agent_id}' is already running for this company"
         )
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     # Create agent run record
     agent_run = AgentRun(

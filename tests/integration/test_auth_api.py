@@ -8,6 +8,7 @@ from packages.database.src.models import SubscriptionTier
 from packages.database.src.models import User as DBUser
 
 
+@pytest.mark.integration
 class TestRegisterEndpoint:
     """Tests for POST /api/v1/auth/register."""
 
@@ -144,6 +145,7 @@ class TestRegisterEndpoint:
             app.dependency_overrides.clear()
 
 
+@pytest.mark.integration
 class TestLoginEndpoint:
     """Tests for POST /api/v1/auth/login."""
 
@@ -282,6 +284,7 @@ class TestLoginEndpoint:
             app.dependency_overrides.clear()
 
 
+@pytest.mark.integration
 class TestMeEndpoint:
     """Tests for GET /api/v1/auth/me."""
 
@@ -392,6 +395,7 @@ class TestMeEndpoint:
             app.dependency_overrides.clear()
 
 
+@pytest.mark.integration
 class TestRefreshEndpoint:
     """Tests for POST /api/v1/auth/refresh."""
 
@@ -453,6 +457,7 @@ class TestRefreshEndpoint:
             app.dependency_overrides.clear()
 
 
+@pytest.mark.integration
 class TestLogoutEndpoint:
     """Tests for POST /api/v1/auth/logout."""
 

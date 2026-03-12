@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "intelligence"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "gtm-advisor-core",
+    "gtm-advisor-database",
+    "gtm-advisor-documents",
+    "vector-store",
+]
+
+[tool.uv.sources]
+gtm-advisor-core = { workspace = true }
+gtm-advisor-database = { workspace = true }
+gtm-advisor-documents = { workspace = true }
+vector-store = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

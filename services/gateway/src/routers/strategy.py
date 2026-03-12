@@ -6,7 +6,7 @@ Provides endpoints for:
 - Running strategy analysis
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
@@ -185,7 +185,7 @@ def recommendation_to_response(rec: StrategyRecommendationModel) -> StrategyReco
         impact=rec.impact or "",
         confidence=rec.confidence or 0.0,
         status=rec.status.value if rec.status else "pending",
-        created_at=rec.created_at.isoformat() if rec.created_at else datetime.utcnow().isoformat(),
+        created_at=rec.created_at.isoformat() if rec.created_at else datetime.now(UTC).isoformat(),
         updated_at=rec.updated_at.isoformat() if rec.updated_at else None,
     )
 
@@ -200,7 +200,7 @@ def activity_to_response(activity: AgentActivityModel) -> AgentActivityResponse:
         icon=activity.icon or "💡",
         created_at=activity.created_at.isoformat()
         if activity.created_at
-        else datetime.utcnow().isoformat(),
+        else datetime.now(UTC).isoformat(),
     )
 
 
@@ -234,7 +234,7 @@ def extract_recommendations_from_results(
     - CampaignPlanOutput: content_pieces, timeline_recommendations
     """
     recommendations = []
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     # Extract from Market Intelligence results (MarketIntelligenceOutput)
     market_result = agent_results.get("market-intelligence", {})
@@ -539,7 +539,7 @@ async def run_strategy_analysis_task(
                 await db.commit()
                 return
 
-            start_time = datetime.utcnow()
+            start_time = datetime.now(UTC)
             agent_results: dict[str, dict] = {}
             completed_agents: list[str] = []
             total_confidence = 0.0
@@ -564,7 +564,7 @@ async def run_strategy_analysis_task(
                 phase = phases_dict.get(phase_key)
                 if phase:
                     phase.status = PhaseStatus.IN_PROGRESS
-                    phase.started_at = datetime.utcnow()
+                    phase.started_at = datetime.now(UTC)
                     await db.commit()
 
                 # Update running count
@@ -653,15 +653,15 @@ async def run_strategy_analysis_task(
                 # Mark phase complete
                 if phase:
                     phase.status = PhaseStatus.COMPLETE
-                    phase.completed_at = datetime.utcnow()
+                    phase.completed_at = datetime.now(UTC)
                     await db.commit()
 
             # Mark final phase complete
             complete_phase = phases_dict.get("complete")
             if complete_phase:
                 complete_phase.status = PhaseStatus.COMPLETE
-                complete_phase.started_at = datetime.utcnow()
-                complete_phase.completed_at = datetime.utcnow()
+                complete_phase.started_at = datetime.now(UTC)
+                complete_phase.completed_at = datetime.now(UTC)
                 await db.commit()
 
             # Generate recommendations from actual results
@@ -673,7 +673,7 @@ async def run_strategy_analysis_task(
                 db.add(rec)
 
             # Update strategy run with final metrics
-            end_time = datetime.utcnow()
+            end_time = datetime.now(UTC)
             strategy_run.status = "completed"
             strategy_run.completed_at = end_time
             strategy_run.agents_active = 0
@@ -824,7 +824,7 @@ async def run_strategy_analysis(
             status_code=409, detail="Strategy analysis already running for this company"
         )
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
 
     # Create strategy run
     strategy_run = StrategyRun(
@@ -888,7 +888,7 @@ async def update_recommendation_status(
         "dismissed": RecommendationStatus.DISMISSED,
     }
     rec.status = status_map.get(data.status, RecommendationStatus.PENDING)
-    rec.updated_at = datetime.utcnow()
+    rec.updated_at = datetime.now(UTC)
 
     await db.commit()
     await db.refresh(rec)

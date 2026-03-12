@@ -98,6 +98,11 @@ secrets/
 generated/
 .generated/
 
+# Knowledge base output (large embeddings, extracted book chunks)
+data/knowledge/
+# Qdrant vector store (large binary files, generated locally)
+data/qdrant/
+
 # Node modules (for dashboard)
 node_modules/
 services/dashboard/node_modules/

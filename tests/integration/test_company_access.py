@@ -8,6 +8,7 @@ from packages.database.src.models import Company, SubscriptionTier
 from packages.database.src.models import User as DBUser
 
 
+@pytest.mark.integration
 class TestCompanyAccess:
     """Tests for company access validation."""
 
@@ -163,6 +164,7 @@ class TestCompanyAccess:
             app.dependency_overrides.clear()
 
 
+@pytest.mark.integration
 class TestCompetitorsCRUD:
     """Tests for competitors CRUD operations with authorization."""
 
@@ -232,6 +234,7 @@ class TestCompetitorsCRUD:
             app.dependency_overrides.clear()
 
 
+@pytest.mark.integration
 class TestSettingsAccess:
     """Tests for settings endpoint access control."""
 

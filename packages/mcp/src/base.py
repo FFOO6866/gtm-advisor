@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -172,7 +172,7 @@ class BaseMCPServer(ABC):
         try:
             is_healthy = await self._health_check_impl()
             self._is_healthy = is_healthy
-            self._last_health_check = datetime.utcnow()
+            self._last_health_check = datetime.now(UTC)
             self._last_error = None
 
             return MCPHealthStatus(
@@ -188,7 +188,7 @@ class BaseMCPServer(ABC):
         except Exception as e:
             self._is_healthy = False
             self._last_error = str(e)
-            self._last_health_check = datetime.utcnow()
+            self._last_health_check = datetime.now(UTC)
 
             self._logger.error("health_check_failed", error=str(e))
 
@@ -226,7 +226,7 @@ class BaseMCPServer(ABC):
             return None
 
         value, cached_at = self._cache[key]
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         # Check if expired
         from datetime import timedelta
@@ -244,7 +244,7 @@ class BaseMCPServer(ABC):
             key: Cache key
             value: Value to cache
         """
-        self._cache[key] = (value, datetime.utcnow())
+        self._cache[key] = (value, datetime.now(UTC))
 
     def _clear_cache(self) -> None:
         """Clear all cached results."""
@@ -256,7 +256,7 @@ class BaseMCPServer(ABC):
         Raises:
             MCPRateLimitError: If rate limit exceeded
         """
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         # Reset hourly counter if needed
         if self._hour_reset_at and now >= self._hour_reset_at:
@@ -397,7 +397,7 @@ class BaseMCPServer(ABC):
             source_url=source_url,
             raw_excerpt=raw_excerpt,
             published_at=published_at,
-            captured_at=datetime.utcnow(),
+            captured_at=datetime.now(UTC),
             confidence=confidence,
             extracted_data=extracted_data or {},
             related_entities=related_entities or [],
@@ -508,7 +508,7 @@ class APIBasedMCPServer(BaseMCPServer):
             return None
 
         result, cached_at = self._cache[cache_key]
-        elapsed = (datetime.utcnow() - cached_at).total_seconds()
+        elapsed = (datetime.now(UTC) - cached_at).total_seconds()
 
         if elapsed > self._config.cache_ttl_seconds:
             del self._cache[cache_key]
@@ -523,7 +523,7 @@ class APIBasedMCPServer(BaseMCPServer):
             cache_key: Cache key
             result: Result to cache
         """
-        self._cache[cache_key] = (result, datetime.utcnow())
+        self._cache[cache_key] = (result, datetime.now(UTC))
 
     def _clear_cache(self) -> None:
         """Clear all cached results."""

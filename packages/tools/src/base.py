@@ -14,7 +14,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Generic, TypeVar
 
@@ -196,7 +196,7 @@ class BaseTool(ABC):
     ) -> None:
         """Log operation for audit trail."""
         entry = AuditEntry(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(UTC),
             tool_name=self.name,
             operation=operation,
             access_level=self.required_access,

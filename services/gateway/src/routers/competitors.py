@@ -1,6 +1,6 @@
 """Competitor management API endpoints."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
@@ -187,7 +187,7 @@ async def update_competitor(
     for field, value in update_data.items():
         setattr(competitor, field, value)
 
-    competitor.last_updated = datetime.utcnow()
+    competitor.last_updated = datetime.now(UTC)
     await db.flush()
 
     logger.info("competitor_updated", competitor_id=str(competitor_id))
@@ -264,7 +264,7 @@ async def mark_alert_read(
         raise HTTPException(status_code=404, detail="Alert not found")
 
     alert.is_read = True
-    alert.read_at = datetime.utcnow()
+    alert.read_at = datetime.now(UTC)
     await db.flush()
 
 
@@ -300,5 +300,5 @@ async def get_battle_card(
         positioning=competitor.positioning,
         pricing_comparison=competitor.pricing_info,
         win_strategies=win_strategies,
-        generated_at=datetime.utcnow(),
+        generated_at=datetime.now(UTC),
     )

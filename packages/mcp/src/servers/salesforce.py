@@ -12,7 +12,7 @@ API Documentation: https://developer.salesforce.com/docs/atlas.en-us.api_rest.me
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -104,7 +104,7 @@ class SalesforceMCPServer(APIBasedMCPServer):
     async def _ensure_authenticated(self) -> bool:
         """Ensure we have a valid access token."""
         if self._access_token and self._token_expires_at:
-            if datetime.utcnow() < self._token_expires_at - timedelta(minutes=5):
+            if datetime.now(UTC) < self._token_expires_at - timedelta(minutes=5):
                 return True
 
         return await self._authenticate()
@@ -131,7 +131,7 @@ class SalesforceMCPServer(APIBasedMCPServer):
                 self._access_token = data.get("access_token")
                 self._instance_url = data.get("instance_url")
                 # Tokens typically last 2 hours
-                self._token_expires_at = datetime.utcnow() + timedelta(hours=2)
+                self._token_expires_at = datetime.now(UTC) + timedelta(hours=2)
 
                 self._logger.info(
                     "salesforce_authenticated",

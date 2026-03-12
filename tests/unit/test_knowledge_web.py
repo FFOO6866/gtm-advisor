@@ -28,6 +28,7 @@ from packages.database.src.models import (
 )
 
 
+@pytest.mark.unit
 class TestEvidencedFactRepository:
     """Tests for EvidencedFactRepository."""
 
@@ -176,6 +177,7 @@ class TestEvidencedFactRepository:
         assert high_conf_facts[0].claim == "High confidence"
 
 
+@pytest.mark.unit
 class TestEntityRepository:
     """Tests for EntityRepository."""
 
@@ -269,6 +271,7 @@ class TestEntityRepository:
         assert found.name == "Brand New Company"
 
 
+@pytest.mark.unit
 class TestEntityRelationRepository:
     """Tests for EntityRelationRepository."""
 
@@ -364,6 +367,7 @@ class TestEntityRelationRepository:
         assert relation.valid_until is not None
 
 
+@pytest.mark.unit
 class TestLeadJustificationRepository:
     """Tests for LeadJustificationRepository."""
 
@@ -434,6 +438,7 @@ class TestLeadJustificationRepository:
         assert len(justifications) == 2
 
 
+@pytest.mark.unit
 class TestCompetitorSignalRepository:
     """Tests for CompetitorSignalRepository."""
 
@@ -488,6 +493,7 @@ class TestCompetitorSignalRepository:
         assert signal.acknowledged_at is not None
 
 
+@pytest.mark.unit
 class TestMCPDataSourceRepository:
     """Tests for MCPDataSourceRepository."""
 
@@ -571,6 +577,7 @@ class TestMCPDataSourceRepository:
         assert source.total_facts_produced == 25
 
 
+@pytest.mark.unit
 class TestKnowledgeWebService:
     """Tests for KnowledgeWebService orchestration."""
 
