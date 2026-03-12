@@ -102,6 +102,14 @@ class FinancialStatementRow(BaseModel):
     net_income: float | None = Field(default=None)
     diluted_eps: float | None = Field(default=None)
 
+    # Income Statement (operational detail)
+    cost_of_revenue: float | None = Field(default=None)
+    selling_general_administrative: float | None = Field(default=None)
+    research_development: float | None = Field(default=None)
+    operating_income: float | None = Field(default=None)
+    interest_expense: float | None = Field(default=None)
+    depreciation_amortization: float | None = Field(default=None)
+
     # Balance Sheet
     total_assets: float | None = Field(default=None)
     total_equity: float | None = Field(default=None)
@@ -143,6 +151,21 @@ class FullFundamentals(BaseModel):
     profit_margin_ttm: float | None = Field(default=None)
     return_on_equity_ttm: float | None = Field(default=None)
     dividend_yield: float | None = Field(default=None)
+
+    # ESG Scores (from ESGScores section)
+    esg_score: float | None = Field(default=None)
+    esg_environment: float | None = Field(default=None)
+    esg_social: float | None = Field(default=None)
+    esg_governance: float | None = Field(default=None)
+
+    # Analyst Ratings (from AnalystRatings section)
+    analyst_rating: str | None = Field(default=None)      # "Buy", "Hold", "Sell"
+    analyst_target_price: float | None = Field(default=None)
+    analyst_strong_buy: int | None = Field(default=None)
+    analyst_buy: int | None = Field(default=None)
+    analyst_hold: int | None = Field(default=None)
+    analyst_sell: int | None = Field(default=None)
+    analyst_strong_sell: int | None = Field(default=None)
 
     # Time series financials
     annual_income: list[FinancialStatementRow] = Field(default_factory=list)
@@ -498,6 +521,12 @@ class EODHDClient:
             "ebit": "ebit",
             "netIncome": "net_income",
             "dilutedEPS": "diluted_eps",
+            "costOfRevenue": "cost_of_revenue",
+            "sellingGeneralAdministrative": "selling_general_administrative",
+            "researchDevelopment": "research_development",
+            "operatingIncome": "operating_income",
+            "interestExpense": "interest_expense",
+            "depreciationAndAmortization": "depreciation_amortization",
             "totalAssets": "total_assets",
             "totalStockholderEquity": "total_equity",
             "shortLongTermDebtTotal": "short_long_term_debt_total",
@@ -547,6 +576,8 @@ class EODHDClient:
             general = data.get("General", {})
             highlights = data.get("Highlights", {})
             financials = data.get("Financials", {})
+            esg = data.get("ESGScores", {})
+            analyst = data.get("AnalystRatings", {})
 
             # Compute gross_margin_ttm from raw figures
             gross_margin_ttm: float | None = None
@@ -586,6 +617,19 @@ class EODHDClient:
                 profit_margin_ttm=self._to_float(highlights.get("ProfitMargin")),
                 return_on_equity_ttm=self._to_float(highlights.get("ReturnOnEquityTTM")),
                 dividend_yield=self._to_float(highlights.get("DividendYield")),
+                # ESG (EODHD uses PascalCase keys)
+                esg_score=self._to_float(esg.get("TotalEsg")),
+                esg_environment=self._to_float(esg.get("EnvironmentScore")),
+                esg_social=self._to_float(esg.get("SocialScore")),
+                esg_governance=self._to_float(esg.get("GovernanceScore")),
+                # Analyst (Rating is a float 1-5, not a string)
+                analyst_rating=str(analyst["Rating"]) if analyst.get("Rating") is not None else None,
+                analyst_target_price=self._to_float(analyst.get("TargetPrice")),
+                analyst_strong_buy=int(analyst["StrongBuy"]) if analyst.get("StrongBuy") else None,
+                analyst_buy=int(analyst["Buy"]) if analyst.get("Buy") else None,
+                analyst_hold=int(analyst["Hold"]) if analyst.get("Hold") else None,
+                analyst_sell=int(analyst["Sell"]) if analyst.get("Sell") else None,
+                analyst_strong_sell=int(analyst["StrongSell"]) if analyst.get("StrongSell") else None,
                 # Financials
                 annual_income=self._parse_statement_rows(
                     _stmt("Income_Statement", "yearly"), limit=5

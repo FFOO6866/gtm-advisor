@@ -1790,6 +1790,17 @@ class ListedCompany(Base):
     dpu_ttm: Mapped[float | None] = mapped_column(Float, nullable=True)       # Distribution per unit
     gearing_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)  # % debt/assets
 
+    # ESG Scores (from EODHD ESGScores section — point-in-time, refreshed with each sync)
+    esg_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    esg_environment: Mapped[float | None] = mapped_column(Float, nullable=True)
+    esg_social: Mapped[float | None] = mapped_column(Float, nullable=True)
+    esg_governance: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Analyst Consensus (from EODHD AnalystRatings section)
+    analyst_rating: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    analyst_target_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    analyst_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Metadata
     is_sg_incorporated: Mapped[bool] = mapped_column(Boolean, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -1842,10 +1853,23 @@ class CompanyFinancialSnapshot(Base):
     net_income: Mapped[float | None] = mapped_column(Float, nullable=True)
     eps: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Operational detail (in SGD) — GTM intelligence
+    cost_of_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)
+    selling_general_administrative: Mapped[float | None] = mapped_column(Float, nullable=True)
+    research_development: Mapped[float | None] = mapped_column(Float, nullable=True)
+    operating_income: Mapped[float | None] = mapped_column(Float, nullable=True)
+    interest_expense: Mapped[float | None] = mapped_column(Float, nullable=True)
+    depreciation_amortization: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     # Computed margins (0–1 float, null if revenue = 0)
     gross_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
     ebitda_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
     net_margin: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Derived ratios from operational detail (null if revenue = 0 or field absent)
+    sga_to_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)    # SG&A / revenue
+    rnd_to_revenue: Mapped[float | None] = mapped_column(Float, nullable=True)    # R&D / revenue
+    operating_margin: Mapped[float | None] = mapped_column(Float, nullable=True)  # operating_income / revenue
 
     # YoY growth rates (null for oldest period)
     revenue_growth_yoy: Mapped[float | None] = mapped_column(Float, nullable=True)

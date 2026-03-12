@@ -970,6 +970,24 @@ class FinancialIntelligenceSync:
         company.roe = fundamentals.return_on_equity_ttm
         company.dividend_yield = fundamentals.dividend_yield
 
+        # ESG Scores
+        company.esg_score = fundamentals.esg_score
+        company.esg_environment = fundamentals.esg_environment
+        company.esg_social = fundamentals.esg_social
+        company.esg_governance = fundamentals.esg_governance
+
+        # Analyst Consensus
+        company.analyst_rating = fundamentals.analyst_rating
+        company.analyst_target_price = fundamentals.analyst_target_price
+        if fundamentals.analyst_strong_buy is not None:
+            company.analyst_count = (
+                (fundamentals.analyst_strong_buy or 0)
+                + (fundamentals.analyst_buy or 0)
+                + (fundamentals.analyst_hold or 0)
+                + (fundamentals.analyst_sell or 0)
+                + (fundamentals.analyst_strong_sell or 0)
+            )
+
         await self._session.flush()  # ensure company.id is set
 
         await asyncio.sleep(self.request_delay)
@@ -1540,6 +1558,23 @@ class FinancialIntelligenceSync:
                     )
                     self._session.add(snap)
 
+                # Operational detail (FX-adjusted)
+                cost_of_revenue = _apply_fx(income_row.cost_of_revenue, fx_rate)
+                selling_general_administrative = _apply_fx(
+                    income_row.selling_general_administrative, fx_rate
+                )
+                research_development = _apply_fx(income_row.research_development, fx_rate)
+                operating_income = _apply_fx(income_row.operating_income, fx_rate)
+                interest_expense = _apply_fx(income_row.interest_expense, fx_rate)
+                depreciation_amortization = _apply_fx(
+                    income_row.depreciation_amortization, fx_rate
+                )
+
+                # Derived ratios from operational detail
+                sga_to_revenue = _safe_div(selling_general_administrative, revenue)
+                rnd_to_revenue = _safe_div(research_development, revenue)
+                operating_margin = _safe_div(operating_income, revenue)
+
                 snap.filing_currency = currency
                 snap.fx_to_sgd = fx_rate
                 snap.revenue = revenue
@@ -1548,9 +1583,18 @@ class FinancialIntelligenceSync:
                 snap.ebit = ebit
                 snap.net_income = net_income
                 snap.eps = eps
+                snap.cost_of_revenue = cost_of_revenue
+                snap.selling_general_administrative = selling_general_administrative
+                snap.research_development = research_development
+                snap.operating_income = operating_income
+                snap.interest_expense = interest_expense
+                snap.depreciation_amortization = depreciation_amortization
                 snap.gross_margin = gross_margin
                 snap.ebitda_margin = ebitda_margin
                 snap.net_margin = net_margin
+                snap.sga_to_revenue = sga_to_revenue
+                snap.rnd_to_revenue = rnd_to_revenue
+                snap.operating_margin = operating_margin
                 snap.revenue_growth_yoy = revenue_growth_yoy
                 snap.total_assets = total_assets
                 snap.total_equity = total_equity
