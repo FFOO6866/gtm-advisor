@@ -751,6 +751,7 @@ async def _run_guide_resynthesis() -> None:
     """
     logger.info("scheduled_job_start", job="guide_resynthesis")
     try:
+        import re  # noqa: PLC0415
         from datetime import timedelta  # noqa: PLC0415
 
         from sqlalchemy import select  # noqa: PLC0415
@@ -758,18 +759,19 @@ async def _run_guide_resynthesis() -> None:
         from packages.database.src.models import ResearchCache  # noqa: PLC0415
         from packages.database.src.session import async_session_factory  # noqa: PLC0415
         from packages.knowledge.src.knowledge_mcp import (  # noqa: PLC0415
-            _GUIDE_RELEVANCE_KEYWORDS,
+            get_guide_relevance_keywords,
             get_knowledge_mcp,
         )
 
-        cutoff = datetime.now(UTC) - timedelta(days=7)
+        # Use naive UTC to match SQLite's naive datetime storage.
+        cutoff = (datetime.now(UTC) - timedelta(days=7)).replace(tzinfo=None)
 
         async with async_session_factory() as db:
             # Load all recent public research rows.
             result = await db.execute(
                 select(ResearchCache)
                 .where(
-                    ResearchCache.is_public == True,  # noqa: E712
+                    ResearchCache.is_public.is_(True),
                     ResearchCache.created_at >= cutoff,
                 )
                 .order_by(ResearchCache.created_at.desc())
@@ -781,13 +783,17 @@ async def _run_guide_resynthesis() -> None:
             logger.info("guide_resynthesis_skipped", reason="no recent public research")
             return
 
-        # Score each guide by keyword overlap with recent research content.
+        # Score each guide by word-boundary keyword overlap with recent research.
+        guide_keywords = get_guide_relevance_keywords()
         guide_research: dict[str, list[str]] = {}
-        for slug, keywords in _GUIDE_RELEVANCE_KEYWORDS.items():
+        for slug, keywords in guide_keywords.items():
+            # Pre-compile word-boundary patterns to avoid substring false positives
+            # (e.g. "sg" matching "messaging", "ads" matching "downloads").
+            patterns = [re.compile(r"\b" + re.escape(kw) + r"\b") for kw in keywords]
             matching_texts: list[str] = []
             for row in recent_rows:
                 row_text = f"{row.query} {row.content[:500]}".lower()
-                hits = sum(1 for kw in keywords if kw in row_text)
+                hits = sum(1 for pat in patterns if pat.search(row_text))
                 if hits >= 2:
                     matching_texts.append(row.content[:1000])
             if len(matching_texts) >= 3:
@@ -804,15 +810,18 @@ async def _run_guide_resynthesis() -> None:
         kmcp = get_knowledge_mcp()
         synthesized = 0
         for slug, texts in guide_research.items():
-            ok = await kmcp.synthesize_guide_incremental(slug=slug, extra_texts=texts)
-            if ok:
-                synthesized += 1
-            logger.info(
-                "guide_resynthesis_result",
-                slug=slug,
-                matching_research=len(texts),
-                success=ok,
-            )
+            try:
+                ok = await kmcp.synthesize_guide_incremental(slug=slug, extra_texts=texts)
+                if ok:
+                    synthesized += 1
+                logger.info(
+                    "guide_resynthesis_result",
+                    slug=slug,
+                    matching_research=len(texts),
+                    success=ok,
+                )
+            except Exception:
+                logger.exception("guide_resynthesis_slug_failed slug=%s", slug)
 
         logger.info("guide_resynthesis_complete", guides_updated=synthesized)
 

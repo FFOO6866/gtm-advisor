@@ -483,3 +483,480 @@ class TestDomainGuides:
             assert "BENCHMARKS" in injection
         finally:
             kmod._GUIDES_DIR = original
+
+
+# ---------------------------------------------------------------------------
+# list_available_guides: _live.json exclusion
+# ---------------------------------------------------------------------------
+
+
+class TestListAvailableGuidesLiveExclusion:
+    """list_available_guides() must never surface _live variants as separate slugs."""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_live_variant_excluded_when_base_exists(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """A _live.json file alongside its base is excluded from the returned slugs."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "cold_email_sequence_live.json").write_text("{}", encoding="utf-8")
+
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            slugs = await mcp.list_available_guides()
+            assert slugs == ["cold_email_sequence"]
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_live_only_file_excluded_when_base_absent(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """A _live.json that has no base counterpart is still excluded from the listing."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "icp_development_live.json").write_text("{}", encoding="utf-8")
+
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            slugs = await mcp.list_available_guides()
+            assert slugs == []
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_mixed_guides_only_base_slugs_returned(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """With a mix of base and live files, only the base slugs appear in the result."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "cold_email_sequence_live.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "icp_development.json").write_text("{}", encoding="utf-8")
+
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            slugs = await mcp.list_available_guides()
+            assert slugs == ["cold_email_sequence", "icp_development"]
+        finally:
+            kmod._GUIDES_DIR = original
+
+
+# ---------------------------------------------------------------------------
+# get_domain_guide: _live.json preference
+# ---------------------------------------------------------------------------
+
+
+class TestGetDomainGuideLivePreference:
+    """get_domain_guide() must return _live.json content when it exists."""
+
+    _BASE_GUIDE = {
+        "slug": "cold_email_sequence",
+        "title": "Cold Email Sequence (Base)",
+        "core_principles": [{"principle": "Base principle", "source": "Book A", "application": "x"}],
+        "process_steps": [],
+        "decision_rules": [],
+        "singapore_adaptations": [],
+        "common_mistakes": [],
+        "success_metrics": {},
+    }
+
+    _LIVE_GUIDE = {
+        "slug": "cold_email_sequence",
+        "title": "Cold Email Sequence (Live)",
+        "core_principles": [{"principle": "Live principle", "source": "Book B", "application": "y"}],
+        "process_steps": [],
+        "decision_rules": [],
+        "singapore_adaptations": [],
+        "common_mistakes": [],
+        "success_metrics": {},
+    }
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_live_when_both_exist(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """When both base and _live.json exist, the live variant's content is returned."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE), encoding="utf-8"
+        )
+        (tmp_path / "cold_email_sequence_live.json").write_text(
+            json.dumps(self._LIVE_GUIDE), encoding="utf-8"
+        )
+
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            result = await mcp.get_domain_guide("cold_email_sequence")
+            assert result is not None
+            assert result["title"] == "Cold Email Sequence (Live)"
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_base_when_live_absent(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """When only the base guide exists, its content is returned."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE), encoding="utf-8"
+        )
+
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            result = await mcp.get_domain_guide("cold_email_sequence")
+            assert result is not None
+            assert result["title"] == "Cold Email Sequence (Base)"
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_none_when_neither_exists(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """When neither base nor live file exists, None is returned without error."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            result = await mcp.get_domain_guide("cold_email_sequence")
+            assert result is None
+        finally:
+            kmod._GUIDES_DIR = original
+
+
+# ---------------------------------------------------------------------------
+# synthesize_guide_incremental
+# ---------------------------------------------------------------------------
+
+
+class TestSynthesizeGuideIncremental:
+    """Unit tests for KnowledgeMCPServer.synthesize_guide_incremental()."""
+
+    # A base guide that includes search_queries — required by the method.
+    _BASE_GUIDE_WITH_QUERIES = {
+        "slug": "cold_email_sequence",
+        "title": "Cold Email Sequence",
+        "agent_relevance": ["campaign-architect"],
+        "source_books": ["Book A"],
+        "source_chunk_count": 5,
+        "search_queries": ["cold email B2B outreach", "email sequence follow-up"],
+        "must_cover": ["subject lines", "follow-up cadence"],
+        "core_principles": [
+            {"principle": "Principle one", "source": "Book A", "application": "Apply it"},
+            {"principle": "Principle two", "source": "Book B", "application": "Apply it"},
+        ],
+        "process_steps": [{"step": 1, "phase": "Draft", "objective": "Write", "actions": ["a"], "timing": "Day 1"}],
+        "decision_rules": ["If no reply: follow up in 3 days"],
+        "singapore_adaptations": ["Reference PSG grants in opener"],
+        "common_mistakes": ["Sending without personalisation"],
+        "success_metrics": {"open_rate": "40%"},
+    }
+
+    # Synthesized content that passes all validation checks.
+    _VALID_SYNTHESIZED = {
+        "core_principles": [
+            {"principle": "New principle one", "source": "Book A", "application": "Apply it"},
+            {"principle": "New principle two", "source": "Book B", "application": "Apply it"},
+        ],
+        "process_steps": [{"step": 1, "phase": "Draft", "objective": "Write", "actions": ["a"], "timing": "Day 1"}],
+        "decision_rules": ["If no reply: follow up"],
+        "singapore_adaptations": ["Mention PSG grants"],
+        "common_mistakes": ["No personalisation"],
+        "success_metrics": {"open_rate": "40%"},
+    }
+
+    def _make_mock_qdrant(self) -> AsyncMock:
+        """Return a mock AsyncQdrantClient with a single hit per query."""
+        mock_hit = MagicMock()
+        mock_hit.id = "chunk-001"
+        mock_hit.score = 0.88
+        mock_hit.payload = {
+            "book_title": "Book A",
+            "chapter": "Chapter 1",
+            "page_number": 10,
+            "text": "Important insight about cold email outreach for B2B.",
+        }
+        mock_response = MagicMock()
+        mock_response.points = [mock_hit]
+        mock_qdrant = AsyncMock()
+        mock_qdrant.query_points = AsyncMock(return_value=mock_response)
+        return mock_qdrant
+
+    def _make_mock_openai(self, synthesized_content: dict) -> AsyncMock:
+        """Return a mock AsyncOpenAI that returns the given synthesized_content as JSON."""
+        mock_openai = AsyncMock()
+
+        # embeddings.create
+        mock_embed_response = MagicMock()
+        mock_embed_response.data = [MagicMock(embedding=[0.1] * 1536)]
+        mock_openai.embeddings.create = AsyncMock(return_value=mock_embed_response)
+
+        # chat.completions.create
+        mock_message = MagicMock()
+        mock_message.content = json.dumps(synthesized_content)
+        mock_choice = MagicMock()
+        mock_choice.message = mock_message
+        mock_completion = MagicMock()
+        mock_completion.choices = [mock_choice]
+        mock_openai.chat.completions.create = AsyncMock(return_value=mock_completion)
+
+        return mock_openai
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_false_when_base_guide_missing(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """Returns False immediately when the base {slug}.json does not exist."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path  # empty — no base guide
+        try:
+            mcp = KnowledgeMCPServer()
+            result = await mcp.synthesize_guide_incremental("cold_email_sequence")
+            assert result is False
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_false_when_qdrant_unavailable(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """Returns False when _get_qdrant() returns None (not configured)."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE_WITH_QUERIES), encoding="utf-8"
+        )
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            # Patch _get_qdrant to return None, _get_openai to return a valid mock
+            mcp._get_qdrant = AsyncMock(return_value=None)
+            mcp._get_openai = AsyncMock(return_value=self._make_mock_openai(self._VALID_SYNTHESIZED))
+            result = await mcp.synthesize_guide_incremental("cold_email_sequence")
+            assert result is False
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_false_when_openai_unavailable(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """Returns False when _get_openai() returns None (not configured)."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE_WITH_QUERIES), encoding="utf-8"
+        )
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            mcp._get_qdrant = AsyncMock(return_value=self._make_mock_qdrant())
+            mcp._get_openai = AsyncMock(return_value=None)
+            result = await mcp.synthesize_guide_incremental("cold_email_sequence")
+            assert result is False
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_false_when_synthesized_missing_required_key(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """Returns False when the LLM response omits a required key (e.g. decision_rules)."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE_WITH_QUERIES), encoding="utf-8"
+        )
+        # Missing decision_rules entirely
+        incomplete = {k: v for k, v in self._VALID_SYNTHESIZED.items() if k != "decision_rules"}
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            mcp._get_qdrant = AsyncMock(return_value=self._make_mock_qdrant())
+            mcp._get_openai = AsyncMock(return_value=self._make_mock_openai(incomplete))
+            result = await mcp.synthesize_guide_incremental("cold_email_sequence")
+            assert result is False
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_false_when_required_key_is_empty_list(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """Returns False when a required list key is present but empty."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE_WITH_QUERIES), encoding="utf-8"
+        )
+        bad_content = dict(self._VALID_SYNTHESIZED)
+        bad_content["singapore_adaptations"] = []  # empty list — fails validation
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            mcp._get_qdrant = AsyncMock(return_value=self._make_mock_qdrant())
+            mcp._get_openai = AsyncMock(return_value=self._make_mock_openai(bad_content))
+            result = await mcp.synthesize_guide_incremental("cold_email_sequence")
+            assert result is False
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_false_when_core_principles_below_60_percent(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """Returns False when new core_principles count is < 60% of the base count."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        # Base has 2 principles; 60% threshold = 1.2, so synthesized needs >= 2.
+        # Providing only 1 principle triggers the content-loss guard.
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE_WITH_QUERIES), encoding="utf-8"
+        )
+        thin_content = dict(self._VALID_SYNTHESIZED)
+        thin_content["core_principles"] = [
+            {"principle": "Only one", "source": "Book A", "application": "x"}
+        ]
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            mcp._get_qdrant = AsyncMock(return_value=self._make_mock_qdrant())
+            mcp._get_openai = AsyncMock(return_value=self._make_mock_openai(thin_content))
+            result = await mcp.synthesize_guide_incremental("cold_email_sequence")
+            assert result is False
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_true_and_writes_live_file_on_success(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """Returns True and writes {slug}_live.json when synthesis succeeds."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE_WITH_QUERIES), encoding="utf-8"
+        )
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            mcp._get_qdrant = AsyncMock(return_value=self._make_mock_qdrant())
+            mcp._get_openai = AsyncMock(return_value=self._make_mock_openai(self._VALID_SYNTHESIZED))
+            result = await mcp.synthesize_guide_incremental("cold_email_sequence")
+            assert result is True
+            live_path = tmp_path / "cold_email_sequence_live.json"
+            assert live_path.exists()
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_live_file_contains_expected_metadata(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """The written _live.json preserves slug, title, and synthesis_type metadata."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE_WITH_QUERIES), encoding="utf-8"
+        )
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            mcp._get_qdrant = AsyncMock(return_value=self._make_mock_qdrant())
+            mcp._get_openai = AsyncMock(return_value=self._make_mock_openai(self._VALID_SYNTHESIZED))
+            await mcp.synthesize_guide_incremental("cold_email_sequence")
+            live_content = json.loads((tmp_path / "cold_email_sequence_live.json").read_text())
+            assert live_content["slug"] == "cold_email_sequence"
+            assert live_content["title"] == "Cold Email Sequence"
+            assert live_content["synthesis_type"] == "incremental"
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_get_domain_guide_reads_live_file_after_synthesis(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """After successful synthesis, get_domain_guide returns the live content."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(self._BASE_GUIDE_WITH_QUERIES), encoding="utf-8"
+        )
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            mcp._get_qdrant = AsyncMock(return_value=self._make_mock_qdrant())
+            mcp._get_openai = AsyncMock(return_value=self._make_mock_openai(self._VALID_SYNTHESIZED))
+            await mcp.synthesize_guide_incremental("cold_email_sequence")
+            guide = await mcp.get_domain_guide("cold_email_sequence")
+            assert guide is not None
+            assert guide["synthesis_type"] == "incremental"
+        finally:
+            kmod._GUIDES_DIR = original
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_slug_without_search_queries_falls_back_to_keywords(
+        self, tmp_path: pytest.TempPathFactory
+    ) -> None:
+        """When search_queries is absent in the base guide, keyword fallback is used and synthesis proceeds."""
+        import packages.knowledge.src.knowledge_mcp as kmod  # noqa: PLC0415
+
+        guide_without_queries = {k: v for k, v in self._BASE_GUIDE_WITH_QUERIES.items() if k != "search_queries"}
+        (tmp_path / "cold_email_sequence.json").write_text(
+            json.dumps(guide_without_queries), encoding="utf-8"
+        )
+        original = kmod._GUIDES_DIR
+        kmod._GUIDES_DIR = tmp_path
+        try:
+            mcp = KnowledgeMCPServer()
+            mcp._get_qdrant = AsyncMock(return_value=self._make_mock_qdrant())
+            mcp._get_openai = AsyncMock(return_value=self._make_mock_openai(self._VALID_SYNTHESIZED))
+            result = await mcp.synthesize_guide_incremental("cold_email_sequence")
+            assert result is True
+        finally:
+            kmod._GUIDES_DIR = original

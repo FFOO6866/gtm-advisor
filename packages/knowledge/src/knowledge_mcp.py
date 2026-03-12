@@ -569,6 +569,9 @@ class KnowledgeMCPServer:
             ``process_steps``, ``decision_rules``, ``singapore_adaptations``,
             ``common_mistakes``, ``success_metrics``, or ``None`` if not found.
         """
+        # Guard against path traversal in slug.
+        if "/" in slug or "\\" in slug or ".." in slug:
+            return None
         # Prefer the _live.json variant (incrementally re-synthesized with
         # accumulated research) over the original static guide.
         live_path = _GUIDES_DIR / f"{slug}_live.json"
@@ -685,6 +688,11 @@ class KnowledgeMCPServer:
             any failure (logged but never raised).
         """
         try:
+            # Guard against path traversal in slug.
+            if "/" in slug or "\\" in slug or ".." in slug:
+                logger.warning("synthesize_guide_incremental: invalid slug '%s'", slug)
+                return False
+
             # Load the existing guide to get search_queries and metadata.
             base_path = _GUIDES_DIR / f"{slug}.json"
             if not base_path.exists():
@@ -840,9 +848,9 @@ class KnowledgeMCPServer:
             for key in required_keys:
                 if not isinstance(synthesized.get(key), list) or not synthesized[key]:
                     logger.warning(
-                        "synthesize_guide_incremental_validation_failed",
-                        slug=slug,
-                        missing_key=key,
+                        "synthesize_guide_incremental_validation_failed slug=%s missing_key=%s",
+                        slug,
+                        key,
                     )
                     return False
 
@@ -850,10 +858,10 @@ class KnowledgeMCPServer:
             new_principles = len(synthesized.get("core_principles", []))
             if base_principles > 0 and new_principles < base_principles * 0.6:
                 logger.warning(
-                    "synthesize_guide_incremental_content_loss",
-                    slug=slug,
-                    base_principles=base_principles,
-                    new_principles=new_principles,
+                    "synthesize_guide_incremental_content_loss slug=%s base=%d new=%d",
+                    slug,
+                    base_principles,
+                    new_principles,
                 )
                 return False
 
@@ -875,19 +883,25 @@ class KnowledgeMCPServer:
 
             live_path = _GUIDES_DIR / f"{slug}_live.json"
             _GUIDES_DIR.mkdir(parents=True, exist_ok=True)
-            live_path.write_text(
+            # Atomic write: write to tmp file then os.replace() to avoid
+            # corrupt _live.json if the process is killed mid-write.
+            import os  # noqa: PLC0415
+
+            tmp_path = live_path.with_suffix(".tmp")
+            tmp_path.write_text(
                 json.dumps(guide, indent=2, ensure_ascii=False), encoding="utf-8"
             )
+            os.replace(tmp_path, live_path)
             logger.info(
-                "guide_resynthesized",
-                slug=slug,
-                chunks=len(chunks),
-                extra=len(extra),
+                "guide_resynthesized slug=%s chunks=%d extra=%d",
+                slug,
+                len(chunks),
+                len(extra),
             )
             return True
 
         except Exception:
-            logger.warning("synthesize_guide_incremental_failed", slug=slug, exc_info=True)
+            logger.warning("synthesize_guide_incremental_failed slug=%s", slug, exc_info=True)
             return False
 
     async def get_sg_reference(
@@ -1239,3 +1253,12 @@ class KnowledgeMCPServer:
 def get_knowledge_mcp() -> KnowledgeMCPServer:
     """Return the process-wide singleton KnowledgeMCPServer."""
     return KnowledgeMCPServer()
+
+
+def get_guide_relevance_keywords() -> dict[str, list[str]]:
+    """Return a copy of the guide-slug → relevance-keywords mapping.
+
+    Public accessor so that cross-package callers (e.g. scheduler) do not
+    need to import the private ``_GUIDE_RELEVANCE_KEYWORDS`` dict directly.
+    """
+    return dict(_GUIDE_RELEVANCE_KEYWORDS)
