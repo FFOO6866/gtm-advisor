@@ -586,10 +586,16 @@ class KnowledgeMCPServer:
             return None
 
     async def list_available_guides(self) -> list[str]:
-        """Return slugs of all synthesized guides currently in the guide store."""
+        """Return slugs of all synthesized guides currently in the guide store.
+
+        Excludes ``_live.json`` variants — they are transparent alternates loaded
+        by ``get_domain_guide()`` and should not be listed as separate entries.
+        """
         if not _GUIDES_DIR.exists():
             return []
-        return sorted(p.stem for p in _GUIDES_DIR.glob("*.json"))
+        return sorted(
+            p.stem for p in _GUIDES_DIR.glob("*.json") if not p.stem.endswith("_live")
+        )
 
     async def get_agent_knowledge_pack(
         self,
@@ -653,6 +659,236 @@ class KnowledgeMCPServer:
             "source_books": source_books,
             "formatted_injection": self._format_knowledge_pack(loaded, max_tokens=max_tokens),
         }
+
+    async def synthesize_guide_incremental(
+        self,
+        slug: str,
+        extra_texts: list[str] | None = None,
+    ) -> bool:
+        """Re-synthesize a guide using Qdrant book chunks + supplementary texts.
+
+        Saves the result as ``{slug}_live.json`` — the original guide is never
+        overwritten.  ``get_domain_guide()`` automatically prefers the live
+        variant when it exists.
+
+        Uses the already-initialised Qdrant and OpenAI clients (no external
+        process, no file-lock conflict with the running gateway).
+
+        Args:
+            slug: Guide identifier, e.g. ``'cold_email_sequence'``.
+            extra_texts: Optional list of supplementary research texts
+                (e.g. accumulated ResearchCache content) to include alongside
+                the book chunks in the synthesis prompt.
+
+        Returns:
+            ``True`` if a new ``{slug}_live.json`` was written, ``False`` on
+            any failure (logged but never raised).
+        """
+        try:
+            # Load the existing guide to get search_queries and metadata.
+            base_path = _GUIDES_DIR / f"{slug}.json"
+            if not base_path.exists():
+                logger.warning("synthesize_guide_incremental: base guide '%s' not found", slug)
+                return False
+            base_guide = json.loads(base_path.read_text(encoding="utf-8"))
+            search_queries: list[str] = base_guide.get("search_queries", [])
+            if not search_queries:
+                # Derive from slug keywords as fallback.
+                keywords = _GUIDE_RELEVANCE_KEYWORDS.get(slug, slug.replace("_", " ").split())
+                search_queries = [" ".join(keywords)]
+
+            title = base_guide.get("title", slug.replace("_", " ").title())
+            agents_str = ", ".join(base_guide.get("agent_relevance", []))
+
+            # Collect book chunks from Qdrant via embedding search.
+            qdrant = await self._get_qdrant()
+            openai = await self._get_openai()
+            if qdrant is None or openai is None:
+                logger.warning("synthesize_guide_incremental: Qdrant or OpenAI not available")
+                return False
+
+            seen_ids: set[str] = set()
+            chunks: list[dict] = []
+            for query in search_queries[:5]:
+                try:
+                    resp = await openai.embeddings.create(
+                        model="text-embedding-3-small",
+                        input=query.strip()[:6000],
+                    )
+                    embedding = resp.data[0].embedding
+                    results = await qdrant.query_points(
+                        collection_name="marketing_knowledge",
+                        query=embedding,
+                        limit=8,
+                        with_payload=True,
+                    )
+                    for hit in results.points:
+                        chunk_id = str(hit.id)
+                        if chunk_id in seen_ids:
+                            continue
+                        seen_ids.add(chunk_id)
+                        payload = hit.payload or {}
+                        chunks.append({
+                            "book_title": payload.get("book_title", "Unknown"),
+                            "chapter": payload.get("chapter"),
+                            "page_number": payload.get("page_number", 0),
+                            "text": payload.get("text", ""),
+                            "score": round(hit.score, 4),
+                        })
+                except Exception:
+                    logger.debug("synthesize_guide_incremental: query failed", exc_info=True)
+
+            chunks.sort(key=lambda c: c["score"], reverse=True)
+            chunks = chunks[:20]
+
+            if not chunks:
+                logger.warning("synthesize_guide_incremental: no book chunks for '%s'", slug)
+                return False
+
+            # Build excerpts text (book chunks + extra research).
+            book_titles = list(dict.fromkeys(c["book_title"] for c in chunks))
+            excerpt_parts: list[str] = []
+            for i, c in enumerate(chunks, 1):
+                ch = f", {c['chapter']}" if c.get("chapter") else ""
+                excerpt_parts.append(
+                    f"[{i}] {c['book_title']}{ch} (p.{c['page_number']}, "
+                    f"score={c['score']}):\n{c['text'][:800]}"
+                )
+
+            # Append supplementary research texts.
+            extra = extra_texts or []
+            for j, text in enumerate(extra[:10], len(chunks) + 1):
+                excerpt_parts.append(
+                    f"[{j}] RECENT MARKET RESEARCH (live data):\n{text[:800]}"
+                )
+            book_count = len(book_titles) + (1 if extra else 0)
+
+            excerpts = "\n\n".join(excerpt_parts)
+            must_cover = "\n".join(
+                f"  - {item}" for item in base_guide.get("must_cover", [])
+            ) or "  - Cover all key aspects of the topic"
+
+            # Synthesis prompt — matches the format in synthesize_domain_guides.py
+            # so incremental guides have consistent quality with initial ones.
+            system_prompt = (
+                "You are a marketing knowledge synthesizer. Your task is to extract "
+                "structured, actionable operational guidance from real book excerpts "
+                "— not from your general training knowledge.\n\n"
+                "STRICT RULES:\n"
+                "1. Every item in core_principles MUST cite its exact source book "
+                "from the excerpts provided.\n"
+                "2. Do NOT use knowledge not present in the provided excerpts — "
+                'mark gaps as "(inferred — verify with source)".\n'
+                "3. All text fields must be under 130 characters each "
+                "(for token efficiency).\n"
+                "4. decision_rules must follow strict IF/WHEN → action format.\n"
+                "5. singapore_adaptations must be specific and practical, "
+                "not generic.\n"
+                "6. Return valid JSON ONLY — no markdown fences, no explanation "
+                "text outside the JSON."
+            )
+            user_prompt = (
+                f"GUIDE TOPIC: {title}\nAGENT USERS: {agents_str}\n"
+                f"WHAT THIS GUIDE MUST COVER:\n{must_cover}\n\n"
+                f"BOOK EXCERPTS ({len(chunks) + len(extra)} passages from "
+                f"{book_count} sources):\n---\n{excerpts}\n---\n\n"
+                "Synthesize ONLY from the excerpts above into this exact JSON "
+                "structure:\n"
+                "{\n"
+                '  "core_principles": [\n'
+                '    {"principle": "concise statement", "source": "exact book '
+                'title", "application": "how to apply"}\n'
+                "  ],\n"
+                '  "process_steps": [\n'
+                '    {"step": 1, "phase": "name", "objective": "goal", '
+                '"actions": ["action1"], "timing": "Week 1-2"}\n'
+                "  ],\n"
+                '  "decision_rules": ["If [condition]: [action]"],\n'
+                '  "singapore_adaptations": ["Specific SG adaptation"],\n'
+                '  "common_mistakes": ["Specific mistake"],\n'
+                '  "success_metrics": {"metric": "target value"}\n'
+                "}\n\n"
+                "REQUIREMENTS:\n"
+                "- 3-5 core_principles, each citing a source book\n"
+                "- 4-8 process_steps covering the end-to-end workflow\n"
+                "- 5-8 decision_rules as IF/WHEN → action statements\n"
+                "- 3-5 singapore_adaptations for Singapore B2B SME context\n"
+                "- 3-5 common_mistakes (concrete, not vague)\n"
+                "- 3-5 success_metrics with quantitative targets"
+            )
+
+            response = await openai.chat.completions.create(
+                model="gpt-4o",
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.1,
+                max_tokens=2000,
+            )
+            raw = response.choices[0].message.content or "{}"
+            synthesized = json.loads(raw)
+
+            # Validate that the synthesis produced meaningful content.
+            # If the new guide has fewer core items than the base, the
+            # Qdrant retrieval was incomplete — keep the original guide.
+            required_keys = (
+                "core_principles", "process_steps", "decision_rules",
+                "singapore_adaptations", "common_mistakes",
+            )
+            for key in required_keys:
+                if not isinstance(synthesized.get(key), list) or not synthesized[key]:
+                    logger.warning(
+                        "synthesize_guide_incremental_validation_failed",
+                        slug=slug,
+                        missing_key=key,
+                    )
+                    return False
+
+            base_principles = len(base_guide.get("core_principles", []))
+            new_principles = len(synthesized.get("core_principles", []))
+            if base_principles > 0 and new_principles < base_principles * 0.6:
+                logger.warning(
+                    "synthesize_guide_incremental_content_loss",
+                    slug=slug,
+                    base_principles=base_principles,
+                    new_principles=new_principles,
+                )
+                return False
+
+            from datetime import UTC  # noqa: PLC0415
+            from datetime import datetime as _dt
+
+            guide = {
+                **synthesized,
+                "slug": slug,
+                "title": title,
+                "search_queries": search_queries,
+                "agent_relevance": base_guide.get("agent_relevance", []),
+                "source_books": book_titles,
+                "source_chunk_count": len(chunks),
+                "extra_research_count": len(extra),
+                "synthesized_at": _dt.now(UTC).isoformat(),
+                "synthesis_type": "incremental",
+            }
+
+            live_path = _GUIDES_DIR / f"{slug}_live.json"
+            _GUIDES_DIR.mkdir(parents=True, exist_ok=True)
+            live_path.write_text(
+                json.dumps(guide, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            logger.info(
+                "guide_resynthesized",
+                slug=slug,
+                chunks=len(chunks),
+                extra=len(extra),
+            )
+            return True
+
+        except Exception:
+            logger.warning("synthesize_guide_incremental_failed", slug=slug, exc_info=True)
+            return False
 
     async def get_sg_reference(
         self,

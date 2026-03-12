@@ -19,6 +19,7 @@ Schedule:
     Every day 03:30:     Document Intelligence — extract business signals from processed documents
     Every 2 hours :45:   Research Embedder — embed public research cache rows → Qdrant
     Every Sunday 04:00:  Singapore Reference Scraper — PSG/PDPA/MAS/EnterpriseSG data
+    Every Saturday 03:00: Knowledge Guide Resynthesis — update guides with accumulated research
 
 All jobs run in the background. Failed jobs are logged but do NOT crash the app.
 APScheduler is embedded in-process (no external queue needed for MVP).
@@ -232,6 +233,20 @@ async def start_scheduler() -> None:
         replace_existing=True,
         max_instances=1,
         misfire_grace_time=3600,
+    )
+
+    # --- Job 16: Weekly Knowledge Guide Resynthesis (Saturday 03:00 SGT) ---
+    # Re-synthesizes domain guides that have accumulated 3+ new public research
+    # rows since the last synthesis.  Uses the in-process Qdrant client (no
+    # file-lock conflict) and GPT-4o.  Saves results as {slug}_live.json.
+    scheduler.add_job(
+        _run_guide_resynthesis,
+        trigger=CronTrigger(day_of_week="sat", hour=3, minute=0, timezone="Asia/Singapore"),
+        id="guide_resynthesis_weekly",
+        name="Knowledge Guide Resynthesis — update guides with accumulated research",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=7200,
     )
 
     scheduler.start()
@@ -724,3 +739,82 @@ async def _run_sg_reference_scraper() -> None:
                 logger.warning("sg_reference_scraper_commit_failed", exc_info=True)
     except Exception:
         logger.exception("sg_reference_scraper_failed")
+
+
+async def _run_guide_resynthesis() -> None:
+    """Re-synthesize domain guides that have accumulated new public research.
+
+    For each guide in ``_AGENT_GUIDE_MAP``, count recent public ResearchCache
+    rows that match the guide's relevance keywords.  If a guide has ≥3 new
+    rows (created in the last 7 days), re-synthesize it using Qdrant book
+    chunks + the new research texts.  Results are saved as ``{slug}_live.json``.
+    """
+    logger.info("scheduled_job_start", job="guide_resynthesis")
+    try:
+        from datetime import timedelta  # noqa: PLC0415
+
+        from sqlalchemy import select  # noqa: PLC0415
+
+        from packages.database.src.models import ResearchCache  # noqa: PLC0415
+        from packages.database.src.session import async_session_factory  # noqa: PLC0415
+        from packages.knowledge.src.knowledge_mcp import (  # noqa: PLC0415
+            _GUIDE_RELEVANCE_KEYWORDS,
+            get_knowledge_mcp,
+        )
+
+        cutoff = datetime.now(UTC) - timedelta(days=7)
+
+        async with async_session_factory() as db:
+            # Load all recent public research rows.
+            result = await db.execute(
+                select(ResearchCache)
+                .where(
+                    ResearchCache.is_public == True,  # noqa: E712
+                    ResearchCache.created_at >= cutoff,
+                )
+                .order_by(ResearchCache.created_at.desc())
+                .limit(500)
+            )
+            recent_rows = list(result.scalars().all())
+
+        if not recent_rows:
+            logger.info("guide_resynthesis_skipped", reason="no recent public research")
+            return
+
+        # Score each guide by keyword overlap with recent research content.
+        guide_research: dict[str, list[str]] = {}
+        for slug, keywords in _GUIDE_RELEVANCE_KEYWORDS.items():
+            matching_texts: list[str] = []
+            for row in recent_rows:
+                row_text = f"{row.query} {row.content[:500]}".lower()
+                hits = sum(1 for kw in keywords if kw in row_text)
+                if hits >= 2:
+                    matching_texts.append(row.content[:1000])
+            if len(matching_texts) >= 3:
+                guide_research[slug] = matching_texts
+
+        if not guide_research:
+            logger.info(
+                "guide_resynthesis_skipped",
+                reason="no guide has 3+ matching research rows",
+                total_rows=len(recent_rows),
+            )
+            return
+
+        kmcp = get_knowledge_mcp()
+        synthesized = 0
+        for slug, texts in guide_research.items():
+            ok = await kmcp.synthesize_guide_incremental(slug=slug, extra_texts=texts)
+            if ok:
+                synthesized += 1
+            logger.info(
+                "guide_resynthesis_result",
+                slug=slug,
+                matching_research=len(texts),
+                success=ok,
+            )
+
+        logger.info("guide_resynthesis_complete", guides_updated=synthesized)
+
+    except Exception:
+        logger.exception("guide_resynthesis_failed")
