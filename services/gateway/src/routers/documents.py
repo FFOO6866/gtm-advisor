@@ -311,15 +311,35 @@ async def scrape_url(req: ScrapeUrlRequest) -> ParsedCompanyProfile:
             detail="Could not resolve hostname. Please check the URL.",
         )
 
-    # 1. Fetch the page
+    # ── SSRF helper for redirect validation ──
+    def _check_ip_safe(host: str) -> None:
+        """Raise HTTPException if *host* resolves to a private/internal IP."""
+        try:
+            for _fam, _, _, _, _sa in socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM):
+                _ip = ipaddress.ip_address(_sa[0])
+                if _ip.is_private or _ip.is_loopback or _ip.is_link_local or _ip.is_reserved:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="URL redirected to a private address. Please provide a direct public URL.",
+                    )
+        except socket.gaierror:
+            pass  # Unresolvable redirect target — httpx will fail on its own
+
+    # 1. Fetch the page (follow redirects, but validate final destination)
     try:
         async with httpx.AsyncClient(
-            follow_redirects=False,
+            follow_redirects=True,
+            max_redirects=5,
             timeout=15.0,
             headers={"User-Agent": "Mozilla/5.0 (compatible; GTMAdvisor/1.0)"},
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
+
+        # SSRF: validate the final URL after redirects
+        final_host = urlparse(str(resp.url)).hostname
+        if final_host and final_host != hostname:
+            _check_ip_safe(final_host)
 
         # Guard: reject very large responses to prevent memory exhaustion
         MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB

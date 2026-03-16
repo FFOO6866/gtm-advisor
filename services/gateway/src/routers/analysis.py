@@ -35,6 +35,9 @@ from packages.core.src.agent_bus import (
 )
 from packages.core.src.errors import AgentError, MaxIterationsExceededError
 from packages.core.src.types import (
+    CampaignBrief,
+    CompetitorAnalysis,
+    CustomerPersona,
     GTMAnalysisResult,
     IndustryVertical,
     LeadProfile,
@@ -357,10 +360,18 @@ async def get_analysis_result(
         executive_summary=analysis.executive_summary or "",
         key_recommendations=analysis.key_recommendations or [],
         market_insights=[MarketInsight(**m) for m in (analysis.market_insights or [])],
-        competitor_analysis=analysis.competitor_analysis or [],
-        customer_personas=analysis.customer_personas or [],
+        competitor_analysis=[
+            CompetitorAnalysis(**c) if isinstance(c, dict) else c
+            for c in (analysis.competitor_analysis or [])
+        ],
+        customer_personas=[
+            CustomerPersona(**p) if isinstance(p, dict) else p
+            for p in (analysis.customer_personas or [])
+        ],
         leads=[LeadProfile(**lead) for lead in (analysis.leads or [])],
-        campaign_brief=analysis.campaign_brief,
+        campaign_brief=CampaignBrief(**analysis.campaign_brief) if isinstance(analysis.campaign_brief, dict) else analysis.campaign_brief,
+        outreach_sequences=analysis.outreach_sequences or [],
+        market_sizing=getattr(analysis, "market_sizing", None),
         agents_used=analysis.agents_used or [],
         total_confidence=analysis.total_confidence or 0.0,
         processing_time_seconds=analysis.processing_time_seconds or 0.0,
@@ -728,7 +739,7 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 _competitors = context.get("known_competitors", [])[:5]
                 _ca = CompetitorAnalystAgent(agent_bus=agent_bus, analysis_id=analysis_id)
                 try:
-                    async with asyncio.timeout(90):
+                    async with asyncio.timeout(180):
                         return await _ca.run(
                             f"Analyze competitors for {request.company_name} in {request.industry.value}: {', '.join(_competitors)}",
                             context=context,
@@ -798,20 +809,30 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
             if request.include_market_research:
                 if market_result is None:
                     result.market_insights = []
-                elif hasattr(market_result, "insights"):
-                    result.market_insights = market_result.insights
                 else:
-                    key_findings = []
-                    implications = []
-                    recommendations = []
+                    # Build structured MarketInsight entries from the full agent output.
+                    # The agent returns MarketIntelligenceOutput with rich fields;
+                    # we must convert these into MarketInsight objects for the response model.
+                    insights: list[MarketInsight] = []
+
+                    # Always include any structured insights the agent produced
+                    if hasattr(market_result, "insights"):
+                        insights.extend(market_result.insights)
+
+                    # Convert the full market analysis into a primary insight entry
+                    key_findings: list[str] = []
+                    implications: list[str] = []
+                    recommendations: list[str] = []
 
                     if hasattr(market_result, "key_trends"):
-                        for trend in market_result.key_trends[:3]:
-                            key_findings.append(f"{trend.name}: {trend.description}")
+                        for trend in market_result.key_trends[:5]:
+                            evidence_str = f" (evidence: {', '.join(trend.evidence[:2])})" if trend.evidence else ""
+                            key_findings.append(f"{trend.name}: {trend.description}{evidence_str}")
 
                     if hasattr(market_result, "opportunities"):
                         for opp in market_result.opportunities[:3]:
-                            key_findings.append(f"Opportunity: {opp.title}")
+                            size_info = f" [{opp.market_size_estimate}]" if opp.market_size_estimate else ""
+                            key_findings.append(f"Opportunity: {opp.title}{size_info} — {opp.description}")
                             recommendations.append(opp.recommended_action)
 
                     if hasattr(market_result, "implications_for_gtm"):
@@ -821,24 +842,47 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                         for threat in market_result.threats[:3]:
                             key_findings.append(f"Threat: {threat}")
 
-                    result.market_insights = [
-                        MarketInsight(
-                            title=f"{request.industry.value.title()} Market Analysis",
-                            summary=market_result.market_summary
-                            if hasattr(market_result, "market_summary")
-                            else "Market analysis completed.",
-                            category="trend",
-                            key_findings=key_findings or ["Market data gathered successfully"],
+                    # Add economic indicators as findings
+                    if hasattr(market_result, "economic_indicators") and market_result.economic_indicators:
+                        for ind in market_result.economic_indicators[:3]:
+                            indicator = ind.get("indicator", "")
+                            value = ind.get("value", "")
+                            change = ind.get("change")
+                            direction = ""
+                            if change is not None:
+                                direction = f" ({'▲' if change >= 0 else '▼'}{abs(change):.2f} vs prior)"
+                            key_findings.append(f"Economic: {indicator} = {value}{direction}")
+
+                    if key_findings or implications:
+                        primary_insight = MarketInsight(
+                            title=f"{request.industry.value.title()} Market Analysis — {request.company_name}",
+                            summary=getattr(market_result, "market_summary", "Market analysis completed."),
+                            category="market_analysis",
+                            key_findings=key_findings,
                             implications=implications,
                             recommendations=recommendations,
-                            sources=market_result.sources
-                            if hasattr(market_result, "sources")
-                            else [],
-                            confidence=market_result.confidence
-                            if hasattr(market_result, "confidence")
-                            else 0.7,
+                            sources=getattr(market_result, "sources", []),
+                            confidence=getattr(market_result, "confidence", 0.5),
+                            relevant_to_company=True,
                         )
-                    ]
+                        insights.insert(0, primary_insight)
+
+                    result.market_insights = insights
+
+                    # Store the full raw market output for workspace pages that need it
+                    if hasattr(market_result, "model_dump"):
+                        result.market_sizing = {
+                            "market_summary": getattr(market_result, "market_summary", ""),
+                            "market_size": getattr(market_result, "market_size", None),
+                            "growth_outlook": getattr(market_result, "growth_outlook", None),
+                            "vertical_landscape": getattr(market_result, "vertical_landscape", None),
+                            "vertical_benchmarks": getattr(market_result, "vertical_benchmarks", None),
+                            "recent_news": getattr(market_result, "recent_news", []),
+                            "economic_indicators": getattr(market_result, "economic_indicators", []),
+                            "data_sources_used": getattr(market_result, "data_sources_used", []),
+                            "is_live_data": getattr(market_result, "is_live_data", False),
+                            "confidence": getattr(market_result, "confidence", 0.0),
+                        }
 
                 completed_agents.append("market-intelligence")
                 step += 1
@@ -1039,6 +1083,24 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     ]
                     result.success_metrics = campaign_result.success_metrics or []
                     result.compliance_flags = getattr(campaign_result, "compliance_flags", []) or []
+
+                    # Enrich campaign_brief.email_templates with actual content from content_pieces
+                    _content_pieces = getattr(campaign_result, "content_pieces", []) or []
+                    if _content_pieces and result.campaign_brief:
+                        _real_emails = [
+                            f"Subject: {cp.title}\n\n{cp.content}"
+                            for cp in _content_pieces
+                            if cp.type == "email" and cp.content and len(cp.content) > 50
+                        ]
+                        if _real_emails:
+                            result.campaign_brief.email_templates = _real_emails
+                        _real_linkedin = [
+                            cp.content
+                            for cp in _content_pieces
+                            if cp.type in ("linkedin", "linkedin_post") and cp.content
+                        ]
+                        if _real_linkedin:
+                            result.campaign_brief.linkedin_posts = _real_linkedin
 
                 completed_agents.append(agent_id)
                 step += 1
@@ -1307,6 +1369,17 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 if hasattr(result.campaign_brief, "model_dump")
                 else result.campaign_brief
             )
+            analysis.outreach_sequences = (
+                [seq.model_dump(mode="json") if hasattr(seq, "model_dump") else seq for seq in result.outreach_sequences]
+                if result.outreach_sequences else []
+            )
+            # content_pieces from CampaignPlanOutput
+            if campaign_result and hasattr(campaign_result, "content_pieces"):
+                analysis.content_pieces = [
+                    cp.model_dump(mode="json") if hasattr(cp, "model_dump") else cp
+                    for cp in (campaign_result.content_pieces or [])
+                ]
+            analysis.market_sizing = result.market_sizing
             analysis.total_confidence = result.total_confidence
             analysis.processing_time_seconds = result.processing_time_seconds
             analysis.agents_used = result.agents_used

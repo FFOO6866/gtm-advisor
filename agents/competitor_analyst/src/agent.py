@@ -418,13 +418,9 @@ Focus on Singapore/APAC competitors when relevant."""
             self._logger.debug("kb_phase0_failed", error=str(e))
 
         # --- Step 1: If no named competitors, discover via Perplexity using service category ---
-        if not known:
+        if not known and getattr(self._perplexity, "is_configured", False):
             industry = plan.get("industry", "technology")
             # Use the LLM-derived service category (not raw marketing copy, not company name).
-            # service_category = "Marketing strategy and GTM execution services for brands"
-            # → finds marketing agencies, GTM consultancies, growth firms (correct!)
-            # raw product_context = "AI-native multi-agent platform for strategic empowerment"
-            # → finds AWS, Google Cloud, OpenAI (wrong!)
             service_category = plan.get("service_category") or industry
             discovery_topic = (
                 f"top Singapore companies that provide {service_category}. "
@@ -498,6 +494,40 @@ Focus on Singapore/APAC competitors when relevant."""
             except Exception as _e:
                 self._logger.debug("acra_discovery_failed", error=str(_e))
 
+        # --- Step 1b2: LLM fallback — discover competitors when Perplexity is unavailable ---
+        if not known:
+            _svc = plan.get("service_category") or plan.get("industry", "technology")
+            _company = plan.get("company_name", "")
+            try:
+                _disc_messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a market analyst. Return a JSON array of 3-5 company names "
+                            "that are direct competitors or close alternatives to the given company "
+                            "in Singapore and APAC. Only real companies — no invented names."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Company: {_company}\n"
+                            f"Service category: {_svc}\n"
+                            f"Industry: {plan.get('industry', '')}\n"
+                            f"Description: {plan.get('product_context', '')}\n\n"
+                            "Return only a JSON array of company name strings."
+                        ),
+                    },
+                ]
+                _disc_raw = await self._complete(_disc_messages, temperature=0, max_tokens=200)
+                _disc_cleaned = re.sub(r"```[a-zA-Z]*\n?", "", _disc_raw).strip() if isinstance(_disc_raw, str) else ""
+                _disc_names = json.loads(_disc_cleaned) if _disc_cleaned else []
+                if isinstance(_disc_names, list):
+                    known = [str(n) for n in _disc_names[:5] if n]
+                    self._logger.info("llm_competitor_discovery", count=len(known), names=known)
+            except Exception as _disc_err:
+                self._logger.debug("llm_competitor_discovery_failed", error=str(_disc_err))
+
         # --- Step 1c: Publish COMPETITOR_FOUND for newly-discovered competitors ---
         # "New" = not in the original plan input list; discovered via Perplexity or KB.
         original_known: set[str] = {c.lower() for c in plan.get("known_competitors", [])}
@@ -529,12 +559,20 @@ Focus on Singapore/APAC competitors when relevant."""
 
         # --- Steps 2 + 3: MCP and Perplexity run in parallel (both only need `known`) ---
         mcp_tasks = [self._fetch_competitor_mcp(c) for c in known]
-        perplexity_tasks = [self._perplexity.research_company_with_citations(c) for c in known]
+        _perplexity_configured = getattr(self._perplexity, "is_configured", False)
+        if _perplexity_configured:
+            perplexity_tasks = [self._perplexity.research_company_with_citations(c) for c in known]
+        else:
+            perplexity_tasks = []
 
-        (mcp_results, perplexity_results) = await asyncio.gather(
-            asyncio.gather(*mcp_tasks, return_exceptions=True),
-            asyncio.gather(*perplexity_tasks, return_exceptions=True),
-        )
+        if perplexity_tasks:
+            (mcp_results, perplexity_results) = await asyncio.gather(
+                asyncio.gather(*mcp_tasks, return_exceptions=True),
+                asyncio.gather(*perplexity_tasks, return_exceptions=True),
+            )
+        else:
+            mcp_results = await asyncio.gather(*mcp_tasks, return_exceptions=True)
+            perplexity_results = []
 
         for res in mcp_results:
             if isinstance(res, Exception):

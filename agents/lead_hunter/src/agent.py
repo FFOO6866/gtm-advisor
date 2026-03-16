@@ -627,9 +627,12 @@ Focus on Singapore/APAC market context."""
                             p.fit_reasons.append(f"Segment: {segment['name']}")
 
         # Convert to LeadProfile
+        # Lower threshold when all prospects came from LLM fallback (no tool enrichment)
+        tool_enriched = any(p.scoring_method == "algorithm" for p in prospects)
+        _qualification_threshold = 0.5 if tool_enriched else 0.3
         qualified_leads = []
         for p in prospects:
-            if p.fit_score >= 0.5:  # Qualification threshold
+            if p.fit_score >= _qualification_threshold:
                 lead = LeadProfile(
                     company_name=p.company_name,
                     industry=p.industry,

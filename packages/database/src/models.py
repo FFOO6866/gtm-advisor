@@ -218,6 +218,9 @@ class Analysis(Base):
     customer_personas = Column(JSON, default=list)
     leads = Column(JSON, default=list)
     campaign_brief = Column(JSON)
+    outreach_sequences = Column(JSON, default=list)
+    content_pieces = Column(JSON, default=list)
+    market_sizing = Column(JSON)
 
     # Metrics
     total_confidence = Column(Float, default=0.0)
