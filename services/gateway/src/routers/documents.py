@@ -210,7 +210,124 @@ async def _llm_extract(text: str) -> dict[str, Any]:
     return json.loads(raw)
 
 
-# ─── Endpoint ──────────────────────────────────────────────────────────────
+# ─── Endpoints ─────────────────────────────────────────────────────────────
+
+class ScrapeUrlRequest(BaseModel):
+    url: str
+
+
+@router.post("/scrape-url", response_model=ParsedCompanyProfile)
+async def scrape_url(req: ScrapeUrlRequest) -> ParsedCompanyProfile:
+    """Fetch a company website and extract structured profile fields.
+
+    Uses httpx to fetch the page HTML, extracts visible text via
+    BeautifulSoup, then runs the same GPT-4o-mini extraction pipeline
+    as the document parser.
+    """
+    import re
+
+    import httpx
+    from bs4 import BeautifulSoup
+
+    url = req.url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+
+    # 1. Fetch the page
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=15.0,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; GTMAdvisor/1.0)"},
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not fetch URL (HTTP {exc.response.status_code}). Please check the URL and try again.",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not reach {url} — {exc}. Please check the URL or upload a document instead.",
+        ) from exc
+
+    # 2. Extract visible text from HTML
+    html = resp.text
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Remove script, style, nav, footer, header tags
+    for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "svg", "iframe"]):
+        tag.decompose()
+
+    # Get text content
+    text = soup.get_text(separator="\n", strip=True)
+    # Collapse multiple blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # Also extract meta description and OG tags for richer context
+    meta_parts: list[str] = []
+    meta_desc = soup.find("meta", attrs={"name": "description"})
+    if meta_desc and meta_desc.get("content"):
+        meta_parts.append(f"Meta description: {meta_desc['content']}")
+    og_desc = soup.find("meta", attrs={"property": "og:description"})
+    if og_desc and og_desc.get("content"):
+        meta_parts.append(f"OG description: {og_desc['content']}")
+    og_title = soup.find("meta", attrs={"property": "og:title"})
+    if og_title and og_title.get("content"):
+        meta_parts.append(f"OG title: {og_title['content']}")
+    title_tag = soup.find("title")
+    if title_tag and title_tag.string:
+        meta_parts.append(f"Page title: {title_tag.string.strip()}")
+
+    enriched_text = ""
+    if meta_parts:
+        enriched_text = "\n".join(meta_parts) + "\n\n"
+    enriched_text += text
+
+    stripped = enriched_text.strip()
+    if not stripped or len(stripped) < 50:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not extract meaningful text from this URL. The page may require JavaScript to render. Please upload a document instead.",
+        )
+
+    logger.info("url_scrape_requested", url=url, chars=len(stripped))
+
+    # 3. LLM extraction (reuse same pipeline as document parser)
+    try:
+        extracted = await _llm_extract(stripped)
+    except Exception as exc:
+        logger.warning("url_llm_extraction_failed", url=url, error=str(exc))
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI extraction failed ({exc}). Please fill in the details manually.",
+        ) from exc
+
+    # 4. Sanitise industry
+    industry = extracted.get("industry")
+    if industry and industry not in VALID_INDUSTRIES:
+        industry = "other"
+
+    warning = None
+    if len(stripped) > MAX_TEXT_CHARS:
+        warning = f"Page is large ({len(stripped):,} characters). Only the first {MAX_TEXT_CHARS:,} characters were analysed."
+
+    return ParsedCompanyProfile(
+        company_name=extracted.get("company_name") or None,
+        description=extracted.get("description") or None,
+        industry=industry,
+        value_proposition=extracted.get("value_proposition") or None,
+        goals=_to_str_list(extracted.get("goals")),
+        challenges=_to_str_list(extracted.get("challenges")),
+        competitors=_to_str_list(extracted.get("competitors")),
+        target_markets=_to_str_list(extracted.get("target_markets")),
+        extracted_chars=len(stripped),
+        extracted_text=stripped[:MAX_TEXT_CHARS],
+        warning=warning,
+    )
+
 
 @router.post("/parse", response_model=ParsedCompanyProfile)
 async def parse_document(file: UploadFile = File(...)) -> ParsedCompanyProfile:

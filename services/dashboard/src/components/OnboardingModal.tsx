@@ -14,7 +14,7 @@ import {
   AlertTriangle, Globe, Upload, FileText, X, CheckCircle,
 } from 'lucide-react';
 import { CompanyInfo, AGENTS, INDUSTRIES } from '../types';
-import { uploadFile } from '../api/client';
+import { uploadFile, apiClient } from '../api/client';
 
 interface ParsedProfile {
   company_name: string | null;
@@ -56,6 +56,30 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadPhaseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const [scraping, setScraping] = useState(false);
+  const [scrapePhase, setScrapePhase] = useState(0);
+  const [scrapeError, setScrapeError] = useState<string | null>(null);
+  const scrapePhaseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const SCRAPE_PHASES = [
+    'Fetching website…',
+    'Reading page content…',
+    'AI extracting company info…',
+    'Structuring fields…',
+  ];
+
+  useEffect(() => {
+    if (scraping) {
+      setScrapePhase(0);
+      scrapePhaseTimerRef.current = setInterval(() => {
+        setScrapePhase(p => Math.min(p + 1, SCRAPE_PHASES.length - 1));
+      }, 1400);
+    } else {
+      if (scrapePhaseTimerRef.current) clearInterval(scrapePhaseTimerRef.current);
+    }
+    return () => { if (scrapePhaseTimerRef.current) clearInterval(scrapePhaseTimerRef.current); };
+  }, [scraping]);
+
   const buildDocumentContext = () =>
     uploadedDocs.map(d => `=== ${d.name} ===\n${d.text}`).join('\n\n') || undefined;
 
@@ -89,14 +113,14 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
       competitors: formData.competitors || [],
       targetMarkets: formData.targetMarkets || ['Singapore'],
       valueProposition: formData.valueProposition,
-      documentContext: inputMode === 'document' ? buildDocumentContext() : undefined,
+      documentContext: buildDocumentContext() || undefined,
     });
   };
 
   const canProceed = () => {
     if (step === 0) {
       if (!formData.name || !formData.industry) return false;
-      if (uploading) return false;
+      if (uploading || scraping) return false;
       if (inputMode === 'document') return uploadedDocs.length > 0;
       if (inputMode === 'website') return !!formData.website?.trim();
       return true;
@@ -160,6 +184,43 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  // ── URL scrape handler ──────────────────────────────────────────────
+  const handleUrlScrape = async () => {
+    const url = formData.website?.trim();
+    if (!url) return;
+
+    setScrapeError(null);
+    setScraping(true);
+
+    try {
+      const parsed = await apiClient.post<ParsedProfile>('/documents/scrape-url', { url });
+
+      // Auto-fill form fields (same logic as document upload)
+      const filled = new Set<string>();
+      const updates: Partial<CompanyInfo> = {};
+      if (parsed.company_name) { updates.name = parsed.company_name; filled.add('name'); }
+      if (parsed.industry)     { updates.industry = parsed.industry;  filled.add('industry'); }
+      if (parsed.description)  { updates.description = parsed.description; filled.add('description'); }
+      if (parsed.value_proposition) { updates.valueProposition = parsed.value_proposition; filled.add('valueProposition'); }
+      if (parsed.goals?.length)      { updates.goals = parsed.goals; filled.add('goals'); }
+      if (parsed.challenges?.length) { updates.challenges = parsed.challenges; filled.add('challenges'); }
+      if (parsed.competitors?.length){ updates.competitors = parsed.competitors; filled.add('competitors'); }
+      if (parsed.target_markets?.length) { updates.targetMarkets = parsed.target_markets; filled.add('targetMarkets'); }
+      setFormData(prev => ({ ...prev, ...updates }));
+      setExtractedFields(filled);
+
+      // Store scraped text as document context for the analysis
+      if (parsed.extracted_text) {
+        setUploadedDocs([{ name: url, text: parsed.extracted_text, chars: parsed.extracted_text.length }]);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not scrape website. Please fill in the details manually.';
+      setScrapeError(msg);
+    } finally {
+      setScraping(false);
     }
   };
 
@@ -325,7 +386,14 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
                       <span className="text-xs text-white/40 text-center">We'll scrape & auto-enrich</span>
                     </button>
                     <button
-                      onClick={() => setInputMode('document')}
+                      onClick={() => {
+                        const wasDocument = inputMode === 'document';
+                        setInputMode('document');
+                        // If switching TO document mode, auto-open file picker
+                        if (!wasDocument && uploadedDocs.length === 0) {
+                          setTimeout(() => fileInputRef.current?.click(), 100);
+                        }
+                      }}
                       className={`flex flex-col items-center gap-2 p-4 rounded-xl border transition-all ${
                         inputMode === 'document'
                           ? 'border-purple-500/50 bg-purple-500/10 text-white'
@@ -349,26 +417,91 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
                     >
-                      <input
-                        type="url"
-                        value={formData.website}
-                        onChange={e => setFormData({ ...formData, website: e.target.value })}
-                        placeholder="https://yourcompany.com"
-                        className="input-glass"
-                      />
-                      {formData.website?.trim() ? (
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          value={formData.website}
+                          onChange={e => {
+                            setFormData({ ...formData, website: e.target.value });
+                            setScrapeError(null);
+                          }}
+                          placeholder="https://yourcompany.com"
+                          className="input-glass flex-1"
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && formData.website?.trim() && !scraping) {
+                              e.preventDefault();
+                              handleUrlScrape();
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={handleUrlScrape}
+                          disabled={!formData.website?.trim() || scraping}
+                          className="btn-primary px-4 text-sm whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {scraping ? (
+                            <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                          ) : (
+                            'Scrape'
+                          )}
+                        </button>
+                      </div>
+
+                      {scraping && (
+                        <div className="mt-2 p-3 rounded-xl bg-white/5 border border-white/10">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                            <motion.span
+                              key={scrapePhase}
+                              initial={{ opacity: 0, y: 4 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              className="text-sm text-white/70"
+                            >
+                              {SCRAPE_PHASES[scrapePhase]}
+                            </motion.span>
+                          </div>
+                          <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+                            <motion.div
+                              className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-full"
+                              animate={{ width: `${((scrapePhase + 1) / SCRAPE_PHASES.length) * 85}%` }}
+                              transition={{ duration: 0.6, ease: 'easeOut' }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {!scraping && extractedFields.size > 0 && uploadedDocs.length > 0 && inputMode === 'website' && (
                         <motion.p
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           className="flex items-center gap-1.5 text-xs text-green-400 mt-1.5"
                         >
                           <CheckCircle className="w-3.5 h-3.5" />
-                          URL saved — the Company Enricher agent will scrape it during analysis
+                          {extractedFields.size} field{extractedFields.size !== 1 ? 's' : ''} extracted from website
                         </motion.p>
-                      ) : (
-                        <p className="text-xs text-white/35 mt-1">
-                          Enter your URL to enable Continue
+                      )}
+
+                      {!scraping && !scrapeError && !extractedFields.size && formData.website?.trim() && (
+                        <p className="text-xs text-white/45 mt-1.5">
+                          Press Enter or click Scrape to extract company information
                         </p>
+                      )}
+
+                      {!scraping && !scrapeError && !formData.website?.trim() && (
+                        <p className="text-xs text-white/35 mt-1">
+                          Enter your company URL
+                        </p>
+                      )}
+
+                      {scrapeError && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex items-start gap-2.5 p-3 rounded-xl bg-red-500/10 border border-red-500/25 mt-2"
+                        >
+                          <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-red-300 leading-relaxed">{scrapeError}</p>
+                        </motion.div>
                       )}
                     </motion.div>
                   )}
