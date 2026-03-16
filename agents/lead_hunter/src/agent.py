@@ -1429,10 +1429,12 @@ Only include archetypes where the product genuinely solves a real problem. Be sp
 
         try:
             async with asyncio.timeout(30):
-                market_text = await self._perplexity.research_market(
+                # Use research_market_with_citations for richer responses
+                pplx_result = await self._perplexity.research_market_with_citations(
                     topic=topic,
                     region="Singapore",
                 )
+                market_text = pplx_result.text if pplx_result else ""
         except Exception as e:
             self._logger.debug("perplexity_research_failed", topic=topic, error=str(e))
             return []
