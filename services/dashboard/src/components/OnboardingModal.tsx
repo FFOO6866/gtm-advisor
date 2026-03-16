@@ -62,6 +62,16 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
   const scrapePhaseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrapeAbortRef = useRef<AbortController | null>(null);
 
+  // Auto-advance to Step 1 after a successful URL scrape
+  const [pendingAdvance, setPendingAdvance] = useState(false);
+
+  useEffect(() => {
+    if (pendingAdvance && !scraping && !scrapeError && extractedFields.size > 0) {
+      setPendingAdvance(false);
+      setStep(1);
+    }
+  }, [pendingAdvance, scraping, scrapeError, extractedFields]);
+
   const SCRAPE_PHASES = [
     'Fetching website…',
     'Reading page content…',
@@ -777,17 +787,31 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
               )}
               {step < 1 ? (
                 <button
-                  onClick={() => setStep(1)}
-                  disabled={!canProceed()}
+                  onClick={() => {
+                    if (inputMode === 'website' && formData.website?.trim() && uploadedDocs.length === 0 && !scraping) {
+                      // Auto-scrape first, then advance
+                      setPendingAdvance(true);
+                      handleUrlScrape();
+                    } else {
+                      setStep(1);
+                    }
+                  }}
+                  disabled={!canProceed() || scraping}
                   className="btn-primary flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {uploading ? (
+                  {uploading || scraping ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                      Processing…
+                      {scraping ? 'Scraping…' : 'Processing…'}
                     </>
                   ) : (
-                    <>Continue <ArrowRight className="w-4 h-4" /></>
+                    <>
+                      {inputMode === 'website' && formData.website?.trim() && uploadedDocs.length === 0
+                        ? 'Scrape & Continue'
+                        : 'Continue'
+                      }
+                      <ArrowRight className="w-4 h-4" />
+                    </>
                   )}
                 </button>
               ) : (

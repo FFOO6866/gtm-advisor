@@ -92,6 +92,58 @@ CRITICAL RULES:
 - Return only the JSON object — no preamble, no markdown, no explanation.
 """
 
+WEB_SYSTEM_PROMPT = """\
+You are an independent business analyst preparing a company profile brief from a scraped company
+website. The text below was extracted from the company's public website — it contains marketing
+copy, navigation elements, testimonials, pricing pages, CTAs, and other web-specific content.
+
+Your task: cut through the marketing language and extract FACTUAL information about the company.
+Ignore testimonials, client logos, pricing CTAs, cookie notices, and navigation text.
+
+Return ONLY a valid JSON object with exactly these keys:
+
+{
+  "company_name": <string or null — the company's trading name, not a tagline>,
+
+  "description": <string or null — 2-4 sentences covering: (1) what the company does,
+    (2) who its customers are, (3) how it delivers its service or product.
+    Use neutral, factual language — strip marketing superlatives ("revolutionary",
+    "world-class", "transform your business"). Do not include client testimonials or
+    outcome claims. Focus on the actual product/service.
+    Example: "Acme Corp provides cloud-based inventory management software for
+    mid-market retailers in Southeast Asia. The platform integrates with POS systems
+    and e-commerce platforms to provide real-time stock visibility.">,
+
+  "industry": <one of: "fintech" | "saas" | "ecommerce" | "healthcare" | "logistics"
+    | "professional_services" | "education" | "other" — or null if unclear>,
+
+  "value_proposition": <string or null — one sentence describing the core benefit.
+    Write as an analyst observation, not marketing copy.
+    Example: "Acme Corp reduces stockout rates for retailers by providing real-time
+    inventory synchronisation across physical and online channels.">,
+
+  "goals": <string array, max 5 — business objectives if stated (e.g. "expanding to
+    Indonesia", "launching enterprise tier"). Look in About/Mission/Vision sections.
+    Empty array if none explicitly stated.>,
+
+  "challenges": <string array, max 5 — obstacles the company faces, if mentioned.
+    Often found in blog posts or press releases on the site. Empty array if none.>,
+
+  "competitors": <string array, max 5 — competing companies mentioned on the site
+    (comparison pages, "alternatives to" content). Empty array if none named.>,
+
+  "target_markets": <string array — geographic markets served, from contact addresses,
+    office locations, or explicit "we serve" statements. Empty array if not specified.>
+}
+
+CRITICAL RULES:
+- Never use first-person ("we", "our") or second-person ("you", "your") in any output.
+- Only include facts derivable from the page content — do not infer or invent.
+- Ignore: testimonials, case study metrics, pricing details, cookie/privacy notices.
+- If a field cannot be determined, return null (strings) or [] (arrays).
+- Return only the JSON object — no preamble, no markdown, no explanation.
+"""
+
 
 # ─── Response model ────────────────────────────────────────────────────────
 
@@ -191,7 +243,7 @@ def _to_str_list(value: Any) -> list[str]:
 
 # ─── LLM extraction ────────────────────────────────────────────────────────
 
-async def _llm_extract(text: str) -> dict[str, Any]:
+async def _llm_extract(text: str, system_prompt: str = SYSTEM_PROMPT) -> dict[str, Any]:
     """Call GPT-4o-mini with structured output to extract company fields."""
     from openai import AsyncOpenAI
 
@@ -199,7 +251,7 @@ async def _llm_extract(text: str) -> dict[str, Any]:
     response = await client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Document:\n\n{text[:MAX_TEXT_CHARS]}"},
         ],
         response_format={"type": "json_object"},
@@ -341,7 +393,7 @@ async def scrape_url(req: ScrapeUrlRequest) -> ParsedCompanyProfile:
 
     # 3. LLM extraction (reuse same pipeline as document parser)
     try:
-        extracted = await _llm_extract(stripped)
+        extracted = await _llm_extract(stripped, system_prompt=WEB_SYSTEM_PROMPT)
     except Exception as exc:
         logger.warning("url_llm_extraction_failed", url=url, error=str(exc))
         raise HTTPException(
