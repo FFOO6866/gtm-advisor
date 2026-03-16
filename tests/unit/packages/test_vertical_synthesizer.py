@@ -19,7 +19,6 @@ from packages.intelligence.src.vertical_synthesizer import (
     _normalise_company_name,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -590,3 +589,143 @@ class TestBuildRegulatoryEnvironment:
         result = await synthesizer._build_regulatory_environment(vertical)
 
         assert result[0]["summary"] is None
+
+
+# ---------------------------------------------------------------------------
+# _build_financial_pulse — key name contract
+# ---------------------------------------------------------------------------
+
+
+def _make_vertical_benchmark(
+    period_label: str = "2024",
+    sga_p50: float | None = 0.32,
+    rnd_p50: float | None = 0.18,
+    gross_margin_p50: float | None = 0.65,
+    operating_margin_p50: float | None = 0.20,
+    sga_p75: float | None = 0.45,
+    rnd_p75: float | None = 0.28,
+    sga_n: int = 12,
+    rnd_n: int = 10,
+) -> MagicMock:
+    """Minimal VerticalBenchmark stand-in for _build_financial_pulse tests."""
+    bm = MagicMock()
+    bm.period_label = period_label
+    bm.sga_to_revenue = {
+        "p50": sga_p50,
+        "p75": sga_p75,
+        "n": sga_n,
+    }
+    bm.rnd_to_revenue = {
+        "p50": rnd_p50,
+        "p75": rnd_p75,
+        "n": rnd_n,
+    }
+    bm.gross_margin = {
+        "p50": gross_margin_p50,
+    }
+    # operating_margin is stored as operating_margin_dist attribute on the model
+    bm.operating_margin_dist = {
+        "p50": operating_margin_p50,
+    }
+    return bm
+
+
+class TestBuildFinancialPulse:
+    """Verify that _build_financial_pulse returns the correct key names."""
+
+    def _make_synthesizer(self, session: AsyncMock) -> VerticalIntelligenceSynthesizer:
+        return VerticalIntelligenceSynthesizer(session=session)
+
+    def _configure_session_for_pulse(
+        self, session: AsyncMock, benchmarks: list
+    ) -> None:
+        """Configure session.execute() to return VerticalBenchmark scalars."""
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = benchmarks
+        session.execute = AsyncMock(return_value=result)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_sga_median_not_sga_to_revenue_median(self) -> None:
+        """The dict key must be 'sga_median', NOT 'sga_to_revenue_median'."""
+        session = _make_mock_session()
+        vertical = _make_vertical()
+        bm = _make_vertical_benchmark(sga_p50=0.32)
+        self._configure_session_for_pulse(session, [bm])
+
+        synthesizer = self._make_synthesizer(session)
+        pulse = await synthesizer._build_financial_pulse(vertical)
+
+        assert "sga_median" in pulse
+        assert "sga_to_revenue_median" not in pulse
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_rnd_median_not_rnd_to_revenue_median(self) -> None:
+        """The dict key must be 'rnd_median', NOT 'rnd_to_revenue_median'."""
+        session = _make_mock_session()
+        vertical = _make_vertical()
+        bm = _make_vertical_benchmark(rnd_p50=0.18)
+        self._configure_session_for_pulse(session, [bm])
+
+        synthesizer = self._make_synthesizer(session)
+        pulse = await synthesizer._build_financial_pulse(vertical)
+
+        assert "rnd_median" in pulse
+        assert "rnd_to_revenue_median" not in pulse
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_gross_margin_median_and_operating_margin_median(self) -> None:
+        """Both 'gross_margin_median' and 'operating_margin_median' must be present."""
+        session = _make_mock_session()
+        vertical = _make_vertical()
+        bm = _make_vertical_benchmark(gross_margin_p50=0.65, operating_margin_p50=0.20)
+        self._configure_session_for_pulse(session, [bm])
+
+        synthesizer = self._make_synthesizer(session)
+        pulse = await synthesizer._build_financial_pulse(vertical)
+
+        assert "gross_margin_median" in pulse
+        assert "operating_margin_median" in pulse
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_sga_median_value_equals_p50(self) -> None:
+        """'sga_median' must carry the p50 value from the benchmark distribution."""
+        session = _make_mock_session()
+        vertical = _make_vertical()
+        bm = _make_vertical_benchmark(sga_p50=0.37)
+        self._configure_session_for_pulse(session, [bm])
+
+        synthesizer = self._make_synthesizer(session)
+        pulse = await synthesizer._build_financial_pulse(vertical)
+
+        assert pulse["sga_median"] == pytest.approx(0.37)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_rnd_median_value_equals_p50(self) -> None:
+        """'rnd_median' must carry the p50 value from the benchmark distribution."""
+        session = _make_mock_session()
+        vertical = _make_vertical()
+        bm = _make_vertical_benchmark(rnd_p50=0.21)
+        self._configure_session_for_pulse(session, [bm])
+
+        synthesizer = self._make_synthesizer(session)
+        pulse = await synthesizer._build_financial_pulse(vertical)
+
+        assert pulse["rnd_median"] == pytest.approx(0.21)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_empty_benchmarks_returns_empty_dict(self) -> None:
+        """When no benchmarks exist, _build_financial_pulse must return {}."""
+        session = _make_mock_session()
+        vertical = _make_vertical()
+        self._configure_session_for_pulse(session, [])
+
+        synthesizer = self._make_synthesizer(session)
+        pulse = await synthesizer._build_financial_pulse(vertical)
+
+        assert pulse == {}

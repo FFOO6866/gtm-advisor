@@ -970,6 +970,8 @@ Focus on Singapore/APAC market context."""
             # KB financial benchmark lookup — queries the Market Intel DB for this
             # company and derives financial health signals from percentile ranks.
             # Runs after EODHD so KB can fill gaps and add richer context.
+            # Step 2b trajectory analysis reuses the same session to avoid
+            # opening a second concurrent connection per prospect.
             _benchmark_result: dict = {}
             try:
                 async with async_session_factory() as _db:
@@ -978,93 +980,93 @@ Focus on Singapore/APAC market context."""
                         name=company_data.get("name", ""),
                         vertical_slug=getattr(self, "_current_vertical_slug", None),
                     )
-                if _benchmark_result.get("found"):
-                    _co = _benchmark_result.get("company", {})
-                    _fin = _benchmark_result.get("financials", {})
-                    _bench = _benchmark_result.get("benchmark", {})
-                    _metric_ranks: dict[str, float] = _bench.get("metric_ranks", {})
+                    if _benchmark_result.get("found"):
+                        _co = _benchmark_result.get("company", {})
+                        _fin = _benchmark_result.get("financials", {})
+                        _bench = _benchmark_result.get("benchmark", {})
+                        _metric_ranks: dict[str, float] = _bench.get("metric_ranks", {})
 
-                    # Override employee count only when KB has a non-zero value
-                    # (more reliable than tool enrichment for listed companies)
-                    if _co.get("employees"):
-                        company_data["employee_count"] = _co["employees"]
+                        # Override employee count only when KB has a non-zero value
+                        # (more reliable than tool enrichment for listed companies)
+                        if _co.get("employees"):
+                            company_data["employee_count"] = _co["employees"]
 
-                    # Mark budget as confirmed — public company with known revenue
-                    company_data["budget_confirmed"] = True
-                    if _fin.get("revenue"):
-                        company_data["revenue_sgd"] = _fin["revenue"]
-                    if _co.get("market_cap_sgd"):
-                        company_data["market_cap"] = _co["market_cap_sgd"]
+                        # Mark budget as confirmed — public company with known revenue
+                        company_data["budget_confirmed"] = True
+                        if _fin.get("revenue"):
+                            company_data["revenue_sgd"] = _fin["revenue"]
+                        if _co.get("market_cap_sgd"):
+                            company_data["market_cap"] = _co["market_cap_sgd"]
 
-                    # Derive financial health signals from percentile ranks
-                    _fh_signals: list[str] = []
-                    _growth_rank = _metric_ranks.get("revenue_growth_yoy")
-                    _margin_rank = _metric_ranks.get("gross_margin")
-                    if _growth_rank is not None:
-                        pct = int(_growth_rank * 100)
-                        if _growth_rank >= 0.75:
-                            _fh_signals.append(f"High-growth (P{pct} revenue growth)")
-                        elif _growth_rank < 0.25:
-                            _fh_signals.append(f"Slow growth (P{pct}) — may seek new channels")
-                    if _margin_rank is not None and _margin_rank >= 0.75:
-                        pct = int(_margin_rank * 100)
-                        _fh_signals.append(f"Strong margins (P{pct} gross margin)")
+                        # Derive financial health signals from percentile ranks
+                        _fh_signals: list[str] = []
+                        _growth_rank = _metric_ranks.get("revenue_growth_yoy")
+                        _margin_rank = _metric_ranks.get("gross_margin")
+                        if _growth_rank is not None:
+                            pct = int(_growth_rank * 100)
+                            if _growth_rank >= 0.75:
+                                _fh_signals.append(f"High-growth (P{pct} revenue growth)")
+                            elif _growth_rank < 0.25:
+                                _fh_signals.append(f"Slow growth (P{pct}) — may seek new channels")
+                        if _margin_rank is not None and _margin_rank >= 0.75:
+                            pct = int(_margin_rank * 100)
+                            _fh_signals.append(f"Strong margins (P{pct} gross margin)")
 
-                    company_data["_financial_health_signals"] = _fh_signals
-                    self._kb_benchmarked_count += 1
-                    self._logger.debug(
-                        "kb_financial_benchmark_applied",
-                        company=company_data.get("name", ""),
-                        signals=_fh_signals,
-                    )
+                        company_data["_financial_health_signals"] = _fh_signals
+                        self._kb_benchmarked_count += 1
+                        self._logger.debug(
+                            "kb_financial_benchmark_applied",
+                            company=company_data.get("name", ""),
+                            signals=_fh_signals,
+                        )
+
+                    # Step 2b: Trajectory analysis — identifies accelerating companies
+                    # (high-intent buyers). Reuses _mcp / _db from the benchmark block
+                    # above to avoid opening a second session per prospect.
+                    try:
+                        # Use ticker from benchmark result if found, otherwise try EODHD search
+                        _traj_ticker = None
+                        _traj_exchange = "SG"
+                        if _benchmark_result.get("found"):
+                            _traj_ticker = _benchmark_result.get("company", {}).get("ticker")
+                            _traj_exchange = _benchmark_result.get("company", {}).get("exchange", "SG")
+                        elif eodhd_data.get("ticker"):
+                            _traj_ticker = eodhd_data.get("ticker")
+                            _traj_exchange = eodhd_data.get("exchange", "SG")
+                        if _traj_ticker:
+                            _traj = await _mcp.get_company_trajectory(_traj_ticker, _traj_exchange)
+                            if _traj and not _traj.get("error"):
+                                _traj_class = _traj.get("trajectory_class", "")
+                                _traj_signals: list[str] = []
+                                if _traj_class == "ACCELERATING":
+                                    _traj_signals.append("Revenue accelerating — high-growth buyer")
+                                elif _traj_class == "DECELERATING":
+                                    _traj_signals.append("Revenue decelerating — may seek efficiency tools")
+                                elif _traj_class == "TURNAROUND":
+                                    _traj_signals.append("Turnaround in progress — actively investing")
+                                _sga_eff = _traj.get("sga_efficiency_trend", "")
+                                if _sga_eff == "improving":
+                                    _traj_signals.append("SG&A efficiency improving — GTM-optimizing buyer")
+                                elif _sga_eff == "declining":
+                                    _traj_signals.append("SG&A efficiency declining — needs GTM optimization")
+                                _cagr = _traj.get("revenue_cagr_3y")
+                                if _cagr is not None:
+                                    _traj_signals.append(f"3Y revenue CAGR: {_cagr*100:.1f}%")
+                                if _traj_signals:
+                                    existing_fh = company_data.get("_financial_health_signals", [])
+                                    company_data["_financial_health_signals"] = existing_fh + _traj_signals
+                                    company_data["_trajectory_class"] = _traj_class
+                    except Exception as _traj_exc:
+                        self._logger.debug(
+                            "trajectory_enrichment_failed",
+                            company=company_data.get("name", ""),
+                            error=str(_traj_exc),
+                        )
             except Exception as _bench_exc:
                 self._logger.debug(
                     "kb_financial_benchmark_failed",
                     company=company_data.get("name", ""),
                     error=str(_bench_exc),
-                )
-
-            # Step 2b: Trajectory analysis — identifies accelerating companies (high-intent buyers)
-            try:
-                async with async_session_factory() as _traj_db:
-                    _traj_mcp = MarketIntelMCPServer(session=_traj_db)
-                    # Use ticker from benchmark result if found, otherwise try EODHD search
-                    _traj_ticker = None
-                    _traj_exchange = "SG"
-                    if _benchmark_result.get("found"):
-                        _traj_ticker = _benchmark_result.get("company", {}).get("ticker")
-                        _traj_exchange = _benchmark_result.get("company", {}).get("exchange", "SG")
-                    elif eodhd_data.get("ticker"):
-                        _traj_ticker = eodhd_data.get("ticker")
-                        _traj_exchange = eodhd_data.get("exchange", "SG")
-                    if _traj_ticker:
-                        _traj = await _traj_mcp.get_company_trajectory(_traj_ticker, _traj_exchange)
-                        if _traj and not _traj.get("error"):
-                            _traj_class = _traj.get("trajectory_class", "")
-                            _traj_signals: list[str] = []
-                            if _traj_class == "ACCELERATING":
-                                _traj_signals.append("Revenue accelerating — high-growth buyer")
-                            elif _traj_class == "DECELERATING":
-                                _traj_signals.append("Revenue decelerating — may seek efficiency tools")
-                            elif _traj_class == "TURNAROUND":
-                                _traj_signals.append("Turnaround in progress — actively investing")
-                            _sga_eff = _traj.get("sga_efficiency_trend", "")
-                            if _sga_eff == "improving":
-                                _traj_signals.append("SG&A efficiency improving — GTM-optimizing buyer")
-                            elif _sga_eff == "declining":
-                                _traj_signals.append("SG&A efficiency declining — needs GTM optimization")
-                            _cagr = _traj.get("revenue_cagr_3y")
-                            if _cagr is not None:
-                                _traj_signals.append(f"3Y revenue CAGR: {_cagr*100:.1f}%")
-                            if _traj_signals:
-                                existing_fh = company_data.get("_financial_health_signals", [])
-                                company_data["_financial_health_signals"] = existing_fh + _traj_signals
-                                company_data["_trajectory_class"] = _traj_class
-            except Exception as _traj_exc:
-                self._logger.debug(
-                    "trajectory_enrichment_failed",
-                    company=company_data.get("name", ""),
-                    error=str(_traj_exc),
                 )
         else:
             eodhd_data = {}

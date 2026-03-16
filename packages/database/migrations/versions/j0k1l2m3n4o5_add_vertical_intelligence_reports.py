@@ -1,7 +1,7 @@
 """Add vertical_intelligence_reports table
 
-Revision ID: i9j0k1l2m3n4
-Revises: h8i9j0k1l2m3
+Revision ID: j0k1l2m3n4o5
+Revises: i9j0k1l2m3n4
 Create Date: 2026-03-16 10:00:00.000000
 
 Stores synthesized per-vertical intelligence reports aggregating
@@ -15,8 +15,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "i9j0k1l2m3n4"
-down_revision: str | Sequence[str] | None = "h8i9j0k1l2m3"
+revision: str = "j0k1l2m3n4o5"
+down_revision: str | Sequence[str] | None = "i9j0k1l2m3n4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

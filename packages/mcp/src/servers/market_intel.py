@@ -518,6 +518,7 @@ class MarketIntelMCPServer:
             )
             company_metrics = CompanyMetrics(
                 ticker=company.ticker,
+                exchange=company.exchange,
                 name=company.name,
                 is_reit=is_reit,
                 revenue_growth_yoy=snapshot.revenue_growth_yoy,

@@ -437,3 +437,73 @@ class TestGTMMetrics:
         ranks = {"revenue_growth_yoy": 0.60, "gross_margin": 0.60, "rnd_to_revenue": 0.80}
         text = engine.describe_position(ranks)
         assert "r&d" in text.lower() or "product" in text.lower()
+
+
+# ---------------------------------------------------------------------------
+# exchange field flows through _snapshot() into leaders/laggards
+# ---------------------------------------------------------------------------
+
+
+class TestExchangeFieldInSnapshot:
+    """Verify that the exchange field is preserved through _snapshot() and compute_benchmark()."""
+
+    def test_snapshot_exchange_us_flows_through(self, engine: FinancialBenchmarkEngine) -> None:
+        """CompanyMetrics(exchange='US') → _snapshot() result has exchange='US'."""
+        company = CompanyMetrics(
+            ticker="MSFT", name="Microsoft", is_reit=False,
+            revenue_growth_yoy=0.15, gross_margin=0.70,
+            ebitda_margin=0.40, net_margin=0.35, roe=0.40,
+            net_debt_ebitda=0.5, revenue_ttm_sgd=2e9,
+            exchange="US",
+        )
+        result = engine.compute_benchmark(
+            "ict_saas", "2024", "annual",
+            [company] * 3,  # duplicate to satisfy _MIN_SAMPLE=3 but only one unique in leaders
+        )
+        # leaders list is the top 3 by revenue_growth_yoy — our company should appear
+        assert len(result.leaders) >= 1
+        assert result.leaders[0]["exchange"] == "US"
+
+    def test_snapshot_exchange_default_sg(self, engine: FinancialBenchmarkEngine) -> None:
+        """CompanyMetrics with no explicit exchange → snapshot dict has exchange='SG'."""
+        company = CompanyMetrics(
+            ticker="D05", name="DBS Group", is_reit=False,
+            revenue_growth_yoy=0.10, gross_margin=None,
+            ebitda_margin=None, net_margin=0.25, roe=0.12,
+            net_debt_ebitda=None, revenue_ttm_sgd=5e8,
+            # exchange not specified — defaults to "SG"
+        )
+        result = engine.compute_benchmark(
+            "fintech", "2024", "annual",
+            [company] * 3,
+        )
+        assert len(result.leaders) >= 1
+        assert result.leaders[0]["exchange"] == "SG"
+
+    def test_mixed_us_sg_exchange_values_in_leaders(
+        self, engine: FinancialBenchmarkEngine
+    ) -> None:
+        """compute_benchmark() with mixed US/SG companies preserves correct exchange per leader."""
+        us_company = CompanyMetrics(
+            ticker="CRM", name="Salesforce", is_reit=False,
+            revenue_growth_yoy=0.50, gross_margin=0.75,
+            ebitda_margin=0.20, net_margin=0.15, roe=0.12,
+            net_debt_ebitda=1.0, revenue_ttm_sgd=3e9,
+            exchange="US",
+        )
+        sg_company = CompanyMetrics(
+            ticker="GRAB", name="Grab", is_reit=False,
+            revenue_growth_yoy=0.20, gross_margin=0.40,
+            ebitda_margin=-0.10, net_margin=-0.05, roe=-0.03,
+            net_debt_ebitda=2.0, revenue_ttm_sgd=1e9,
+            exchange="SG",
+        )
+        result = engine.compute_benchmark(
+            "ict_saas", "2024", "annual",
+            [us_company, sg_company, us_company],  # 3 items to pass _MIN_SAMPLE
+        )
+        # Leaders sorted by revenue_growth_yoy descending — us_company (0.50) is first
+        assert len(result.leaders) >= 1
+        first_leader = result.leaders[0]
+        assert first_leader["ticker"] == "CRM"
+        assert first_leader["exchange"] == "US"
