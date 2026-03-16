@@ -1413,20 +1413,19 @@ Only include archetypes where the product genuinely solves a real problem. Be sp
         )
         current_year = datetime.now().year
 
-        # Use the first specific search query from the plan if available (archetype queries
-        # provide targeted queries like "Singapore e-commerce companies needing AI marketing").
-        # Fall back to constructing a topic from value_proposition / description.
+        # Build a company-discovery-focused query that explicitly asks for named companies.
+        # Generic queries like "construction market trends Singapore" return analysis text
+        # without naming specific companies, causing 0 extraction downstream.
         specific_queries: list[str] = plan.get("search_queries") or []  # type: ignore[assignment]
         if specific_queries and isinstance(specific_queries, list):
             first_query = specific_queries[0]
-            # Avoid appending "Singapore" if already present in the query
             if "singapore" not in first_query.lower():
-                topic = f"{first_query} Singapore {current_year}"[:200]
+                topic = f"List of {first_query} Singapore {current_year} with company names"[:200]
             else:
-                topic = f"{first_query} {current_year}"[:200]
+                topic = f"List of {first_query} {current_year} with company names"[:200]
         else:
             buyer_signal = (value_prop or description_text or industry)[:120]
-            topic = f"Singapore companies that need {buyer_signal} {current_year}"[:200]
+            topic = f"List of Singapore companies that need {buyer_signal} {current_year}"[:200]
 
         try:
             async with asyncio.timeout(30):
