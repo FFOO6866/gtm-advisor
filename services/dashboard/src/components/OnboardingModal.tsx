@@ -60,6 +60,7 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
   const [scrapePhase, setScrapePhase] = useState(0);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
   const scrapePhaseTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scrapeAbortRef = useRef<AbortController | null>(null);
 
   const SCRAPE_PHASES = [
     'Fetching website…',
@@ -192,11 +193,19 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
     const url = formData.website?.trim();
     if (!url) return;
 
+    // Cancel any in-flight scrape
+    scrapeAbortRef.current?.abort();
+    const controller = new AbortController();
+    scrapeAbortRef.current = controller;
+
     setScrapeError(null);
     setScraping(true);
 
     try {
       const parsed = await apiClient.post<ParsedProfile>('/documents/scrape-url', { url });
+
+      // If aborted (user switched modes or started a new scrape), discard
+      if (controller.signal.aborted) return;
 
       // Auto-fill form fields (same logic as document upload)
       const filled = new Set<string>();
@@ -217,10 +226,13 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
         setUploadedDocs([{ name: url, text: parsed.extracted_text, chars: parsed.extracted_text.length }]);
       }
     } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       const msg = err instanceof Error ? err.message : 'Could not scrape website. Please fill in the details manually.';
       setScrapeError(msg);
     } finally {
-      setScraping(false);
+      if (!controller.signal.aborted) {
+        setScraping(false);
+      }
     }
   };
 
@@ -374,6 +386,8 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
                         setUploadedDocs([]);
                         setUploadError(null);
                         setExtractWarning(null);
+                        setScrapeError(null);
+                        setExtractedFields(new Set());
                       }}
                       className={`flex flex-col items-center gap-2 p-4 rounded-xl border transition-all ${
                         inputMode === 'website'
@@ -389,9 +403,16 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
                       onClick={() => {
                         const wasDocument = inputMode === 'document';
                         setInputMode('document');
-                        // If switching TO document mode, auto-open file picker
-                        if (!wasDocument && uploadedDocs.length === 0) {
-                          setTimeout(() => fileInputRef.current?.click(), 100);
+                        if (!wasDocument) {
+                          // Cancel any in-flight scrape
+                          scrapeAbortRef.current?.abort();
+                          setScraping(false);
+                          setScrapeError(null);
+                          setExtractedFields(new Set());
+                          // Clear URL-scraped docs so document auto-fill works
+                          setUploadedDocs([]);
+                          // Auto-open file picker
+                          setTimeout(() => fileInputRef.current?.click(), 150);
                         }
                       }}
                       className={`flex flex-col items-center gap-2 p-4 rounded-xl border transition-all ${

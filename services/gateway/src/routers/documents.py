@@ -20,7 +20,7 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = structlog.get_logger()
 
@@ -213,7 +213,7 @@ async def _llm_extract(text: str) -> dict[str, Any]:
 # ─── Endpoints ─────────────────────────────────────────────────────────────
 
 class ScrapeUrlRequest(BaseModel):
-    url: str
+    url: str = Field(..., max_length=2048)
 
 
 @router.post("/scrape-url", response_model=ParsedCompanyProfile)
@@ -233,24 +233,68 @@ async def scrape_url(req: ScrapeUrlRequest) -> ParsedCompanyProfile:
     if not url.startswith(("http://", "https://")):
         url = f"https://{url}"
 
+    # ── SSRF guard: reject loopback, private, and link-local addresses ──
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=422, detail="Invalid URL — no hostname found.")
+
+    try:
+        # Resolve hostname to IP(s) before connecting
+        addr_infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for family, _, _, _, sockaddr in addr_infos:
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                raise HTTPException(
+                    status_code=422,
+                    detail="URL points to a private or internal address. Please provide a public URL.",
+                )
+    except socket.gaierror:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not resolve hostname. Please check the URL.",
+        )
+
     # 1. Fetch the page
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=15.0,
             headers={"User-Agent": "Mozilla/5.0 (compatible; GTMAdvisor/1.0)"},
         ) as client:
             resp = await client.get(url)
             resp.raise_for_status()
+
+        # Guard: reject very large responses to prevent memory exhaustion
+        MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB
+        content_length = resp.headers.get("content-length")
+        if content_length and int(content_length) > MAX_RESPONSE_BYTES:
+            raise HTTPException(
+                status_code=422,
+                detail="Page is too large to process. Please upload a document instead.",
+            )
+        if len(resp.content) > MAX_RESPONSE_BYTES:
+            raise HTTPException(
+                status_code=422,
+                detail="Page is too large to process. Please upload a document instead.",
+            )
+    except HTTPException:
+        raise
     except httpx.HTTPStatusError as exc:
+        logger.warning("url_scrape_http_error", url=url, status=exc.response.status_code)
         raise HTTPException(
             status_code=422,
             detail=f"Could not fetch URL (HTTP {exc.response.status_code}). Please check the URL and try again.",
         ) from exc
     except Exception as exc:
+        logger.warning("url_scrape_network_error", url=url, error=str(exc))
         raise HTTPException(
             status_code=422,
-            detail=f"Could not reach {url} — {exc}. Please check the URL or upload a document instead.",
+            detail="Could not reach the provided URL. Please check it is publicly accessible or upload a document instead.",
         ) from exc
 
     # 2. Extract visible text from HTML
@@ -302,7 +346,7 @@ async def scrape_url(req: ScrapeUrlRequest) -> ParsedCompanyProfile:
         logger.warning("url_llm_extraction_failed", url=url, error=str(exc))
         raise HTTPException(
             status_code=502,
-            detail=f"AI extraction failed ({exc}). Please fill in the details manually.",
+            detail="AI extraction failed. Please fill in the details manually.",
         ) from exc
 
     # 4. Sanitise industry
