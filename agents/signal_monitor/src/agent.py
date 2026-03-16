@@ -117,6 +117,7 @@ class SignalMonitorAgent(BaseGTMAgent[SignalMonitorResult]):
         self._agent_bus = agent_bus or get_agent_bus()
         self._analysis_id: Any = None
         self._known_competitors: list[str] = []
+        self._knowledge_pack: dict = {}
 
         # Subscribe to competitor discoveries so monitoring queries can include them
         self._agent_bus.subscribe(
@@ -185,6 +186,17 @@ class SignalMonitorAgent(BaseGTMAgent[SignalMonitorResult]):
                         }
             except Exception as e:
                 logger.debug("signal_monitor_kb_failed", error=str(e))
+
+        # Load domain knowledge pack for signal classification grounding
+        self._knowledge_pack: dict[str, Any] = {}
+        try:
+            kmcp_pack = get_knowledge_mcp()
+            self._knowledge_pack = await kmcp_pack.get_agent_knowledge_pack(
+                agent_name="signal-monitor",
+                task_context=task,
+            )
+        except Exception as e:
+            logger.debug("signal_monitor_knowledge_pack_failed", error=str(e))
 
         # Fetch Singapore SME context for signal classification grounding
         sg_context: dict[str, Any] = {}
@@ -267,12 +279,26 @@ class SignalMonitorAgent(BaseGTMAgent[SignalMonitorResult]):
         if kb_vertical_context:
             data_sources.append("Market Intel DB")
 
-        # Classify all signals in parallel then score
+        # Classify all signals in parallel then score (60-second total timeout)
         capped = raw_signals[:30]
-        signal_types = await asyncio.gather(
-            *[self._classify_signal(raw.headline, kb_context=kb_vertical_context, sg_context=sg_context) for raw in capped],
-            return_exceptions=True,
-        )
+        try:
+            signal_types = await asyncio.wait_for(
+                asyncio.gather(
+                    *[
+                        self._classify_signal(
+                            raw.headline,
+                            kb_context=kb_vertical_context,
+                            sg_context=sg_context,
+                        )
+                        for raw in capped
+                    ],
+                    return_exceptions=True,
+                ),
+                timeout=60,
+            )
+        except TimeoutError:
+            self._logger.warning("signal_classification_batch_timed_out", count=len(capped))
+            signal_types = ["market_trend"] * len(capped)
 
         scored: list[ScoredSignal] = []
         for raw, sig_type in zip(capped, signal_types, strict=False):
@@ -686,7 +712,9 @@ class SignalMonitorAgent(BaseGTMAgent[SignalMonitorResult]):
     ) -> str:
         """Use LLM to classify signal type from headline."""
         try:
-            user_content = f"Classify: {headline}"
+            _knowledge_ctx = getattr(self, "_knowledge_pack", {}).get("formatted_injection", "")
+            _knowledge_header = f"{_knowledge_ctx}\n\n---\n\n" if _knowledge_ctx else ""
+            user_content = f"{_knowledge_header}Classify: {headline}"
             if kb_context and kb_context.get("market_leaders"):
                 leaders_str = ", ".join(kb_context["market_leaders"])
                 user_content += (

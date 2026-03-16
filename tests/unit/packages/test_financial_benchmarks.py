@@ -224,7 +224,8 @@ class TestComputeBenchmark:
         required_keys = {
             "company_count", "revenue_growth_yoy", "gross_margin",
             "ebitda_margin", "net_margin", "roe", "net_debt_ebitda",
-            "revenue_ttm_sgd", "leaders", "laggards", "computed_at",
+            "revenue_ttm_sgd", "sga_to_revenue", "rnd_to_revenue",
+            "operating_margin", "leaders", "laggards", "computed_at",
         }
         assert required_keys.issubset(d.keys())
         # Each distribution dict must have p25/p50/p75/p90/mean/n
@@ -328,3 +329,111 @@ class TestRankToLabel:
 
     def test_none_returns_median(self) -> None:
         assert _rank_to_label(None) == "Median"
+
+
+# ---------------------------------------------------------------------------
+# GTM-relevant benchmark metrics (SG&A, R&D, operating margin)
+# ---------------------------------------------------------------------------
+
+
+class TestGTMMetrics:
+    """Tests for sga_to_revenue, rnd_to_revenue, operating_margin benchmarks."""
+
+    def _sample_companies_with_gtm(self) -> list[CompanyMetrics]:
+        """Companies with SG&A/R&D data — simulates tech vertical."""
+        return [
+            CompanyMetrics(ticker="SAAS1", name="SaaS Co 1", is_reit=False,
+                           revenue_growth_yoy=0.15, gross_margin=0.70, ebitda_margin=0.20,
+                           net_margin=0.10, roe=0.15, net_debt_ebitda=1.0, revenue_ttm_sgd=5e7,
+                           sga_to_revenue=0.35, rnd_to_revenue=0.20, operating_margin=0.15),
+            CompanyMetrics(ticker="SAAS2", name="SaaS Co 2", is_reit=False,
+                           revenue_growth_yoy=0.25, gross_margin=0.75, ebitda_margin=0.25,
+                           net_margin=0.15, roe=0.20, net_debt_ebitda=0.5, revenue_ttm_sgd=1e8,
+                           sga_to_revenue=0.40, rnd_to_revenue=0.25, operating_margin=0.20),
+            CompanyMetrics(ticker="SAAS3", name="SaaS Co 3", is_reit=False,
+                           revenue_growth_yoy=0.30, gross_margin=0.80, ebitda_margin=0.30,
+                           net_margin=0.20, roe=0.25, net_debt_ebitda=0.2, revenue_ttm_sgd=2e8,
+                           sga_to_revenue=0.45, rnd_to_revenue=0.30, operating_margin=0.25),
+            CompanyMetrics(ticker="SAAS4", name="SaaS Co 4", is_reit=False,
+                           revenue_growth_yoy=0.40, gross_margin=0.85, ebitda_margin=0.35,
+                           net_margin=0.25, roe=0.30, net_debt_ebitda=0.1, revenue_ttm_sgd=5e8,
+                           sga_to_revenue=0.50, rnd_to_revenue=0.35, operating_margin=0.30),
+        ]
+
+    def test_sga_distribution_computed(self, engine: FinancialBenchmarkEngine) -> None:
+        result = engine.compute_benchmark(
+            "ict_saas", "2024", "annual", self._sample_companies_with_gtm()
+        )
+        assert result.sga_to_revenue.p50 is not None
+        assert result.sga_to_revenue.sample_size == 4
+
+    def test_rnd_distribution_computed(self, engine: FinancialBenchmarkEngine) -> None:
+        result = engine.compute_benchmark(
+            "ict_saas", "2024", "annual", self._sample_companies_with_gtm()
+        )
+        assert result.rnd_to_revenue.p50 is not None
+        assert result.rnd_to_revenue.sample_size == 4
+
+    def test_operating_margin_distribution_computed(self, engine: FinancialBenchmarkEngine) -> None:
+        result = engine.compute_benchmark(
+            "ict_saas", "2024", "annual", self._sample_companies_with_gtm()
+        )
+        assert result.operating_margin.p50 is not None
+
+    def test_sga_outlier_filtering(self, engine: FinancialBenchmarkEngine) -> None:
+        """SG&A > 100% of revenue should be excluded (e.g. litigation spike)."""
+        companies = self._sample_companies_with_gtm()
+        companies.append(CompanyMetrics(
+            ticker="LITCO", name="Litigation Co", is_reit=False,
+            revenue_growth_yoy=-0.05, gross_margin=0.30, ebitda_margin=-0.20,
+            net_margin=-0.30, roe=-0.10, net_debt_ebitda=5.0, revenue_ttm_sgd=1e7,
+            sga_to_revenue=1.50,  # 150% of revenue — outlier
+            rnd_to_revenue=0.05, operating_margin=-0.80,
+        ))
+        result = engine.compute_benchmark("ict_saas", "2024", "annual", companies)
+        # 1.50 is outside (0.0, 1.0) bounds → excluded
+        assert result.sga_to_revenue.sample_size == 4  # not 5
+
+    def test_none_sga_excluded_from_distribution(self, engine: FinancialBenchmarkEngine) -> None:
+        """Companies without SG&A data (banks, etc.) should not affect the distribution."""
+        companies = self._sample_companies_with_gtm()
+        companies.append(CompanyMetrics(
+            ticker="BANK1", name="Bank One", is_reit=False,
+            revenue_growth_yoy=0.10, gross_margin=None, ebitda_margin=None,
+            net_margin=0.20, roe=0.12, net_debt_ebitda=None, revenue_ttm_sgd=1e9,
+            sga_to_revenue=None, rnd_to_revenue=None, operating_margin=0.30,
+        ))
+        result = engine.compute_benchmark("fintech", "2024", "annual", companies)
+        assert result.sga_to_revenue.sample_size == 4  # bank excluded
+        assert result.operating_margin.sample_size == 5  # bank has operating_margin
+
+    def test_rank_company_includes_gtm_metrics(self, engine: FinancialBenchmarkEngine) -> None:
+        companies = self._sample_companies_with_gtm()
+        benchmark = engine.compute_benchmark("ict_saas", "2024", "annual", companies)
+        target = companies[0]  # lowest SG&A spend
+        ranks = engine.rank_company(target, benchmark)
+        assert "sga_to_revenue" in ranks
+        assert "rnd_to_revenue" in ranks
+        assert "operating_margin" in ranks
+
+    def test_serialisation_includes_gtm_metrics(self, engine: FinancialBenchmarkEngine) -> None:
+        result = engine.compute_benchmark(
+            "ict_saas", "2024", "annual", self._sample_companies_with_gtm()
+        )
+        d = result.to_vertical_benchmark_dict()
+        assert "sga_to_revenue" in d
+        assert "rnd_to_revenue" in d
+        assert "operating_margin" in d
+        assert d["sga_to_revenue"]["n"] == 4
+
+    def test_describe_position_surfaces_high_sga(self, engine: FinancialBenchmarkEngine) -> None:
+        """High SG&A rank should produce a GTM spend narrative."""
+        ranks = {"revenue_growth_yoy": 0.60, "gross_margin": 0.60, "sga_to_revenue": 0.85}
+        text = engine.describe_position(ranks)
+        assert "gtm" in text.lower() or "sg&a" in text.lower()
+
+    def test_describe_position_surfaces_high_rnd(self, engine: FinancialBenchmarkEngine) -> None:
+        """High R&D rank should produce a product-led growth narrative."""
+        ranks = {"revenue_growth_yoy": 0.60, "gross_margin": 0.60, "rnd_to_revenue": 0.80}
+        text = engine.describe_position(ranks)
+        assert "r&d" in text.lower() or "product" in text.lower()

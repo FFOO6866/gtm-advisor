@@ -31,6 +31,10 @@ OUTLIER_BOUNDS: dict[str, tuple[float, float]] = {
     "net_margin": (-2.0, 1.0),
     "roe": (-2.0, 2.0),
     "net_debt_ebitda": (-5.0, 20.0),
+    "sga_to_revenue": (0.0, 1.0),         # 0–100% of revenue; >100% is outlier (e.g. litigation)
+    "rnd_to_revenue": (0.0, 1.0),         # 0–100%
+    "operating_margin": (-1.0, 1.0),      # mirrors ebitda_margin bounds
+    "capex_to_revenue": (0.0, 1.0),       # 0–100%; capital-intensive verticals (maritime, energy, telco) can exceed 50%
 }
 
 # Minimum sample size to compute meaningful percentiles
@@ -139,6 +143,13 @@ class CompanyMetrics:
     roe: float | None
     net_debt_ebitda: float | None
     revenue_ttm_sgd: float | None
+    # Exchange where listed — used by Market Intel agent to disambiguate trajectory lookups
+    exchange: str = "SG"
+    # GTM-relevant operational detail
+    sga_to_revenue: float | None = None
+    rnd_to_revenue: float | None = None
+    operating_margin: float | None = None
+    capex_to_revenue: float | None = None
     # REIT-specific
     dpu_yield: float | None = None
     gearing_ratio: float | None = None
@@ -164,6 +175,11 @@ class BenchmarkResult:
     roe: PercentileDistribution
     net_debt_ebitda: PercentileDistribution
     revenue_ttm_sgd: PercentileDistribution
+    # GTM-relevant operational benchmarks
+    sga_to_revenue: PercentileDistribution
+    rnd_to_revenue: PercentileDistribution
+    operating_margin: PercentileDistribution
+    capex_to_revenue: PercentileDistribution
     # Leaders / laggards by revenue growth
     leaders: list[dict]    # top 3: [{"ticker", "name", "revenue_growth_yoy", "gross_margin"}]
     laggards: list[dict]   # bottom 3
@@ -183,6 +199,10 @@ class BenchmarkResult:
             "roe": self.roe.to_dict(),
             "net_debt_ebitda": self.net_debt_ebitda.to_dict(),
             "revenue_ttm_sgd": self.revenue_ttm_sgd.to_dict(),
+            "sga_to_revenue": self.sga_to_revenue.to_dict(),
+            "rnd_to_revenue": self.rnd_to_revenue.to_dict(),
+            "operating_margin": self.operating_margin.to_dict(),
+            "capex_to_revenue": self.capex_to_revenue.to_dict(),
             "leaders": self.leaders,
             "laggards": self.laggards,
             "computed_at": self.computed_at.isoformat(),
@@ -314,6 +334,20 @@ class FinancialBenchmarkEngine:
             [v for v in _values("revenue_ttm_sgd") if v is None or v >= 0],
         )
 
+        # GTM-relevant operational benchmarks
+        sga_dist = self.compute_distribution(
+            _values("sga_to_revenue"), metric="sga_to_revenue"
+        )
+        rnd_dist = self.compute_distribution(
+            _values("rnd_to_revenue"), metric="rnd_to_revenue"
+        )
+        operating_margin_dist = self.compute_distribution(
+            _values("operating_margin"), metric="operating_margin"
+        )
+        capex_dist = self.compute_distribution(
+            _values("capex_to_revenue"), metric="capex_to_revenue"
+        )
+
         # Leaders and laggards — ranked by revenue_growth_yoy
         ranked = sorted(
             [c for c in operating if c.revenue_growth_yoy is not None],
@@ -325,8 +359,11 @@ class FinancialBenchmarkEngine:
             return {
                 "ticker": c.ticker,
                 "name": c.name,
+                "exchange": c.exchange,
                 "revenue_growth_yoy": c.revenue_growth_yoy,
                 "gross_margin": c.gross_margin,
+                "sga_to_revenue": c.sga_to_revenue,
+                "rnd_to_revenue": c.rnd_to_revenue,
             }
 
         leaders = [_snapshot(c) for c in ranked[:3]]
@@ -344,6 +381,10 @@ class FinancialBenchmarkEngine:
             roe=roe_dist,
             net_debt_ebitda=net_debt_ebitda_dist,
             revenue_ttm_sgd=revenue_ttm_dist,
+            sga_to_revenue=sga_dist,
+            rnd_to_revenue=rnd_dist,
+            operating_margin=operating_margin_dist,
+            capex_to_revenue=capex_dist,
             leaders=leaders,
             laggards=laggards,
         )
@@ -370,6 +411,10 @@ class FinancialBenchmarkEngine:
             ("roe", company.roe, benchmark.roe),
             ("net_debt_ebitda", company.net_debt_ebitda, benchmark.net_debt_ebitda),
             ("revenue_ttm_sgd", company.revenue_ttm_sgd, benchmark.revenue_ttm_sgd),
+            ("sga_to_revenue", company.sga_to_revenue, benchmark.sga_to_revenue),
+            ("rnd_to_revenue", company.rnd_to_revenue, benchmark.rnd_to_revenue),
+            ("operating_margin", company.operating_margin, benchmark.operating_margin),
+            ("capex_to_revenue", company.capex_to_revenue, benchmark.capex_to_revenue),
         ]
 
         ranks: dict[str, float] = {}
@@ -398,7 +443,9 @@ class FinancialBenchmarkEngine:
         growth_phrase = _rank_to_label(growth_rank, invert=False) if growth_rank is not None else None
 
         # Margin narrative — use gross margin if available, else net margin
-        margin_rank = ranks.get("gross_margin") or ranks.get("net_margin")
+        margin_rank = ranks.get("gross_margin")
+        if margin_rank is None:
+            margin_rank = ranks.get("net_margin")
         margin_phrase = _rank_to_label(margin_rank, invert=False) if margin_rank is not None else None
 
         # Leverage narrative — high net_debt_ebitda is bad, so invert the rank
@@ -408,17 +455,17 @@ class FinancialBenchmarkEngine:
         sentences: list[str] = []
 
         if growth_phrase and margin_phrase:
-            growth_pct = int(round((growth_rank or 0) * 100))
-            margin_pct = int(round((margin_rank or 0) * 100))
+            growth_pct = int(round(growth_rank * 100))
+            margin_pct = int(round(margin_rank * 100))
             sentences.append(
                 f"{growth_phrase} revenue growth ({growth_pct}th percentile) "
                 f"with {margin_phrase.lower()} margins ({margin_pct}th percentile)."
             )
         elif growth_phrase:
-            growth_pct = int(round((growth_rank or 0) * 100))
+            growth_pct = int(round(growth_rank * 100))
             sentences.append(f"{growth_phrase} revenue growth ({growth_pct}th percentile).")
         elif margin_phrase:
-            margin_pct = int(round((margin_rank or 0) * 100))
+            margin_pct = int(round(margin_rank * 100))
             sentences.append(f"{margin_phrase} margins ({margin_pct}th percentile).")
 
         # Second sentence — actionable insight
@@ -446,6 +493,34 @@ class FinancialBenchmarkEngine:
             if leverage_rank <= self._BOTTOM_QUARTILE or leverage_rank >= self._TOP_QUARTILE:
                 sentences.append(
                     f"{leverage_phrase} balance sheet ({leverage_pct}th percentile leverage)."
+                )
+
+        # GTM spend narrative — SG&A and R&D intensity
+        sga_rank = ranks.get("sga_to_revenue")
+        rnd_rank = ranks.get("rnd_to_revenue")
+        if sga_rank is not None:
+            sga_pct = int(round(sga_rank * 100))
+            if sga_rank >= self._TOP_QUARTILE:
+                sentences.append(
+                    f"High GTM spend intensity (SG&A at {sga_pct}th percentile) — aggressive market investment."
+                )
+            elif sga_rank <= self._BOTTOM_QUARTILE:
+                sentences.append(
+                    f"Lean GTM operation (SG&A at {sga_pct}th percentile) — may indicate efficiency or underinvestment."
+                )
+        if rnd_rank is not None:
+            rnd_pct = int(round(rnd_rank * 100))
+            if rnd_rank >= self._TOP_QUARTILE:
+                sentences.append(
+                    f"R&D-intensive ({rnd_pct}th percentile) — product-led growth potential."
+                )
+
+        capex_rank = ranks.get("capex_to_revenue")
+        if capex_rank is not None:
+            capex_pct = int(round(capex_rank * 100))
+            if capex_rank >= self._TOP_QUARTILE:
+                sentences.append(
+                    f"High capex intensity ({capex_pct}th percentile) — investing heavily in capacity."
                 )
 
         if not sentences:

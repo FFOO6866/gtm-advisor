@@ -18,8 +18,9 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any, ClassVar
 
+import sqlalchemy as sa
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.src.models import (
@@ -1009,10 +1010,12 @@ class FinancialIntelligenceSync:
     async def sync_financial_snapshots(self, limit: int = 50) -> dict[str, int]:
         """Sync full financials for top N companies by market cap.
 
-        Run daily to keep high-value companies fresh.
+        Run daily to keep high-value companies fresh. Skips companies
+        synced within the last 7 days and commits every 50 companies
+        to protect against SIGTERM kills.
 
         Returns:
-            {"synced": N, "failed": N}
+            {"synced": N, "skipped": N, "failed": N}
         """
         result = await self._session.execute(
             select(ListedCompany)
@@ -1021,11 +1024,25 @@ class FinancialIntelligenceSync:
         )
         companies = result.scalars().all()
 
-        counts: dict[str, int] = {"synced": 0, "failed": 0}
+        counts: dict[str, int] = {"synced": 0, "skipped": 0, "failed": 0}
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=7)
 
         logger.info("sync_financial_snapshots_start", total=len(companies))
 
-        for company in companies:
+        for idx, company in enumerate(companies, 1):
+            # Skip recently synced companies (7-day window)
+            # Strip tzinfo for consistent naive-vs-naive comparison
+            # (SQLite returns naive, PostgreSQL may return tz-aware)
+            last_synced = company.last_synced_at
+            if last_synced is not None:
+                last_synced = last_synced.replace(tzinfo=None)
+            if (
+                last_synced is not None
+                and last_synced > cutoff
+            ):
+                counts["skipped"] += 1
+                continue
+
             try:
                 success = await self.sync_company(company.ticker, company.exchange)
                 if success:
@@ -1039,6 +1056,11 @@ class FinancialIntelligenceSync:
                     exchange=company.exchange,
                 )
                 counts["failed"] += 1
+
+            # Periodic commit every 50 companies to protect against SIGTERM
+            if idx % 50 == 0:
+                await self._session.commit()
+                logger.info("sync_financial_snapshots_checkpoint", processed=idx)
 
             await asyncio.sleep(self.request_delay)
 
@@ -1068,16 +1090,17 @@ class FinancialIntelligenceSync:
             else FinancialPeriodType.ANNUAL
         )
 
-        # Query all snapshots for this vertical + period_label, joined to ListedCompany
+        # Query all snapshots for this vertical + period_label, joined to ListedCompany.
+        # For quarterly labels ("2024-Q3"), filter by year + quarter month range
+        # to avoid mixing Q1-Q4 data together.
+        date_filter = _period_label_to_date_filter(period_label)
         snapshots_result = await self._session.execute(
             select(CompanyFinancialSnapshot, ListedCompany)
             .join(ListedCompany, CompanyFinancialSnapshot.company_id == ListedCompany.id)
             .where(
                 ListedCompany.vertical_id == vertical.id,
                 CompanyFinancialSnapshot.period_type == period_type,
-                CompanyFinancialSnapshot.period_end_date.startswith(
-                    period_label[:4]  # year prefix; quarterly labels are "2024-Q3"
-                ),
+                *date_filter,
             )
         )
         rows = snapshots_result.all()
@@ -1098,6 +1121,7 @@ class FinancialIntelligenceSync:
                 CompanyMetrics(
                     ticker=listed.ticker,
                     name=listed.name,
+                    exchange=listed.exchange,
                     is_reit=not is_reit_vertical
                     and listed.listing_type == CompanyListingType.REIT,
                     revenue_growth_yoy=snapshot.revenue_growth_yoy,
@@ -1107,6 +1131,14 @@ class FinancialIntelligenceSync:
                     roe=snapshot.roe,
                     net_debt_ebitda=snapshot.net_debt_ebitda,
                     revenue_ttm_sgd=snapshot.revenue,
+                    sga_to_revenue=snapshot.sga_to_revenue,
+                    rnd_to_revenue=snapshot.rnd_to_revenue,
+                    operating_margin=snapshot.operating_margin,
+                    capex_to_revenue=(
+                        abs(snapshot.capex) / snapshot.revenue
+                        if snapshot.capex is not None and snapshot.revenue and snapshot.revenue > 0
+                        else None
+                    ),
                 )
             )
 
@@ -1154,6 +1186,10 @@ class FinancialIntelligenceSync:
         vb.roe = bm_dict["roe"]
         vb.net_debt_ebitda = bm_dict["net_debt_ebitda"]
         vb.revenue_ttm_sgd = bm_dict["revenue_ttm_sgd"]
+        vb.sga_to_revenue = bm_dict["sga_to_revenue"]
+        vb.rnd_to_revenue = bm_dict["rnd_to_revenue"]
+        vb.operating_margin_dist = bm_dict["operating_margin"]
+        vb.capex_to_revenue = bm_dict["capex_to_revenue"]
         vb.leaders = bm_dict["leaders"]
         vb.laggards = bm_dict["laggards"]
         vb.computed_at = datetime.now(UTC)
@@ -1409,7 +1445,7 @@ class FinancialIntelligenceSync:
         existing.listing_type = listing_type
         if isin:
             existing.isin = isin
-        if vertical_id is not None:
+        if vertical_id is not None and existing.vertical_id is None:
             existing.vertical_id = vertical_id
         if gics_sector:
             existing.gics_sector = gics_sector
@@ -1571,7 +1607,13 @@ class FinancialIntelligenceSync:
                 )
 
                 # Derived ratios from operational detail
-                sga_to_revenue = _safe_div(selling_general_administrative, revenue)
+                sga_to_revenue = _validated_sga_ratio(
+                    reported_sga=selling_general_administrative,
+                    gross_profit=gross_profit,
+                    operating_income=operating_income,
+                    research_development=research_development,
+                    revenue=revenue,
+                )
                 rnd_to_revenue = _safe_div(research_development, revenue)
                 operating_margin = _safe_div(operating_income, revenue)
 
@@ -1686,11 +1728,112 @@ def _apply_fx(value: float | None, fx_rate: float) -> float | None:
     return value * fx_rate
 
 
+def _period_label_to_date_filter(period_label: str) -> list:
+    """Build SQLAlchemy WHERE clauses to match period_end_date for a given label.
+
+    Annual labels (e.g. "2024") → startswith("2024")
+    Quarterly labels (e.g. "2024-Q3") → year matches AND month in quarter range.
+
+    Quarter month ranges:
+      Q1: 01-03, Q2: 04-06, Q3: 07-09, Q4: 10-12
+
+    Returns a list of SQLAlchemy conditions (to be splatted into .where(*conditions)).
+    """
+    import re as _re
+
+    m = _re.match(r"^(\d{4})-Q([1-4])$", period_label)
+    if m:
+        year, quarter = m.group(1), int(m.group(2))
+        # Quarter end-month: Q1→03, Q2→06, Q3→09, Q4→12
+        # Filter by year prefix AND month in the quarter's 3-month range
+        start_month = (quarter - 1) * 3 + 1
+        end_month = quarter * 3
+        year_prefix = f"{year}-"
+        return [
+            CompanyFinancialSnapshot.period_end_date.startswith(year_prefix),
+            func.cast(
+                func.substr(CompanyFinancialSnapshot.period_end_date, 6, 2),
+                sa.Integer,
+            ).between(start_month, end_month),
+        ]
+    # Annual: just match year prefix
+    return [
+        CompanyFinancialSnapshot.period_end_date.startswith(period_label[:4]),
+    ]
+
+
 def _safe_div(numerator: float | None, denominator: float | None) -> float | None:
     """Return numerator / denominator, or None on division by zero / None inputs."""
     if numerator is None or denominator is None or denominator == 0.0:
         return None
     return numerator / denominator
+
+
+def _validated_sga_ratio(
+    reported_sga: float | None,
+    gross_profit: float | None,
+    operating_income: float | None,
+    research_development: float | None,
+    revenue: float | None,
+) -> float | None:
+    """Compute a validated SGA-to-revenue ratio.
+
+    EODHD sometimes reports only part of SGA when companies split
+    "Selling" and "General & Administrative" expenses in their filings.
+    This detects the anomaly using the income statement identity:
+
+        GP - OpInc >= SGA + R&D
+
+    When reported SGA appears implausibly low (< 40% of the implied
+    total), the function derives a corrected value from:
+
+        corrected_sga = GP - OpInc - R&D
+
+    This may slightly overstate SGA for companies with D&A or
+    restructuring charges below the gross-profit line, but produces
+    a far better signal than the partially-reported value.
+
+    The raw ``selling_general_administrative`` column is never
+    modified — only the derived ``sga_to_revenue`` ratio is corrected.
+
+    Returns:
+        sga_to_revenue ratio (float) or None if unreliable.
+    """
+    # Need revenue to produce a ratio
+    if revenue is None or revenue <= 0:
+        return _safe_div(reported_sga, revenue)
+
+    # Without GP and OpInc we can't cross-check — use reported value
+    if gross_profit is None or operating_income is None:
+        return _safe_div(reported_sga, revenue)
+
+    # If no SGA was reported at all, the company may not break out
+    # this line item (e.g. banks).  Do NOT impute — return None.
+    if reported_sga is None:
+        return None
+
+    # What the income statement identity implies for SGA
+    implied_sga = gross_profit - operating_income - (research_development or 0)
+
+    # If implied SGA is non-positive, the income statement structure is
+    # unusual (e.g. operating income exceeds gross profit minus R&D);
+    # fall back to the reported value.
+    if implied_sga <= 0:
+        return _safe_div(reported_sga, revenue)
+
+    # If reported SGA is within 60% of implied, it's accurate enough.
+    if reported_sga >= implied_sga * 0.6:
+        return _safe_div(reported_sga, revenue)
+
+    # ---- Anomaly detected: reported SGA is < 60% of implied ----
+    # Use the implied value as a corrected estimate.
+    corrected_ratio = implied_sga / revenue
+
+    # Sanity bound — ratio must be in (0, 100%]; otherwise discard.
+    if corrected_ratio <= 0 or corrected_ratio > 1.0:
+        return None
+
+    return corrected_ratio
 
 
 def _compute_yoy_growth(

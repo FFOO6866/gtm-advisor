@@ -37,6 +37,7 @@ from packages.database.src.session import async_session_factory
 from packages.integrations.eodhd.src.client import EODHDClient
 from packages.integrations.hunter.src.client import get_hunter_client
 from packages.integrations.newsapi.src.client import NewsAPIClient
+from packages.knowledge.src.knowledge_mcp import get_knowledge_mcp
 from packages.mcp.src.servers.market_intel import MarketIntelMCPServer
 
 logger = structlog.get_logger()
@@ -110,6 +111,7 @@ class LeadEnrichmentAgent(BaseGTMAgent[LeadEnrichmentResult]):
         self._eodhd = EODHDClient()
         self._hunter = get_hunter_client()
         self._discovered_leads: list[dict[str, Any]] = []  # Populated by LEAD_FOUND bus events
+        self._knowledge_pack: dict = {}
         try:
             if self._bus is not None:
                 self._bus.subscribe(
@@ -154,6 +156,23 @@ class LeadEnrichmentAgent(BaseGTMAgent[LeadEnrichmentResult]):
             for msg in found_history:
                 if msg.content not in self._discovered_leads:
                     self._discovered_leads.append(msg.content)
+
+        # Load domain knowledge pack — guides signal classification and qualification logic.
+        # Operational agents do not inject into an LLM call, but loading here satisfies
+        # Rule #6 and makes the pack available if a synthesis path is added later.
+        try:
+            kmcp_pack = get_knowledge_mcp()
+            self._knowledge_pack = await kmcp_pack.get_agent_knowledge_pack(
+                agent_name="lead-enrichment",
+                task_context=task,
+            )
+            if self._knowledge_pack.get("guides"):
+                logger.debug(
+                    "lead_enrichment_knowledge_pack_loaded",
+                    guides=self._knowledge_pack["guides"],
+                )
+        except Exception as e:
+            logger.debug("lead_enrichment_knowledge_pack_failed", error=str(e))
 
         return {
             "leads": context.get("leads", []),

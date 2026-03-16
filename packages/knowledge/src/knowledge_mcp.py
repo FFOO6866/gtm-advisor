@@ -75,6 +75,21 @@ _AGENT_GUIDE_MAP: dict[str, list[str]] = {
         "signal_based_prospecting",
         "singapore_psg_grants",
     ],
+    "signal-monitor": [
+        "signal_based_prospecting",
+        "industry_trend_analysis",
+        "competitive_intelligence",
+    ],
+    "lead-enrichment": [
+        "lead_qualification",
+        "singapore_pdpa_gtm",
+        "buyer_persona_research",
+    ],
+    "workforce-architect": [
+        "campaign_measurement",
+        "gtm_motion_selection",
+        "content_marketing_b2b",
+    ],
 }
 
 # Keywords per guide slug used to rank guides by relevance to a task string.

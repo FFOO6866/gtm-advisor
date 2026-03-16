@@ -11,6 +11,7 @@ NOT generic LLM advice - actual data-driven insights.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from typing import Any
 
@@ -145,6 +146,7 @@ class MarketIntelligenceAgent(BaseGTMAgent[MarketIntelligenceOutput]):
         self._agent_bus = agent_bus or get_agent_bus()
         self._analysis_id: Any = None
         self._company_profile: dict | None = None
+        self._vertical_slug: str = ""
 
     def _detect_vertical(self, task: str) -> str | None:
         """Detect a Singapore market vertical slug from free-text task description.
@@ -288,9 +290,12 @@ Be specific and data-driven. Generic statements like "the market is growing" are
         mcp_landscape: dict[str, Any] = {}
         mcp_benchmarks: dict[str, Any] = {}
         mcp_articles: list[dict[str, Any]] = []
+        mcp_vertical_intel: dict[str, Any] = {}
+        mcp_trajectories: list[dict[str, Any]] = []
 
         vertical_slug = self._detect_vertical(f"{industry} {task}")
         if vertical_slug:
+            self._vertical_slug = vertical_slug
             try:
                 # SQLAlchemy AsyncSession is NOT safe for concurrent access —
                 # "not safe for use in concurrent tasks" (SQLAlchemy 2.0 docs).
@@ -305,6 +310,26 @@ Be specific and data-driven. Generic statements like "the market is growing" are
                         limit=10,
                     )
                     mcp_articles = mcp_search if isinstance(mcp_search, list) else []
+                    mcp_vertical_intel = await mcp.get_vertical_intelligence(vertical_slug)
+                    # Fetch trajectory for top leaders to show market direction
+                    mcp_trajectories = []
+                    for leader in (mcp_landscape.get("leaders") or [])[:3]:
+                        _ticker = leader.get("ticker")
+                        if _ticker:
+                            # Leaders may be SG or US-listed; try both exchanges
+                            for _exchange in ("SG", "US"):
+                                try:
+                                    traj = await mcp.get_company_trajectory(_ticker, _exchange)
+                                    if traj and not traj.get("error"):
+                                        traj = {**traj, "company_name": leader.get("name", _ticker)}
+                                        mcp_trajectories.append(traj)
+                                        break  # found on this exchange
+                                except Exception:
+                                    self._logger.debug(
+                                        "leader_trajectory_failed",
+                                        ticker=_ticker,
+                                        exchange=_exchange,
+                                    )
             except Exception as e:
                 self._logger.warning(
                     "market_intel_mcp_fetch_failed",
@@ -344,6 +369,9 @@ Be specific and data-driven. Generic statements like "the market is growing" are
         # Phase 2: Live external API data (NewsAPI, EODHD, Perplexity)
         # ------------------------------------------------------------------
 
+        self._has_vertical_intel = bool(mcp_vertical_intel)
+        self._has_trajectories = bool(mcp_trajectories)
+
         # Gather data from all sources concurrently (they are fully independent)
         gathered_data: dict[str, Any] = {
             "news": [],
@@ -352,6 +380,8 @@ Be specific and data-driven. Generic statements like "the market is growing" are
             "mcp_landscape": mcp_landscape,
             "mcp_benchmarks": mcp_benchmarks,
             "mcp_articles": mcp_articles,
+            "mcp_vertical_intel": mcp_vertical_intel,
+            "mcp_trajectories": mcp_trajectories,
             "kb_framework_guidance": kb_framework_guidance,
         }
         data_sources = plan.get("data_sources", [])
@@ -557,7 +587,6 @@ Return only the JSON array, no markdown."""
                 {"role": "system", "content": "Return only valid JSON array. No markdown."},
                 {"role": "user", "content": parse_prompt},
             ]
-            import json
             import re as _re_local
             raw = await self._complete(messages, temperature=0, max_tokens=2000)
             cleaned = _re_local.sub(r"```[a-zA-Z]*\n?", "", raw or "").strip()
@@ -629,6 +658,76 @@ Return only the JSON array, no markdown."""
                 data_summary.append(
                     "DB Stored Articles (semantic search):\n" + "\n".join(article_lines)
                 )
+
+        mcp_vertical_intel: dict[str, Any] = gathered_data.get("mcp_vertical_intel") or {}
+        if mcp_vertical_intel:
+            vi_lines = []
+            # Financial pulse
+            fin_pulse = mcp_vertical_intel.get("financial_pulse") or {}
+            if fin_pulse:
+                vi_lines.append(f"Financial Pulse: {json.dumps(fin_pulse, default=str)[:500]}")
+            # Competitive dynamics
+            comp_dyn = mcp_vertical_intel.get("competitive_dynamics") or {}
+            movers_up = comp_dyn.get("movers_up", [])
+            gtm_investors = comp_dyn.get("gtm_investors", [])
+            if movers_up:
+                vi_lines.append(f"Movers Up (revenue acceleration): {', '.join(str(m) for m in movers_up[:3])}")
+            if gtm_investors:
+                vi_lines.append(f"Top GTM Investors (highest SG&A spend): {', '.join(str(g) for g in gtm_investors[:3])}")
+            # GTM implications
+            gtm_impl = mcp_vertical_intel.get("gtm_implications") or []
+            if gtm_impl:
+                vi_lines.append("Pre-computed GTM Implications:")
+                for impl in gtm_impl[:5]:
+                    if isinstance(impl, dict):
+                        vi_lines.append(f"  - {impl.get('insight', impl)}")
+                    else:
+                        vi_lines.append(f"  - {impl}")
+            # Executive movements
+            exec_moves = mcp_vertical_intel.get("executive_movements") or []
+            if exec_moves:
+                vi_lines.append(f"Recent Executive Movements: {len(exec_moves)} leadership changes detected")
+                for em in exec_moves[:3]:
+                    if isinstance(em, dict):
+                        vi_lines.append(f"  - {em.get('name', '')}: {em.get('title', '')} at {em.get('company', '')}")
+            # Key trends from pre-computed article analysis
+            vi_trends = mcp_vertical_intel.get("key_trends") or []
+            if vi_trends:
+                vi_lines.append(f"Pre-computed Vertical Trends ({len(vi_trends)} identified):")
+                for vt in vi_trends[:3]:
+                    if isinstance(vt, dict):
+                        vi_lines.append(f"  - {vt.get('trend', vt.get('name', str(vt)))} (impact: {vt.get('impact', 'N/A')})")
+            # Signal digest
+            vi_signals = mcp_vertical_intel.get("signal_digest") or []
+            if vi_signals:
+                vi_lines.append(f"Top Market Signals ({len(vi_signals)}):")
+                for vs in vi_signals[:3]:
+                    if isinstance(vs, dict):
+                        vi_lines.append(f"  - [{vs.get('signal_type', '')}] {vs.get('headline', vs.get('title', str(vs)))[:200]}")
+            if vi_lines:
+                data_summary.append(
+                    "Vertical Intelligence Report (synthesized from EODHD + documents + news):\n"
+                    + "\n".join(vi_lines)
+                )
+
+        mcp_trajectories: list[dict[str, Any]] = gathered_data.get("mcp_trajectories") or []
+        if mcp_trajectories:
+            traj_lines = ["Market Leaders — Financial Trajectory:"]
+            for traj in mcp_trajectories:
+                name = traj.get("company_name", "Unknown")
+                tclass = traj.get("trajectory_class", "")
+                narrative = traj.get("narrative", "")
+                cagr = traj.get("revenue_cagr_3y")
+                sga_trend = traj.get("sga_efficiency_trend", "")
+                line = f"- {name}: {tclass}"
+                if cagr is not None:
+                    line += f" (3Y CAGR: {cagr * 100:.1f}%)"
+                if sga_trend:
+                    line += f", SG&A efficiency: {sga_trend}"
+                if narrative:
+                    line += f". {narrative[:200]}"
+                traj_lines.append(line)
+            data_summary.append("\n".join(traj_lines))
 
         if gathered_data.get("news"):
             news_lines = []
@@ -784,7 +883,7 @@ Where relevant, reference MAS regulations, PSG/EDG grants, or SGX dynamics.{fram
 
     async def _check(self, result: MarketIntelligenceOutput) -> float:
         """Validate market intelligence quality."""
-        score = 0.0
+        score = 0.2  # base — earned incrementally from here
 
         # Check data presence
         if result.market_summary and len(result.market_summary) > 100:
@@ -810,9 +909,9 @@ Where relevant, reference MAS regulations, PSG/EDG grants, or SGX dynamics.{fram
         if result.implications_for_gtm:
             score += 0.15
 
-        # Check data sources
+        # Check data sources (capped at 0.15 — 10+ Perplexity citations must not inflate score)
         if result.sources:
-            score += 0.05 * len(result.sources)
+            score += min(len(result.sources) * 0.05, 0.15)
 
         # Check news and economic data
         if result.recent_news:
@@ -833,6 +932,12 @@ Where relevant, reference MAS regulations, PSG/EDG grants, or SGX dynamics.{fram
         # Knowledge MCP framework guidance bonus (+0.03 when Porter/RACE frameworks were loaded)
         if getattr(self, "_has_kb_framework", False):
             score += 0.03
+
+        # Vertical intelligence and trajectory bonuses
+        if getattr(self, "_has_vertical_intel", False):
+            score += 0.03
+        if getattr(self, "_has_trajectories", False):
+            score += 0.02
 
         return min(score, 0.95)
 

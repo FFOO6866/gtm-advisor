@@ -76,6 +76,7 @@ SECTION_PATTERNS: dict[str, list[str]] = {
         "managing director's message",
     ],
     "Strategy": [
+        "strategy",
         "our strategy",
         "strategic priorities",
         "strategic direction",
@@ -114,6 +115,38 @@ SECTION_PATTERNS: dict[str, list[str]] = {
         "operations review",
         "operational review",
         "business review",
+    ],
+    "Operating Expenses": [
+        "operating expenses",
+        "operating costs",
+        "cost structure",
+        "expense breakdown",
+    ],
+    "Sales and Marketing": [
+        "sales and marketing",
+        "selling and distribution",
+        "marketing expenses",
+        "go-to-market",
+    ],
+    "Research and Development": [
+        "research and development",
+        "r&d",
+        "technology and innovation",
+        "product development",
+    ],
+    "Segment Information": [
+        "segment information",
+        "operating segments",
+        "business segments",
+        "revenue by segment",
+        "geographic information",
+        "revenue by geography",
+    ],
+    "Management Discussion": [
+        "management discussion",
+        "management's discussion",
+        "md&a",
+        "operating and financial review",
     ],
 }
 
@@ -396,6 +429,10 @@ def _match_section_header(line: str) -> str | None:
     - Line must be non-empty and <=120 characters (headings are short).
     - Line must not be purely numeric (page numbers, years).
     - Line is checked case-insensitively against each pattern's keywords.
+    - Short keywords (<=4 chars, e.g. "r&d", "esg") require word-boundary match
+      to avoid false positives on substrings.
+    - The keyword must represent a meaningful portion of the line (>=20% of its
+      non-whitespace length) to avoid matching incidental mentions in long prose.
     """
     if not line:
         return None
@@ -406,9 +443,24 @@ def _match_section_header(line: str) -> str | None:
         return None
 
     line_lower = line.lower()
+    line_stripped_len = len(line.replace(" ", ""))
+
     for section_name, keywords in SECTION_PATTERNS.items():
         for keyword in keywords:
-            if keyword in line_lower:
-                return section_name
+            if keyword not in line_lower:
+                continue
+            # Short keywords need word-boundary match to avoid substring hits
+            # e.g. "r&d" should not match "standard" or "board"
+            if len(keyword) <= 4:
+                pattern = r"(?<![a-z])" + re.escape(keyword) + r"(?![a-z])"
+                if not re.search(pattern, line_lower):
+                    continue
+            # Keyword must be a significant portion of the line — headings are
+            # mostly the keyword itself, not a long sentence that happens to
+            # contain the word "strategy"
+            keyword_len = len(keyword.replace(" ", ""))
+            if line_stripped_len > 0 and keyword_len / line_stripped_len < 0.20:
+                continue
+            return section_name
 
     return None

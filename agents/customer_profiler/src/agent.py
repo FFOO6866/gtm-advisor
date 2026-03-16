@@ -6,14 +6,17 @@ Uses real signals from AgentBus (market trends, competitor intel) to ground LLM 
 
 from __future__ import annotations
 
+import statistics
 from typing import Any
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
 from packages.core.src.agent_bus import AgentBus, DiscoveryType, get_agent_bus
 from packages.core.src.types import CustomerPersona
 from packages.core.src.vertical import detect_vertical_slug
+from packages.database.src.models import ListedCompany, MarketVertical
 from packages.database.src.session import async_session_factory
 from packages.integrations.newsapi.src.client import NewsAPIClient
 from packages.knowledge.src.knowledge_mcp import get_knowledge_mcp
@@ -174,6 +177,7 @@ Each persona must have a SPECIFIC job title (e.g. "Head of Sales Operations, 3â€
         # --- Phase 0: KB â€” Vertical landscape + ICP framework from knowledge library ---
         kb_landscape: dict[str, Any] = {}
         kb_benchmarks: dict[str, Any] = {}
+        kb_vertical_intel: dict[str, Any] = {}
         target_industries = plan.get("target_industries", [])
         company_info = plan.get("company_info", {})
         industry_fallback = (
@@ -189,6 +193,32 @@ Each persona must have a SPECIFIC job title (e.g. "Head of Sales Operations, 3â€
                     mcp = MarketIntelMCPServer(session=db)
                     kb_landscape = await mcp.get_vertical_landscape(vertical_slug) or {}
                     kb_benchmarks = await mcp.get_vertical_benchmarks(vertical_slug) or {}
+                    kb_vertical_intel = await mcp.get_vertical_intelligence(vertical_slug) or {}
+
+                    # Query real employee distribution for this vertical
+                    kb_employee_stats: dict[str, Any] = {}
+                    vert_row = await db.scalar(
+                        select(MarketVertical).where(MarketVertical.slug == vertical_slug)
+                    )
+                    if vert_row is not None:
+                        emp_rows = await db.scalars(
+                            select(ListedCompany.employees).where(
+                                ListedCompany.vertical_id == vert_row.id,
+                                ListedCompany.is_active.is_(True),
+                                ListedCompany.employees.is_not(None),
+                            )
+                        )
+                        emp_values = sorted(emp_rows.all())
+                        if emp_values:
+                            n = len(emp_values)
+                            kb_employee_stats = {
+                                "n": n,
+                                "p25": emp_values[max(0, int(n * 0.25) - 1)],
+                                "median": statistics.median(emp_values),
+                                "p75": emp_values[min(n - 1, int(n * 0.75))],
+                            }
+                    self._kb_employee_stats = kb_employee_stats
+                    self._kb_vertical_intel = kb_vertical_intel
             except Exception as e:
                 self._logger.debug("kb_icp_enrichment_failed", error=str(e))
 
@@ -224,6 +254,8 @@ Each persona must have a SPECIFIC job title (e.g. "Head of Sales Operations, 3â€
             data_sources_used.append("Market Intel DB")
         if industry_news:
             data_sources_used.append("NewsAPI")
+        if getattr(self, "_kb_vertical_intel", {}):
+            data_sources_used.append("Vertical Intelligence Report")
         self._data_sources_used = data_sources_used
         self._has_live_data = bool(market_signals or kb_landscape or kb_benchmarks or industry_news)
 
@@ -254,18 +286,86 @@ Each persona must have a SPECIFIC job title (e.g. "Head of Sales Operations, 3â€
         if kb_landscape or kb_benchmarks:
             lines = [f"\n\nKB Vertical Data ({vertical_slug}):"]
             if kb_landscape.get("companies_count"):
-                lines.append(f"- {kb_landscape['companies_count']} companies in vertical")
+                lines.append(f"- {kb_landscape['companies_count']} listed companies in vertical")
             mkt_cap = kb_landscape.get("market_cap_sgd_total")
             if mkt_cap and isinstance(mkt_cap, int | float):
                 lines.append(f"- Total market cap: SGD {mkt_cap:,.0f}M")
             if kb_landscape.get("leaders"):
                 leaders = [c.get("name", "") for c in kb_landscape["leaders"][:3] if c.get("name")]
                 lines.append(f"- Market leaders: {', '.join(leaders)}")
-            if kb_benchmarks.get("median_employees"):
-                lines.append(f"- Median employees in vertical: {kb_benchmarks['median_employees']}")
-            med_rev = kb_benchmarks.get("median_revenue_sgd")
-            if med_rev and isinstance(med_rev, int | float):
-                lines.append(f"- Median revenue: SGD {med_rev:,.0f}")
+
+            # Real employee distribution from ListedCompany DB query
+            emp_stats = getattr(self, "_kb_employee_stats", {})
+            if emp_stats:
+                lines.append(
+                    f"- Employee distribution: P25={emp_stats['p25']:,}, "
+                    f"median={int(emp_stats['median']):,}, "
+                    f"P75={emp_stats['p75']:,} "
+                    f"(n={emp_stats['n']})"
+                )
+
+            # Revenue distribution from VerticalBenchmark.distributions.revenue_ttm_sgd
+            dist = (kb_benchmarks.get("distributions") or {})
+            rev_dist = dist.get("revenue_ttm_sgd") or {}
+            rev_p25 = rev_dist.get("p25")
+            rev_p50 = rev_dist.get("p50")
+            rev_p75 = rev_dist.get("p75")
+            if rev_p50 is not None:
+                parts = []
+                if rev_p25 is not None:
+                    parts.append(f"P25=SGD {rev_p25/1e6:.0f}M")
+                if rev_p50 is not None:
+                    parts.append(f"median=SGD {rev_p50/1e6:.0f}M")
+                if rev_p75 is not None:
+                    parts.append(f"P75=SGD {rev_p75/1e6:.0f}M")
+                if parts:
+                    lines.append(f"- Revenue distribution (TTM): {', '.join(parts)}")
+
+            # Gross margin median
+            gm_dist = dist.get("gross_margin") or {}
+            gm_p50 = gm_dist.get("p50")
+            if gm_p50 is not None:
+                lines.append(f"- Median gross margin: {gm_p50 * 100:.1f}%")
+
+            # Revenue growth median
+            rg_dist = dist.get("revenue_growth_yoy") or {}
+            rg_p50 = rg_dist.get("p50")
+            if rg_p50 is not None:
+                lines.append(f"- Median revenue growth: {rg_p50 * 100:.1f}% YoY")
+
+            # Vertical intelligence â€” competitive dynamics and GTM spend patterns
+            vi = getattr(self, "_kb_vertical_intel", {})
+            if vi:
+                comp_dyn = vi.get("competitive_dynamics") or {}
+                gtm_investors = comp_dyn.get("gtm_investors", [])
+                if gtm_investors:
+                    investor_names = [
+                        g.get("name", str(g)) if isinstance(g, dict) else str(g)
+                        for g in gtm_investors[:3]
+                    ]
+                    lines.append(f"- Top GTM investors (highest SG&A spend): {', '.join(investor_names)}")
+                fin_pulse = vi.get("financial_pulse") or {}
+                sga_median = fin_pulse.get("sga_median")
+                rnd_median = fin_pulse.get("rnd_median")
+                if isinstance(sga_median, (int, float)) and sga_median > 0:
+                    lines.append(f"- Median SG&A/Revenue: {sga_median*100:.1f}% (marketing intensity)")
+                if isinstance(rnd_median, (int, float)) and rnd_median > 0:
+                    lines.append(f"- Median R&D/Revenue: {rnd_median*100:.1f}% (innovation intensity)")
+                # Movers up = companies gaining momentum (good ICP targets)
+                movers = comp_dyn.get("movers_up", [])
+                if movers:
+                    mover_names = [
+                        m.get("name", str(m)) if isinstance(m, dict) else str(m)
+                        for m in movers[:3]
+                    ]
+                    lines.append(f"- Momentum companies (revenue accelerating): {', '.join(mover_names)}")
+                # GTM implications for ICP refinement
+                gtm_impl = vi.get("gtm_implications") or []
+                if gtm_impl:
+                    for impl in gtm_impl[:2]:
+                        insight = impl.get("insight", str(impl)) if isinstance(impl, dict) else str(impl)
+                        lines.append(f"- GTM insight: {insight[:200]}")
+
             kb_firmographic_context = "\n".join(lines)
 
         market_context = ""
@@ -332,6 +432,9 @@ Create:
    - Tools they currently use (if inferable from industry/description)
    - Trigger events that cause them to evaluate solutions
 3. Segmentation strategy with Tier 1/2/3 classification criteria
+   - When GTM investor or momentum company data is provided above, reference it to identify
+     companies actively investing in go-to-market (high SG&A) as Tier 1 targets
+   - Use SG&A/Revenue median to estimate target company marketing budgets
 4. Targeting recommendations with specific outreach priority order
 5. Messaging themes per persona (hooks grounded in the market signals above where available)
 
@@ -361,8 +464,14 @@ Focus on Singapore/APAC B2B market.{_sg_context}""",
         # KB grounding bonus â€” vertical landscape/benchmarks improve ICP accuracy
         if getattr(self, "_kb_hit", False):
             score += 0.10
+        # Real employee distribution bonus â€” grounded firmographic size ranges
+        if getattr(self, "_kb_employee_stats", {}):
+            score += 0.05
         # Live news bonus â€” grounds ICP in current market dynamics
         if getattr(self, "_has_live_news", False):
+            score += 0.05
+        # Vertical intelligence bonus â€” real financial data grounds ICP
+        if getattr(self, "_kb_vertical_intel", {}):
             score += 0.05
         # Hard cap: ICP is largely derived from LLM without real data â€” don't overstate confidence
         has_live_data = getattr(self, "_has_live_data", False)

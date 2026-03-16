@@ -141,6 +141,8 @@ class CompetitorAnalystAgent(BaseGTMAgent[CompetitorIntelOutput]):
         self._competitors_with_real_data: set[str] = set()
         # Porter's Five Forces framework from KB (populated during _do)
         self._porter_framework: dict | None = None
+        # Vertical slug resolved during _do() and forwarded to persist_research()
+        self._vertical_slug: str = ""
 
         # Subscribe to competitor discoveries
         self._subscribe_to_discoveries()
@@ -361,6 +363,7 @@ Focus on Singapore/APAC competitors when relevant."""
         # Reset tracking for this run
         self._competitors_with_real_data = set()
         self._porter_framework = None
+        self._kb_financial_benchmarks: dict[str, dict] = {}
 
         known = plan.get("known_competitors", [])[:5]
 
@@ -384,6 +387,8 @@ Focus on Singapore/APAC competitors when relevant."""
             industry = plan.get("industry", "")
             # Map industry keyword to vertical slug via shared utility (best-effort; "" on no match)
             vertical_slug = detect_vertical_slug(f"{industry} {context.get('description', '')}") or ""
+            # Store for persist_research() in _act()
+            self._vertical_slug = vertical_slug
             async with async_session_factory() as db:
                 mcp = MarketIntelMCPServer(session=db)
 
@@ -667,7 +672,168 @@ Focus on Singapore/APAC competitors when relevant."""
                     competitor_news[comp_name] = headlines
                     sources.add("NewsAPI")
 
+        # --- Step 3d: KB financial benchmarks — benchmark each competitor against vertical peers ---
+        kb_financial_benchmarks: dict[str, dict] = {}  # comp_name → benchmark dict
+        if known:
+            try:
+                industry_3d = plan.get("industry", "")
+                vertical_slug_3d = (
+                    detect_vertical_slug(f"{industry_3d} {context.get('description', '')}") or None
+                )
+                async with async_session_factory() as db:
+                    mcp_bench = MarketIntelMCPServer(session=db)
+                    for comp_name in known[:5]:
+                        try:
+                            bench_result = await mcp_bench.find_and_benchmark_company_by_name(
+                                name=comp_name,
+                                vertical_slug=vertical_slug_3d,
+                            )
+                            if bench_result.get("found"):
+                                kb_financial_benchmarks[comp_name] = bench_result
+                        except Exception as _bench_err:
+                            self._logger.debug(
+                                "kb_benchmark_failed",
+                                competitor=comp_name,
+                                error=str(_bench_err),
+                            )
+            except Exception as _bench_outer_err:
+                self._logger.debug("kb_benchmark_outer_failed", error=str(_bench_outer_err))
+
+        self._kb_financial_benchmarks = kb_financial_benchmarks
+
+        # --- Step 3e: Trajectory + GTM profile + executive intelligence ---
+        # These MCP tools access EODHD time-series data that no LLM has.
+        kb_trajectories: dict[str, dict] = {}  # comp_name → trajectory dict
+        kb_gtm_profiles: dict[str, dict] = {}  # comp_name → GTM profile dict
+        if known:
+            try:
+                async with async_session_factory() as db:
+                    mcp_deep = MarketIntelMCPServer(session=db)
+                    for comp_name in known[:5]:
+                        bench = kb_financial_benchmarks.get(comp_name, {})
+                        co = bench.get("company", {})
+                        _ticker = co.get("ticker")
+                        _exchange = co.get("exchange", "SG")
+                        if _ticker:
+                            try:
+                                traj = await mcp_deep.get_company_trajectory(_ticker, _exchange)
+                                if traj:
+                                    kb_trajectories[comp_name] = traj
+                            except Exception as _exc:
+                                self._logger.debug("trajectory_fetch_failed", competitor=comp_name, error=str(_exc))
+                            try:
+                                gtm_prof = await mcp_deep.get_company_gtm_profile(_ticker, _exchange)
+                                if gtm_prof:
+                                    kb_gtm_profiles[comp_name] = gtm_prof
+                            except Exception as _exc:
+                                self._logger.debug("gtm_profile_fetch_failed", competitor=comp_name, error=str(_exc))
+            except Exception as _deep_err:
+                self._logger.debug("kb_deep_intel_failed", error=str(_deep_err))
+
+        self._kb_trajectories = kb_trajectories
+        self._kb_gtm_profiles = kb_gtm_profiles
+
         # --- Step 4: Build grounding context from real MCP data + KB articles ---
+
+        def _format_kb_benchmark(comp_name: str) -> str:
+            """Return a formatted KB financial benchmark block, or '' if not found."""
+            bench = kb_financial_benchmarks.get(comp_name)
+            if not bench:
+                return ""
+            company_info = bench.get("company", {})
+            financials = bench.get("financials", {})
+            benchmark_meta = bench.get("benchmark", {})
+            ticker = company_info.get("ticker", "")
+            metric_ranks: dict = benchmark_meta.get("metric_ranks", {})
+            description: str = benchmark_meta.get("description", "")
+
+            def _rank_label(rank: float | None) -> str:
+                if rank is None:
+                    return "n/a"
+                pct = rank * 100
+                if pct >= 90:
+                    return f"P{pct:.0f} — fast-growing threat"
+                if pct >= 75:
+                    return f"P{pct:.0f} — above median"
+                if pct >= 50:
+                    return f"P{pct:.0f} — average"
+                if pct >= 25:
+                    return f"P{pct:.0f} — below median"
+                return f"P{pct:.0f} — laggard"
+
+            lines: list[str] = [f"KB Financial Benchmark ({ticker}):"]
+            metric_display = {
+                "gross_margin": "Gross margin",
+                "revenue_growth_yoy": "Revenue growth YoY",
+                "net_margin": "Net margin",
+                "ebitda_margin": "EBITDA margin",
+                "roe": "ROE",
+            }
+            fin_vals = {
+                "gross_margin": financials.get("gross_margin"),
+                "revenue_growth_yoy": financials.get("revenue_growth_yoy"),
+                "net_margin": financials.get("net_margin"),
+                "ebitda_margin": financials.get("ebitda_margin"),
+                "roe": financials.get("roe"),
+            }
+            for key, label in metric_display.items():
+                val = fin_vals.get(key)
+                rank = metric_ranks.get(key)
+                if val is not None:
+                    lines.append(
+                        f"- {label}: {val * 100:.1f}% ({_rank_label(rank)})"
+                    )
+            if description:
+                lines.append(f"- Position: {description}")
+            return "\n".join(lines) if len(lines) > 1 else ""
+
+        def _format_deep_intel(comp_name: str) -> str:
+            """Return trajectory + GTM profile + exec intel block, or '' if not found."""
+            parts: list[str] = []
+            traj = kb_trajectories.get(comp_name)
+            if traj:
+                tclass = traj.get("trajectory_class", "")
+                narrative = traj.get("narrative", "")
+                cagr = traj.get("revenue_cagr_3y")
+                sga = traj.get("sga_efficiency_trend", "")
+                line = f"Trajectory: {tclass}"
+                if cagr is not None:
+                    line += f" (3Y CAGR: {cagr*100:.1f}%)"
+                if sga:
+                    line += f", SG&A efficiency: {sga}"
+                parts.append(line)
+                if narrative:
+                    parts.append(f"  {narrative[:300]}")
+
+            gtm = kb_gtm_profiles.get(comp_name)
+            if gtm and not gtm.get("error"):
+                profile_parts = []
+                gtm_spend = gtm.get("gtm_spend") or {}
+                sga = gtm_spend.get("sga_to_revenue")
+                if isinstance(sga, (int, float)):
+                    profile_parts.append(f"SG&A/Rev: {sga*100:.1f}%")
+                rnd = gtm_spend.get("rnd_to_revenue")
+                if isinstance(rnd, (int, float)):
+                    profile_parts.append(f"R&D/Rev: {rnd*100:.1f}%")
+                # SG&A trend from time-series
+                trend_data = gtm_spend.get("trend") or []
+                if len(trend_data) >= 2:
+                    curr_sga = (trend_data[0] or {}).get("sga_to_revenue")
+                    prev_sga = (trend_data[1] or {}).get("sga_to_revenue")
+                    if isinstance(curr_sga, (int, float)) and isinstance(prev_sga, (int, float)) and prev_sga > 0:
+                        direction = "increasing" if curr_sga > prev_sga else "decreasing"
+                        profile_parts.append(f"SG&A trend: {direction}")
+                esg_score = (gtm.get("esg") or {}).get("total_score")
+                if isinstance(esg_score, (int, float)):
+                    profile_parts.append(f"ESG: {esg_score:.0f}")
+                analyst_rating = (gtm.get("analyst_consensus") or {}).get("rating")
+                if analyst_rating:
+                    profile_parts.append(f"Analyst: {analyst_rating}")
+                if profile_parts:
+                    parts.append(f"GTM Profile: {', '.join(profile_parts)}")
+
+            return "\n".join(parts) if parts else ""
+
         real_data_sections: list[str] = []
         for competitor, facts_summary in real_data.items():
             section = f"### {competitor} (real data from MCP sources)\n{facts_summary}"
@@ -695,6 +861,12 @@ Focus on Singapore/APAC competitors when relevant."""
             news_headlines = competitor_news.get(competitor, [])
             if news_headlines:
                 section += "\n\nRecent News (last 14 days):\n" + "\n".join(f"- {h}" for h in news_headlines)
+            kb_bench_block = _format_kb_benchmark(competitor)
+            if kb_bench_block:
+                section += f"\n\n{kb_bench_block}"
+            deep_intel_block = _format_deep_intel(competitor)
+            if deep_intel_block:
+                section += f"\n\n{deep_intel_block}"
             real_data_sections.append(section)
 
         # For competitors with KB articles but no MCP facts, add a KB-only section
@@ -721,6 +893,12 @@ Focus on Singapore/APAC competitors when relevant."""
                 news_headlines = competitor_news.get(competitor, [])
                 if news_headlines:
                     section += "\n\nRecent News (last 14 days):\n" + "\n".join(f"- {h}" for h in news_headlines)
+                kb_bench_block = _format_kb_benchmark(competitor)
+                if kb_bench_block:
+                    section += f"\n\n{kb_bench_block}"
+                deep_intel_block = _format_deep_intel(competitor)
+                if deep_intel_block:
+                    section += f"\n\n{deep_intel_block}"
                 real_data_sections.append(section)
 
         # For competitors with EODHD data but neither MCP nor KB coverage, add a standalone section
@@ -735,16 +913,46 @@ Focus on Singapore/APAC competitors when relevant."""
                     eodhd_parts.append(f"market_cap={eodhd_data['market_cap']:.0f}")
                 if eodhd_parts:
                     _exch = eodhd_data.get("exchange", "SG")
-                    real_data_sections.append(
+                    eodhd_section = (
                         f"### {competitor} (EODHD {_exch}:{eodhd_data.get('ticker', '')})\n"
                         + "EODHD Fundamentals: " + ", ".join(eodhd_parts)
                     )
+                    kb_bench_block = _format_kb_benchmark(competitor)
+                    if kb_bench_block:
+                        eodhd_section += f"\n\n{kb_bench_block}"
+                    deep_intel_block = _format_deep_intel(competitor)
+                    if deep_intel_block:
+                        eodhd_section += f"\n\n{deep_intel_block}"
+                    real_data_sections.append(eodhd_section)
 
         # Competitors with only news data
         for competitor, headlines in competitor_news.items():
             if competitor not in real_data and competitor not in kb_competitor_articles and competitor not in eodhd_enrichments:
                 section = f"### {competitor} (recent news only)\n" + "\n".join(f"- {h}" for h in headlines)
+                kb_bench_block = _format_kb_benchmark(competitor)
+                if kb_bench_block:
+                    section += f"\n\n{kb_bench_block}"
+                deep_intel_block = _format_deep_intel(competitor)
+                if deep_intel_block:
+                    section += f"\n\n{deep_intel_block}"
                 real_data_sections.append(section)
+
+        # Competitors with only KB financial benchmark data (no other coverage)
+        covered = (
+            set(real_data)
+            | set(kb_competitor_articles)
+            | set(eodhd_enrichments)
+            | set(competitor_news)
+        )
+        for competitor, bench in kb_financial_benchmarks.items():
+            if competitor not in covered and bench.get("found"):
+                kb_bench_block = _format_kb_benchmark(competitor)
+                if kb_bench_block:
+                    bench_section = f"### {competitor}\n{kb_bench_block}"
+                    deep_intel_block = _format_deep_intel(competitor)
+                    if deep_intel_block:
+                        bench_section += f"\n\n{deep_intel_block}"
+                    real_data_sections.append(bench_section)
 
         grounding_context = (
             "\n\n".join(real_data_sections)
@@ -809,6 +1017,8 @@ Create a complete CompetitorIntelOutput with:
         named_sources = list(sources | kb_sources) + (
             ["Perplexity AI"] if competitors_data else []
         )
+        if kb_financial_benchmarks:
+            named_sources.append("Market Intel DB (financial benchmarks)")
         result.data_sources_used = named_sources
         # is_live_data: only count real-time sources (Perplexity, MCP live queries, EODHD, NewsAPI).
         # kb_sources are from daily-synced DB snapshots — not live data.
@@ -926,6 +1136,16 @@ Do not use generic phrases like "strong brand" without supporting detail.""",
         if self._porter_framework is not None:
             score += 0.03
 
+        # KB financial benchmark bonus (+0.05 when at least one competitor was benchmarked)
+        if getattr(self, "_kb_financial_benchmarks", {}):
+            score += 0.05
+
+        # Deep intelligence bonuses (trajectory + GTM profile)
+        if getattr(self, "_kb_trajectories", {}):
+            score += 0.03
+        if getattr(self, "_kb_gtm_profiles", {}):
+            score += 0.02
+
         return min(score, cap)
 
     async def _act(self, result: CompetitorIntelOutput, confidence: float) -> CompetitorIntelOutput:
@@ -949,17 +1169,24 @@ Do not use generic phrases like "strong brand" without supporting detail.""",
         if self._agent_bus and result.competitors:
             for competitor in result.competitors:
                 if competitor.weaknesses:
-                    await self._agent_bus.publish(
-                        from_agent=self.name,
-                        discovery_type=DiscoveryType.COMPETITOR_WEAKNESS,
-                        title=f"Weaknesses: {competitor.competitor_name}",
-                        content={
-                            "competitor_name": competitor.competitor_name,
-                            "weaknesses": competitor.weaknesses,
-                            "opportunities": competitor.opportunities,
-                        },
-                        confidence=confidence,
-                        analysis_id=self._analysis_id,
-                    )
+                    try:
+                        await self._agent_bus.publish(
+                            from_agent=self.name,
+                            discovery_type=DiscoveryType.COMPETITOR_WEAKNESS,
+                            title=f"Weaknesses: {competitor.competitor_name}",
+                            content={
+                                "competitor_name": competitor.competitor_name,
+                                "weaknesses": competitor.weaknesses,
+                                "opportunities": competitor.opportunities,
+                            },
+                            confidence=confidence,
+                            analysis_id=self._analysis_id,
+                        )
+                    except Exception as e:
+                        self._logger.warning(
+                            "competitor_weakness_publish_failed",
+                            competitor=competitor.competitor_name,
+                            error=str(e),
+                        )
 
         return result

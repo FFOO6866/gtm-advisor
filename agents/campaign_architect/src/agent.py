@@ -216,6 +216,8 @@ Templates should be ready to personalize and send."""
 
         # --- KB Phase 1: Market vertical landscape ---
         kb_vertical_context: dict[str, Any] = {}
+        kb_vertical_benchmarks: dict[str, Any] = {}
+        kb_vertical_intel: dict[str, Any] = {}
         industry_text = context.get("industry", "") or context.get("description", "")
         vertical_slug = detect_vertical_slug(industry_text)
         if vertical_slug:
@@ -223,6 +225,8 @@ Templates should be ready to personalize and send."""
                 async with async_session_factory() as db:
                     mcp = MarketIntelMCPServer(session=db)
                     kb_vertical_context = await mcp.get_vertical_landscape(vertical_slug) or {}
+                    kb_vertical_benchmarks = await mcp.get_vertical_benchmarks(vertical_slug) or {}
+                    kb_vertical_intel = await mcp.get_vertical_intelligence(vertical_slug) or {}
             except Exception as e:
                 self._logger.debug("kb_campaign_enrichment_failed", error=str(e))
 
@@ -267,6 +271,8 @@ Templates should be ready to personalize and send."""
             "value_proposition": context.get("value_proposition", ""),
             "campaign_goal": campaign_goal,
             "kb_vertical_context": kb_vertical_context,
+            "kb_vertical_benchmarks": kb_vertical_benchmarks,
+            "kb_vertical_intel": kb_vertical_intel,
             "kb_messaging_framework": kb_messaging_framework,
             "kb_cialdini_principles": kb_cialdini_principles,
         }
@@ -315,6 +321,52 @@ Templates should be ready to personalize and send."""
                 kb_vertical_str = f"\n\nMarket Leaders in Vertical: {', '.join(leaders)}"
             if trends:
                 kb_vertical_str += f"\nLatest Market Signals: {'; '.join(str(t) for t in trends)}"
+
+        # Vertical intelligence — data-backed messaging angles from EODHD + documents
+        kb_vertical_intel = plan.get("kb_vertical_intel", {})
+        vi_context = ""
+        if kb_vertical_intel:
+            vi_lines: list[str] = []
+            # GTM implications = pre-computed messaging angles from financial data
+            gtm_impl = kb_vertical_intel.get("gtm_implications") or []
+            if gtm_impl:
+                vi_lines.append("Data-Backed Messaging Angles (from financial analysis):")
+                for impl in gtm_impl[:4]:
+                    insight = impl.get("insight", str(impl)) if isinstance(impl, dict) else str(impl)
+                    vi_lines.append(f"  - {insight[:250]}")
+            # Competitive dynamics — who's investing in GTM
+            comp_dyn = kb_vertical_intel.get("competitive_dynamics") or {}
+            gtm_investors = comp_dyn.get("gtm_investors", [])
+            if gtm_investors:
+                investor_names = [
+                    g.get("name", str(g)) if isinstance(g, dict) else str(g)
+                    for g in gtm_investors[:3]
+                ]
+                vi_lines.append(f"Companies investing heavily in GTM: {', '.join(investor_names)}")
+            # Financial pulse — SG&A trends for budget framing
+            fin_pulse = kb_vertical_intel.get("financial_pulse") or {}
+            sga_median = fin_pulse.get("sga_median")
+            if isinstance(sga_median, (int, float)) and sga_median > 0:
+                vi_lines.append(
+                    f"Industry median marketing spend: {sga_median*100:.1f}% of revenue"
+                    " — use for budget framing in messaging"
+                )
+            if vi_lines:
+                vi_context = (
+                    "\n\n--- VERTICAL INTELLIGENCE (EODHD + annual reports) ---\n"
+                    + "\n".join(vi_lines)
+                )
+        self._kb_vertical_intel_hit = bool(vi_context)
+
+        # Vertical benchmarks — industry-level financial distributions for social proof
+        kb_vertical_benchmarks = plan.get("kb_vertical_benchmarks", {})
+        bench_context = ""
+        if kb_vertical_benchmarks:
+            dist = kb_vertical_benchmarks.get("distributions") or {}
+            growth_dist = dist.get("revenue_growth_yoy") or {}
+            growth_p50 = growth_dist.get("p50")
+            if growth_p50 is not None:
+                bench_context += f"\nIndustry median revenue growth: {growth_p50*100:.1f}% YoY"
 
         # Format knowledge framework guidance for LLM
         kb_framework_str = ""
@@ -458,7 +510,7 @@ Compliance requirements for Singapore outreach (mandatory — include in all ema
 
 Company: {company_text}
 Value Proposition: {plan.get("value_proposition", "Not specified")}{persona_context}{weakness_context}{kb_vertical_str}{kb_framework_str}{competitor_intel_str}
-Campaign Goal: {plan.get("campaign_goal")}
+Campaign Goal: {plan.get("campaign_goal")}{vi_context}{bench_context}
 Target Leads: {lead_context}
 {compliance_prompt}
 Create:
@@ -584,6 +636,10 @@ CRITICAL: All content must be COMPLETE and IMMEDIATELY USABLE.
         if getattr(self, "_has_live_intel", False):
             score += 0.10
 
+        # Vertical intelligence bonus — data-backed messaging angles
+        if getattr(self, "_kb_vertical_intel_hit", False):
+            score += 0.05
+
         return min(score, 1.0)
 
     async def _act(self, result: CampaignPlanOutput, confidence: float) -> CampaignPlanOutput:
@@ -597,6 +653,8 @@ CRITICAL: All content must be COMPLETE and IMMEDIATELY USABLE.
         data_sources = list(getattr(self, "_campaign_data_sources", []))
         if getattr(self, "_has_live_intel", False):
             data_sources.append("Perplexity")
+        if getattr(self, "_kb_vertical_intel_hit", False):
+            data_sources.append("Vertical Intelligence Report")
         result.data_sources_used = data_sources
         result.is_live_data = bool(
             getattr(self, "_has_live_intel", False) or self._bus_personas or self._bus_leads

@@ -1937,6 +1937,11 @@ class VerticalBenchmark(Base):
     roe: Mapped[dict] = mapped_column(JSON, default=dict)
     net_debt_ebitda: Mapped[dict] = mapped_column(JSON, default=dict)
     revenue_ttm_sgd: Mapped[dict] = mapped_column(JSON, default=dict)         # Revenue scale distribution
+    # GTM-relevant operational benchmarks
+    sga_to_revenue: Mapped[dict] = mapped_column(JSON, default=dict)
+    rnd_to_revenue: Mapped[dict] = mapped_column(JSON, default=dict)
+    operating_margin_dist: Mapped[dict] = mapped_column(JSON, default=dict)  # _dist suffix avoids clash with snapshot column
+    capex_to_revenue: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Leader / laggard snapshots (top 3 and bottom 3 by revenue growth)
     leaders: Mapped[list] = mapped_column(JSON, default=list)                 # [{"ticker", "name", "metric", "value"}]
@@ -2214,4 +2219,71 @@ class SgKnowledgeArticle(Base):
     __table_args__ = (
         Index("ix_sg_knowledge_source_type", "source", "category_type"),
         Index("ix_sg_knowledge_unembedded", "is_embedded"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Vertical Intelligence Reports
+# ---------------------------------------------------------------------------
+
+
+class VerticalIntelligenceReport(Base):
+    """Synthesized industry intelligence report for a market vertical.
+
+    Aggregates MarketArticles, VerticalBenchmarks, CompanyExecutive movements,
+    and financial trends into a structured report that agents consume for
+    industry-aware GTM advisory.
+
+    Updated weekly by the vertical intelligence synthesis job.
+    Each vertical has one active report at a time; older reports are retained
+    for historical comparison.
+    """
+    __tablename__ = "vertical_intelligence_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    vertical_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("market_verticals.id"), nullable=False, index=True
+    )
+    report_period: Mapped[str] = mapped_column(String(20), nullable=False)  # e.g. "2026-W11"
+    is_current: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+
+    # Aggregated intelligence sections (all JSON)
+    market_overview: Mapped[dict] = mapped_column(JSON, default=dict)
+    # {summary, total_companies, total_market_cap_sgd, yoy_growth_median, benchmark_highlights}
+
+    key_trends: Mapped[list] = mapped_column(JSON, default=list)
+    # [{trend, evidence, impact, source_count}]
+
+    competitive_dynamics: Mapped[dict] = mapped_column(JSON, default=dict)
+    # {leaders, challengers, movers (biggest growth/decline), new_entrants, exits}
+
+    financial_pulse: Mapped[dict] = mapped_column(JSON, default=dict)
+    # {sga_median, sga_trend, rnd_median, rnd_trend, margin_compression_or_expansion,
+    #  top_spenders [{ticker, name, sga_to_revenue}], capex_intensity}
+
+    signal_digest: Mapped[list] = mapped_column(JSON, default=list)
+    # [{headline, signal_type, source, published_at, companies_mentioned}] — top 10 signals
+
+    executive_movements: Mapped[list] = mapped_column(JSON, default=list)
+    # [{company, name, old_title, new_title, change_type, date}]
+
+    regulatory_environment: Mapped[list] = mapped_column(JSON, default=list)
+    # [{title, summary, source, impact}]
+
+    gtm_implications: Mapped[list] = mapped_column(JSON, default=list)
+    # [{insight, evidence, recommended_action, priority}]
+
+    data_sources: Mapped[dict] = mapped_column(JSON, default=dict)
+    # {articles_analyzed, companies_tracked, benchmarks_used, signals_processed}
+
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relationships
+    vertical: Mapped["MarketVertical"] = relationship("MarketVertical")
+
+    __table_args__ = (
+        Index(
+            "ix_vertical_intel_report_current",
+            "vertical_id", "is_current",
+        ),
     )

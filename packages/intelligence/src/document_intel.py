@@ -152,6 +152,14 @@ class DocumentIntelligenceExtractor:
         "operations review",
         "sustainability",
         "risk",
+        "operating expenses",
+        "sales and marketing",
+        "selling and distribution",
+        "research and development",
+        "r&d",
+        "segment",
+        "management discussion",
+        "md&a",
     })
 
     # Max chunks to process per document (cost control)
@@ -423,7 +431,7 @@ class DocumentIntelligenceExtractor:
                     or_(
                         func.lower(Company.industry).contains(industry.lower()),
                         func.lower(Company.name).contains(
-                            company_name.split()[0].lower() if company_name else ""
+                            company_name.split()[0].lower() if company_name and company_name.strip() else ""
                         ),
                     )
                 ).limit(5)

@@ -244,6 +244,8 @@ class LeadHunterAgent(ToolEmpoweredAgent[LeadHuntingOutput]):
         self._opportunity_window = None
         # KB qualification frameworks (populated during _do)
         self._kb_qualification: dict | None = None
+        # Count of prospects enriched with KB financial benchmarks (reset each _do run)
+        self._kb_benchmarked_count: int = 0
         # Market opportunities from MarketIntelligenceAgent (via bus)
         self._market_opportunities: list[dict] = []
         # Competitor weaknesses from CompetitorAnalyst (via bus)
@@ -342,11 +344,14 @@ Focus on Singapore/APAC market context."""
         self._analysis_id = context.get("analysis_id")
 
         # Load domain knowledge pack — injected into outreach approach synthesis.
-        kmcp = get_knowledge_mcp()
-        self._knowledge_pack = await kmcp.get_agent_knowledge_pack(
-            agent_name="lead-hunter",
-            task_context=task,
-        )
+        try:
+            kmcp_pack = get_knowledge_mcp()
+            self._knowledge_pack = await kmcp_pack.get_agent_knowledge_pack(
+                agent_name="lead-hunter",
+                task_context=task,
+            )
+        except Exception as _e:
+            self._logger.debug("knowledge_pack_load_failed", error=str(_e))
 
         # Pull personas from bus history (for cases where PERSONA_DEFINED was published before this agent ran)
         if self._agent_bus is not None:
@@ -486,6 +491,7 @@ Focus on Singapore/APAC market context."""
         """Execute lead hunting using 4-layer architecture."""
         context = context or {}
         criteria = LeadScoringCriteria(**plan["criteria"])
+        self._kb_benchmarked_count = 0  # reset per-run counter
 
         # --- KB Phase: Pull BANT (via SALES_QUALIFICATION) and ICP qualification frameworks ---
         self._kb_qualification = None
@@ -719,6 +725,7 @@ Focus on Singapore/APAC market context."""
                 if opportunity_window is not None
                 else []
             )
+            + (["Market Intel DB"] if self._kb_benchmarked_count > 0 else [])
         )
 
         return LeadHuntingOutput(
@@ -796,6 +803,9 @@ Focus on Singapore/APAC market context."""
                 enrichment["revenue_sgd"] = fundamentals.revenue
             if fundamentals.market_cap:
                 enrichment["market_cap"] = fundamentals.market_cap
+            if enrichment:
+                enrichment["ticker"] = ticker
+                enrichment["exchange"] = "SG"
             return enrichment
 
         except Exception as e:
@@ -956,6 +966,106 @@ Focus on Singapore/APAC market context."""
             # EODHD overrides: employee count from stock filings is more accurate than enrichment
             if eodhd_data:
                 company_data.update(eodhd_data)
+
+            # KB financial benchmark lookup — queries the Market Intel DB for this
+            # company and derives financial health signals from percentile ranks.
+            # Runs after EODHD so KB can fill gaps and add richer context.
+            _benchmark_result: dict = {}
+            try:
+                async with async_session_factory() as _db:
+                    _mcp = MarketIntelMCPServer(session=_db)
+                    _benchmark_result = await _mcp.find_and_benchmark_company_by_name(
+                        name=company_data.get("name", ""),
+                        vertical_slug=getattr(self, "_current_vertical_slug", None),
+                    )
+                if _benchmark_result.get("found"):
+                    _co = _benchmark_result.get("company", {})
+                    _fin = _benchmark_result.get("financials", {})
+                    _bench = _benchmark_result.get("benchmark", {})
+                    _metric_ranks: dict[str, float] = _bench.get("metric_ranks", {})
+
+                    # Override employee count only when KB has a non-zero value
+                    # (more reliable than tool enrichment for listed companies)
+                    if _co.get("employees"):
+                        company_data["employee_count"] = _co["employees"]
+
+                    # Mark budget as confirmed — public company with known revenue
+                    company_data["budget_confirmed"] = True
+                    if _fin.get("revenue"):
+                        company_data["revenue_sgd"] = _fin["revenue"]
+                    if _co.get("market_cap_sgd"):
+                        company_data["market_cap"] = _co["market_cap_sgd"]
+
+                    # Derive financial health signals from percentile ranks
+                    _fh_signals: list[str] = []
+                    _growth_rank = _metric_ranks.get("revenue_growth_yoy")
+                    _margin_rank = _metric_ranks.get("gross_margin")
+                    if _growth_rank is not None:
+                        pct = int(_growth_rank * 100)
+                        if _growth_rank >= 0.75:
+                            _fh_signals.append(f"High-growth (P{pct} revenue growth)")
+                        elif _growth_rank < 0.25:
+                            _fh_signals.append(f"Slow growth (P{pct}) — may seek new channels")
+                    if _margin_rank is not None and _margin_rank >= 0.75:
+                        pct = int(_margin_rank * 100)
+                        _fh_signals.append(f"Strong margins (P{pct} gross margin)")
+
+                    company_data["_financial_health_signals"] = _fh_signals
+                    self._kb_benchmarked_count += 1
+                    self._logger.debug(
+                        "kb_financial_benchmark_applied",
+                        company=company_data.get("name", ""),
+                        signals=_fh_signals,
+                    )
+            except Exception as _bench_exc:
+                self._logger.debug(
+                    "kb_financial_benchmark_failed",
+                    company=company_data.get("name", ""),
+                    error=str(_bench_exc),
+                )
+
+            # Step 2b: Trajectory analysis — identifies accelerating companies (high-intent buyers)
+            try:
+                async with async_session_factory() as _traj_db:
+                    _traj_mcp = MarketIntelMCPServer(session=_traj_db)
+                    # Use ticker from benchmark result if found, otherwise try EODHD search
+                    _traj_ticker = None
+                    _traj_exchange = "SG"
+                    if _benchmark_result.get("found"):
+                        _traj_ticker = _benchmark_result.get("company", {}).get("ticker")
+                        _traj_exchange = _benchmark_result.get("company", {}).get("exchange", "SG")
+                    elif eodhd_data.get("ticker"):
+                        _traj_ticker = eodhd_data.get("ticker")
+                        _traj_exchange = eodhd_data.get("exchange", "SG")
+                    if _traj_ticker:
+                        _traj = await _traj_mcp.get_company_trajectory(_traj_ticker, _traj_exchange)
+                        if _traj and not _traj.get("error"):
+                            _traj_class = _traj.get("trajectory_class", "")
+                            _traj_signals: list[str] = []
+                            if _traj_class == "ACCELERATING":
+                                _traj_signals.append("Revenue accelerating — high-growth buyer")
+                            elif _traj_class == "DECELERATING":
+                                _traj_signals.append("Revenue decelerating — may seek efficiency tools")
+                            elif _traj_class == "TURNAROUND":
+                                _traj_signals.append("Turnaround in progress — actively investing")
+                            _sga_eff = _traj.get("sga_efficiency_trend", "")
+                            if _sga_eff == "improving":
+                                _traj_signals.append("SG&A efficiency improving — GTM-optimizing buyer")
+                            elif _sga_eff == "declining":
+                                _traj_signals.append("SG&A efficiency declining — needs GTM optimization")
+                            _cagr = _traj.get("revenue_cagr_3y")
+                            if _cagr is not None:
+                                _traj_signals.append(f"3Y revenue CAGR: {_cagr*100:.1f}%")
+                            if _traj_signals:
+                                existing_fh = company_data.get("_financial_health_signals", [])
+                                company_data["_financial_health_signals"] = existing_fh + _traj_signals
+                                company_data["_trajectory_class"] = _traj_class
+            except Exception as _traj_exc:
+                self._logger.debug(
+                    "trajectory_enrichment_failed",
+                    company=company_data.get("name", ""),
+                    error=str(_traj_exc),
+                )
         else:
             eodhd_data = {}
             kb_headlines = []
@@ -1067,6 +1177,7 @@ Focus on Singapore/APAC market context."""
                 company_data.get("technologies", [])[:3]
                 + (["SGX-listed public company"] if company_data.get("market_cap") else [])
                 + kb_headlines  # Stored news/events from KB ingestion pipeline
+                + company_data.get("_financial_health_signals", [])  # KB financial benchmark signals
             )[:5],
             fit_score=fit_score,
             intent_score=intent_score,
@@ -1252,11 +1363,13 @@ Only include archetypes where the product genuinely solves a real problem. Be sp
                 f'Return JSON: {{"companies": [{{"name": "...", "domain": "..."}}]}}'
             )
 
+        _knowledge_ctx = getattr(self, "_knowledge_pack", {}).get("formatted_injection", "")
+        _knowledge_header = f"{_knowledge_ctx}\n\n---\n\n" if _knowledge_ctx else ""
         messages = [
             {"role": "system", "content": self.get_system_prompt()},
             {
                 "role": "user",
-                "content": buyer_desc,
+                "content": f"{_knowledge_header}{buyer_desc}",
             },
         ]
         try:
@@ -1563,6 +1676,24 @@ Write a 2-3 sentence outreach approach that:
 
         # Knowledge MCP qualification framework bonus (+0.03 when BANT/ICP frameworks loaded)
         if self._kb_qualification is not None:
+            score += 0.03
+
+        # KB financial benchmark bonus (+0.05 when at least one prospect was benchmarked)
+        if getattr(self, "_kb_benchmarked_count", 0) > 0:
+            score += 0.05
+
+        # Trajectory enrichment bonus (+0.03 when at least one prospect has trajectory signals)
+        # Trajectory signals are appended to _financial_health_signals, which lands in trigger_events.
+        trajectory_enriched = sum(
+            1
+            for p in result.prospects
+            if any(
+                kw in ev
+                for ev in (p.trigger_events or [])
+                for kw in ("accelerating", "decelerating", "Turnaround", "CAGR", "SG&A efficiency")
+            )
+        )
+        if trajectory_enriched > 0:
             score += 0.03
 
         return min(score, 1.0)

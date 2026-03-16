@@ -20,6 +20,7 @@ Schedule:
     Every 2 hours :45:   Research Embedder — embed public research cache rows → Qdrant
     Every Sunday 04:00:  Singapore Reference Scraper — PSG/PDPA/MAS/EnterpriseSG data
     Every Saturday 03:00: Knowledge Guide Resynthesis — update guides with accumulated research
+    Every Sunday 05:00:  Vertical Intelligence Synthesis — per-vertical intelligence reports
 
 All jobs run in the background. Failed jobs are logged but do NOT crash the app.
 APScheduler is embedded in-process (no external queue needed for MVP).
@@ -244,6 +245,34 @@ async def start_scheduler() -> None:
         trigger=CronTrigger(day_of_week="sat", hour=3, minute=0, timezone="Asia/Singapore"),
         id="guide_resynthesis_weekly",
         name="Knowledge Guide Resynthesis — update guides with accumulated research",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=7200,
+    )
+
+    # --- Job 17: GTM Financial Intelligence Extraction (daily 04:30 SGT) ---
+    # Runs at 04:30, after Document Intelligence (04:15) completes.
+    # Extracts structured GTM insights (channels, initiatives, segments)
+    # from annual report chunks and stores as SignalEvent rows.
+    scheduler.add_job(
+        _run_gtm_financial_extraction,
+        trigger=CronTrigger(hour=4, minute=30, timezone="Asia/Singapore"),
+        id="gtm_financial_extraction_daily",
+        name="GTM Financial Intelligence — extract GTM insights from annual reports",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=3600,
+    )
+
+    # --- Job 18: Vertical Intelligence Synthesis (Sunday 05:00 SGT) ---
+    # Runs after all weekly data pipelines complete.
+    # Synthesizes per-vertical intelligence reports from accumulated
+    # articles, benchmarks, financial trends, and executive movements.
+    scheduler.add_job(
+        _run_vertical_intelligence_synthesis,
+        trigger=CronTrigger(day_of_week="sun", hour=5, minute=0, timezone="Asia/Singapore"),
+        id="vertical_intelligence_weekly",
+        name="Vertical Intelligence — synthesize per-vertical reports",
         replace_existing=True,
         max_instances=1,
         misfire_grace_time=7200,
@@ -827,3 +856,41 @@ async def _run_guide_resynthesis() -> None:
 
     except Exception:
         logger.exception("guide_resynthesis_failed")
+
+
+async def _run_gtm_financial_extraction() -> None:
+    """Extract structured GTM intelligence from processed annual reports.
+
+    Uses begin_nested() savepoints inside process_pending_documents() so that
+    individual document failures are rolled back without losing earlier work.
+    The outer commit() only runs after the full batch completes.
+    """
+    logger.info("scheduled_job_start", job="gtm_financial_extraction")
+    try:
+        from packages.database.src.session import async_session_factory
+        from packages.intelligence.src.gtm_financial_intel import GTMFinancialExtractor
+
+        async with async_session_factory() as db:
+            extractor = GTMFinancialExtractor(db)
+            count = await extractor.process_pending_documents(batch_size=10)
+            logger.info("GTM financial extraction: %d signals created", count)
+            # Commit only after full batch — per-document savepoints inside
+            # process_pending_documents() protect against partial corruption.
+            await db.commit()
+    except Exception:
+        logger.exception("GTM financial extraction job failed")
+
+
+async def _run_vertical_intelligence_synthesis() -> None:
+    """Synthesize per-vertical intelligence reports from accumulated data."""
+    logger.info("scheduled_job_start", job="vertical_intelligence_synthesis")
+    try:
+        from packages.database.src.session import async_session_factory
+        from packages.intelligence.src.vertical_synthesizer import VerticalIntelligenceSynthesizer
+
+        async with async_session_factory() as db:
+            synthesizer = VerticalIntelligenceSynthesizer(db)
+            count = await synthesizer.synthesize_all()
+            logger.info("vertical_intelligence_synthesis_complete", reports_created=count)
+    except Exception:
+        logger.exception("Vertical intelligence synthesis job failed")

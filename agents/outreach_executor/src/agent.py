@@ -71,6 +71,7 @@ class OutreachExecutorAgent(BaseGTMAgent[OutreachResult]):
         self._mcp = AgentMCPClient()
         self._agent_bus: AgentBus | None = get_agent_bus()
         self._analysis_id: Any = None
+        self._knowledge_pack: dict = {}
         self._workforce_config: dict[str, Any] | None = None  # Populated by WORKFORCE_READY bus events
         self._campaign_context: dict[str, Any] | None = None  # Populated by CAMPAIGN_READY bus events
         self._enriched_leads: dict[str, dict[str, Any]] = {}  # keyed by lead_id
@@ -154,6 +155,16 @@ Rules:
     ) -> dict[str, Any]:
         context = context or {}
         self._analysis_id = context.get("analysis_id")
+
+        # Load domain knowledge pack for cold email / outreach synthesis.
+        try:
+            kmcp_pack = get_knowledge_mcp()
+            self._knowledge_pack = await kmcp_pack.get_agent_knowledge_pack(
+                agent_name="outreach-executor",
+                task_context=task,
+            )
+        except Exception as _e:
+            self._logger.debug("knowledge_pack_load_failed", error=str(_e))
 
         # Backfill from bus history (handles cases where events were published before
         # this agent started listening).
@@ -364,11 +375,13 @@ Rules:
         except Exception as e:
             self._logger.debug("knowledge_mcp_failed", error=str(e))
 
+        _knowledge_ctx = getattr(self, "_knowledge_pack", {}).get("formatted_injection", "")
+        _knowledge_header = f"{_knowledge_ctx}\n\n---\n\n" if _knowledge_ctx else ""
         messages = [
             {"role": "system", "content": self.get_system_prompt()},
             {
                 "role": "user",
-                "content": f"""Personalise this outreach email:
+                "content": f"""{_knowledge_header}Personalise this outreach email:
 
 Target: {plan.get('lead_name', 'Decision maker')} at {plan.get('company_name', 'their company')}
 {lead_context}{persona_hint}{framework_hint}

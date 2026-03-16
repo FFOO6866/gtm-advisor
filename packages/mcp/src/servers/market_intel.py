@@ -11,6 +11,10 @@ Tools:
   search_market_intelligence    — semantic search over annual reports and news
   get_executive_intelligence    — executive profiles and news monitoring
   get_vertical_benchmarks       — full benchmark distributions
+  get_company_gtm_profile       — GTM-focused profile (SG&A, R&D, ESG, peer rank, signals)
+  get_company_trajectory        — growth trajectory analysis from financial time-series
+  get_gtm_intelligence          — extracted GTM insights from annual reports
+  get_vertical_intelligence     — synthesized per-vertical intelligence report
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from packages.database.src.models import (
     ListedCompany,
     MarketArticle,
     MarketVertical,
+    SignalEvent,
     VerticalBenchmark,
 )
 from packages.documents.src.embeddings import get_embedding_service
@@ -48,6 +53,11 @@ from packages.vector_store.src import cosine_similarity_fallback, get_qdrant_sto
 logger = structlog.get_logger(__name__)
 
 
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE wildcard characters (% and _) in user input."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class MarketIntelMCPServer:
     """MCP server providing Singapore Market Intelligence tools to GTM agents.
 
@@ -58,6 +68,9 @@ class MarketIntelMCPServer:
       search_market_intelligence    — semantic search over annual reports + news
       get_executive_intelligence    — executive profiles and news monitoring
       get_vertical_benchmarks       — full benchmark distributions
+      get_company_gtm_profile       — GTM-focused profile (SG&A, R&D, ESG, peer rank, signals)
+      get_company_trajectory        — growth trajectory analysis from financial time-series
+      get_gtm_intelligence          — extracted GTM insights from annual reports
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -145,6 +158,10 @@ class MarketIntelMCPServer:
                     "net_margin": benchmark.net_margin,
                     "roe": benchmark.roe,
                     "net_debt_ebitda": benchmark.net_debt_ebitda,
+                    "sga_to_revenue": benchmark.sga_to_revenue,
+                    "rnd_to_revenue": benchmark.rnd_to_revenue,
+                    "operating_margin": benchmark.operating_margin_dist,
+                    "capex_to_revenue": benchmark.capex_to_revenue,
                     "computed_at": (
                         benchmark.computed_at.isoformat() if benchmark.computed_at else None
                     ),
@@ -274,6 +291,19 @@ class MarketIntelMCPServer:
                     "net_debt_ebitda": snapshot.net_debt_ebitda,
                     "operating_cash_flow": snapshot.operating_cash_flow,
                     "free_cash_flow": snapshot.free_cash_flow,
+                    "cost_of_revenue": snapshot.cost_of_revenue,
+                    "selling_general_administrative": snapshot.selling_general_administrative,
+                    "research_development": snapshot.research_development,
+                    "operating_income": snapshot.operating_income,
+                    "sga_to_revenue": snapshot.sga_to_revenue,
+                    "rnd_to_revenue": snapshot.rnd_to_revenue,
+                    "operating_margin": snapshot.operating_margin,
+                    "capex": snapshot.capex,
+                    "capex_to_revenue": (
+                        abs(snapshot.capex) / snapshot.revenue
+                        if snapshot.capex is not None and snapshot.revenue and snapshot.revenue > 0
+                        else None
+                    ),
                 }
 
             # Active executives
@@ -445,6 +475,12 @@ class MarketIntelMCPServer:
                 )
                 return {}
 
+            # Fetch vertical eagerly (avoids lazy-load greenlet issue)
+            vertical_stmt = select(MarketVertical).where(
+                MarketVertical.id == company.vertical_id
+            )
+            vertical: MarketVertical | None = await self._session.scalar(vertical_stmt)
+
             # Reconstruct BenchmarkResult from the stored JSON distributions
             def _dist_from_dict(d: dict) -> PercentileDistribution:
                 return PercentileDistribution(
@@ -457,7 +493,7 @@ class MarketIntelMCPServer:
                 )
 
             benchmark_result = BenchmarkResult(
-                vertical_slug=vb.vertical.slug if vb.vertical else "",
+                vertical_slug=vertical.slug if vertical else "",
                 period_label=vb.period_label,
                 period_type=vb.period_type.value,
                 company_count=vb.company_count,
@@ -468,6 +504,10 @@ class MarketIntelMCPServer:
                 roe=_dist_from_dict(vb.roe or {}),
                 net_debt_ebitda=_dist_from_dict(vb.net_debt_ebitda or {}),
                 revenue_ttm_sgd=_dist_from_dict(vb.revenue_ttm_sgd or {}),
+                sga_to_revenue=_dist_from_dict(vb.sga_to_revenue or {}),
+                rnd_to_revenue=_dist_from_dict(vb.rnd_to_revenue or {}),
+                operating_margin=_dist_from_dict(vb.operating_margin_dist or {}),
+                capex_to_revenue=_dist_from_dict(vb.capex_to_revenue or {}),
                 leaders=vb.leaders or [],
                 laggards=vb.laggards or [],
             )
@@ -487,18 +527,20 @@ class MarketIntelMCPServer:
                 roe=snapshot.roe,
                 net_debt_ebitda=snapshot.net_debt_ebitda,
                 revenue_ttm_sgd=snapshot.revenue,
+                sga_to_revenue=snapshot.sga_to_revenue,
+                rnd_to_revenue=snapshot.rnd_to_revenue,
+                operating_margin=snapshot.operating_margin,
+                capex_to_revenue=(
+                    abs(snapshot.capex) / snapshot.revenue
+                    if snapshot.capex is not None and snapshot.revenue and snapshot.revenue > 0
+                    else None
+                ),
                 dpu_yield=company.dividend_yield,
                 gearing_ratio=company.gearing_ratio,
             )
 
             metric_ranks = self._benchmark_engine.rank_company(company_metrics, benchmark_result)
             description = self._benchmark_engine.describe_position(metric_ranks)
-
-            # Fetch vertical name for display
-            vertical_stmt = select(MarketVertical).where(
-                MarketVertical.id == company.vertical_id
-            )
-            vertical: MarketVertical | None = await self._session.scalar(vertical_stmt)
 
             logger.info(
                 "market_intel.benchmark_company.ok",
@@ -532,6 +574,88 @@ class MarketIntelMCPServer:
                 error=str(exc),
             )
             return {}
+
+    # ------------------------------------------------------------------
+    # Name → benchmark helper (Competitor/Lead/Profiler agents)
+    # ------------------------------------------------------------------
+
+    async def find_and_benchmark_company_by_name(
+        self, name: str, vertical_slug: str | None = None,
+    ) -> dict[str, Any]:
+        """Find a listed company by name and benchmark against its vertical.
+
+        Strips common corporate suffixes, performs ILIKE search, fetches latest
+        annual snapshot, and delegates to ``benchmark_company()``.
+
+        Returns ``{"found": True, "company": {}, "financials": {}, "benchmark": {}}``
+        or ``{"found": False}``.
+        """
+        try:
+            import re as _re  # noqa: PLC0415
+
+            stripped = _re.sub(
+                r"\s*(Pte\.?\s*Ltd\.?|Ltd\.?|Inc\.?|Corp\.?|Co\.?\s*Ltd\.?|"
+                r"Group|Holdings|Bhd\.?|Plc\.?|Limited|Corporation|PLC)\s*$",
+                "", name.strip(), flags=_re.IGNORECASE,
+            ).strip()
+            if len(stripped) < 2:
+                return {"found": False}
+
+            stmt = (
+                select(ListedCompany)
+                .where(ListedCompany.is_active.is_(True), ListedCompany.name.ilike(f"%{_escape_like(stripped)}%", escape="\\"))
+                .limit(5)
+            )
+            if vertical_slug:
+                vert_id = await self._session.scalar(
+                    select(MarketVertical.id).where(MarketVertical.slug == vertical_slug)
+                )
+                if vert_id:
+                    stmt = stmt.where(ListedCompany.vertical_id == vert_id)
+
+            candidates = list((await self._session.execute(stmt)).scalars().all())
+            if not candidates:
+                return {"found": False}
+
+            company = min(candidates, key=lambda c: len(c.name))
+
+            snapshot: CompanyFinancialSnapshot | None = await self._session.scalar(
+                select(CompanyFinancialSnapshot)
+                .where(
+                    CompanyFinancialSnapshot.company_id == company.id,
+                    CompanyFinancialSnapshot.period_type == FinancialPeriodType.ANNUAL,
+                )
+                .order_by(desc(CompanyFinancialSnapshot.period_end_date))
+                .limit(1)
+            )
+
+            financials: dict[str, Any] = {}
+            if snapshot:
+                financials = {
+                    "revenue": snapshot.revenue,
+                    "gross_margin": snapshot.gross_margin,
+                    "ebitda_margin": snapshot.ebitda_margin,
+                    "net_margin": snapshot.net_margin,
+                    "revenue_growth_yoy": snapshot.revenue_growth_yoy,
+                    "roe": snapshot.roe,
+                    "period_end_date": snapshot.period_end_date,
+                }
+
+            company_info = {
+                "ticker": company.ticker, "exchange": company.exchange,
+                "name": company.name, "employees": company.employees,
+                "market_cap_sgd": company.market_cap_sgd,
+            }
+
+            benchmark: dict[str, Any] = {}
+            if company.ticker and company.exchange:
+                benchmark = await self.benchmark_company(company.ticker, company.exchange)
+
+            return {"found": True, "company": company_info, "financials": financials, "benchmark": benchmark}
+
+        except Exception as exc:
+            logger.warning("market_intel.find_and_benchmark_by_name.error", name=name, error=str(exc))
+            return {"found": False}
 
     # ------------------------------------------------------------------
     # Tool 4: search_market_intelligence
@@ -781,10 +905,10 @@ class MarketIntelMCPServer:
                 # ----------------------------------------------------------
                 # Tier 3: SQL LIKE fallback — articles
                 # ----------------------------------------------------------
-                like_pattern = f"%{query}%"
+                like_pattern = f"%{_escape_like(query)}%"
                 article_stmt = (
                     select(MarketArticle)
-                    .where(MarketArticle.title.ilike(like_pattern))
+                    .where(MarketArticle.title.ilike(like_pattern, escape="\\"))
                     .order_by(desc(MarketArticle.published_at))
                     .limit(limit)
                 )
@@ -826,7 +950,7 @@ class MarketIntelMCPServer:
                         ListedCompany,
                         CompanyDocument.listed_company_id == ListedCompany.id,
                     )
-                    .where(DocumentChunk.chunk_text.like(like_pattern))
+                    .where(DocumentChunk.chunk_text.like(like_pattern, escape="\\"))
                     .limit(limit)
                 )
                 if vertical_slug is not None:
@@ -892,10 +1016,10 @@ class MarketIntelMCPServer:
         """
         try:
             # 1. DB profile lookup (ILIKE on name)
-            name_pattern = f"%{executive_name}%"
+            name_pattern = f"%{_escape_like(executive_name)}%"
             exec_stmt = (
                 select(CompanyExecutive)
-                .where(CompanyExecutive.name.ilike(name_pattern))
+                .where(CompanyExecutive.name.ilike(name_pattern, escape="\\"))
                 .where(CompanyExecutive.is_active.is_(True))
                 .limit(1)
             )
@@ -1034,6 +1158,10 @@ class MarketIntelMCPServer:
                     "roe": vb.roe,
                     "net_debt_ebitda": vb.net_debt_ebitda,
                     "revenue_ttm_sgd": vb.revenue_ttm_sgd,
+                    "sga_to_revenue": vb.sga_to_revenue,
+                    "rnd_to_revenue": vb.rnd_to_revenue,
+                    "operating_margin": vb.operating_margin_dist,
+                    "capex_to_revenue": vb.capex_to_revenue or {},
                 },
                 "leaders": vb.leaders or [],
                 "laggards": vb.laggards or [],
@@ -1044,6 +1172,519 @@ class MarketIntelMCPServer:
                 "market_intel.get_vertical_benchmarks.error",
                 slug=vertical_slug,
                 period_label=period_label,
+                error=str(exc),
+            )
+            return {}
+
+    # ------------------------------------------------------------------
+    # Tool 7: get_company_gtm_profile
+    # ------------------------------------------------------------------
+
+    async def get_company_gtm_profile(
+        self, ticker: str, exchange: str = "SG"
+    ) -> dict[str, Any]:
+        """Return a GTM-focused intelligence profile for a listed company.
+
+        Combines financial spend analysis (SG&A, R&D, operating margin),
+        ESG scores, analyst consensus, and peer benchmarking into a single
+        profile designed for GTM advisory use.
+
+        Args:
+            ticker:   Stock code, e.g. "D05" (DBS), "AAPL" (Apple).
+            exchange: Exchange identifier, default "SG".
+
+        Returns:
+            {company, gtm_spend, esg, analyst_consensus, peer_comparison,
+             gtm_signals}
+            or {} when not found / on error.
+        """
+        try:
+            company_stmt = select(ListedCompany).where(
+                ListedCompany.ticker == ticker,
+                ListedCompany.exchange == exchange,
+            )
+            company: ListedCompany | None = await self._session.scalar(company_stmt)
+            if company is None:
+                logger.warning(
+                    "market_intel.get_company_gtm_profile.not_found",
+                    ticker=ticker,
+                    exchange=exchange,
+                )
+                return {}
+
+            # Fetch last 3 annual snapshots for trend analysis
+            snapshots_stmt = (
+                select(CompanyFinancialSnapshot)
+                .where(
+                    CompanyFinancialSnapshot.company_id == company.id,
+                    CompanyFinancialSnapshot.period_type == FinancialPeriodType.ANNUAL,
+                )
+                .order_by(desc(CompanyFinancialSnapshot.period_end_date))
+                .limit(3)
+            )
+            snap_result = await self._session.execute(snapshots_stmt)
+            snapshots: list[CompanyFinancialSnapshot] = list(snap_result.scalars().all())
+
+            if not snapshots:
+                return {
+                    "company": {"ticker": ticker, "exchange": exchange, "name": company.name},
+                    "error": "no_financial_data",
+                }
+
+            latest = snapshots[0]
+
+            # GTM spend analysis
+            gtm_spend: dict[str, Any] = {
+                "period": latest.period_end_date,
+                "revenue_sgd": latest.revenue,
+                "sga_sgd": latest.selling_general_administrative,
+                "sga_to_revenue": latest.sga_to_revenue,
+                "rnd_sgd": latest.research_development,
+                "rnd_to_revenue": latest.rnd_to_revenue,
+                "operating_margin": latest.operating_margin,
+                "cost_of_revenue_sgd": latest.cost_of_revenue,
+                "operating_income_sgd": latest.operating_income,
+            }
+
+            # Trend: SG&A and R&D intensity over available years
+            trend: list[dict[str, Any]] = []
+            for snap in snapshots:
+                trend.append({
+                    "period": snap.period_end_date,
+                    "sga_to_revenue": snap.sga_to_revenue,
+                    "rnd_to_revenue": snap.rnd_to_revenue,
+                    "operating_margin": snap.operating_margin,
+                    "revenue_growth_yoy": snap.revenue_growth_yoy,
+                    "gross_margin": snap.gross_margin,
+                })
+            gtm_spend["trend"] = trend
+
+            # ESG scores
+            esg: dict[str, Any] = {
+                "total_score": company.esg_score,
+                "environment": company.esg_environment,
+                "social": company.esg_social,
+                "governance": company.esg_governance,
+            }
+
+            # Analyst consensus
+            analyst: dict[str, Any] = {
+                "rating": company.analyst_rating,
+                "target_price": company.analyst_target_price,
+                "analyst_count": company.analyst_count,
+            }
+
+            # Peer comparison — rank against vertical benchmark
+            peer_comparison: dict[str, Any] = {}
+            if company.vertical_id is not None:
+                benchmark_stmt = (
+                    select(VerticalBenchmark)
+                    .where(
+                        VerticalBenchmark.vertical_id == company.vertical_id,
+                        VerticalBenchmark.period_type == FinancialPeriodType.ANNUAL,
+                    )
+                    .order_by(desc(VerticalBenchmark.computed_at))
+                    .limit(1)
+                )
+                vb: VerticalBenchmark | None = await self._session.scalar(benchmark_stmt)
+
+                if vb is not None:
+                    # Fetch vertical explicitly (avoids lazy-load greenlet issue)
+                    vert_stmt = select(MarketVertical).where(
+                        MarketVertical.id == company.vertical_id
+                    )
+                    vertical: MarketVertical | None = await self._session.scalar(vert_stmt)
+                    vert_slug = vertical.slug if vertical else ""
+                    vert_name = vertical.name if vertical else ""
+
+                    def _dist(d: dict) -> PercentileDistribution:
+                        return PercentileDistribution(
+                            p25=d.get("p25"), p50=d.get("p50"),
+                            p75=d.get("p75"), p90=d.get("p90"),
+                            mean=d.get("mean"), sample_size=d.get("n", 0),
+                        )
+
+                    is_reit = (
+                        company.listing_type.value == "reit" if company.listing_type else False
+                    )
+                    company_metrics = CompanyMetrics(
+                        ticker=company.ticker,
+                        name=company.name,
+                        is_reit=is_reit,
+                        revenue_growth_yoy=latest.revenue_growth_yoy,
+                        gross_margin=latest.gross_margin,
+                        ebitda_margin=latest.ebitda_margin,
+                        net_margin=latest.net_margin,
+                        roe=latest.roe,
+                        net_debt_ebitda=latest.net_debt_ebitda,
+                        revenue_ttm_sgd=latest.revenue,
+                        sga_to_revenue=latest.sga_to_revenue,
+                        rnd_to_revenue=latest.rnd_to_revenue,
+                        operating_margin=latest.operating_margin,
+                        capex_to_revenue=(
+                            abs(latest.capex) / latest.revenue
+                            if latest.capex is not None and latest.revenue and latest.revenue > 0
+                            else None
+                        ),
+                        dpu_yield=company.dividend_yield,
+                        gearing_ratio=company.gearing_ratio,
+                    )
+
+                    benchmark_result = BenchmarkResult(
+                        vertical_slug=vert_slug,
+                        period_label=vb.period_label,
+                        period_type=vb.period_type.value,
+                        company_count=vb.company_count,
+                        revenue_growth_yoy=_dist(vb.revenue_growth_yoy or {}),
+                        gross_margin=_dist(vb.gross_margin or {}),
+                        ebitda_margin=_dist(vb.ebitda_margin or {}),
+                        net_margin=_dist(vb.net_margin or {}),
+                        roe=_dist(vb.roe or {}),
+                        net_debt_ebitda=_dist(vb.net_debt_ebitda or {}),
+                        revenue_ttm_sgd=_dist(vb.revenue_ttm_sgd or {}),
+                        sga_to_revenue=_dist(vb.sga_to_revenue or {}),
+                        rnd_to_revenue=_dist(vb.rnd_to_revenue or {}),
+                        operating_margin=_dist(vb.operating_margin_dist or {}),
+                        capex_to_revenue=_dist(vb.capex_to_revenue or {}),
+                        leaders=vb.leaders or [],
+                        laggards=vb.laggards or [],
+                    )
+
+                    ranks = self._benchmark_engine.rank_company(company_metrics, benchmark_result)
+                    peer_comparison = {
+                        "vertical_slug": vert_slug,
+                        "vertical_name": vert_name,
+                        "period": vb.period_label,
+                        "peer_count": vb.company_count,
+                        "metric_ranks": ranks,
+                        "description": self._benchmark_engine.describe_position(ranks),
+                    }
+
+            # GTM signals — derive actionable insights from the data
+            gtm_signals: list[str] = []
+            if latest.sga_to_revenue is not None:
+                if latest.sga_to_revenue > 0.40:
+                    gtm_signals.append(
+                        f"High SG&A intensity ({latest.sga_to_revenue:.0%}) — "
+                        "aggressive market investment; may be receptive to efficiency tools."
+                    )
+                elif latest.sga_to_revenue < 0.15:
+                    gtm_signals.append(
+                        f"Low SG&A intensity ({latest.sga_to_revenue:.0%}) — "
+                        "lean operation; may need help scaling GTM."
+                    )
+            if latest.rnd_to_revenue is not None and latest.rnd_to_revenue > 0.15:
+                gtm_signals.append(
+                    f"R&D-intensive ({latest.rnd_to_revenue:.0%} of revenue) — "
+                    "product-led growth; position technical solutions."
+                )
+            if company.esg_score is not None and company.esg_score > 70:
+                gtm_signals.append(
+                    f"Strong ESG profile (score: {company.esg_score:.0f}) — "
+                    "sustainability messaging resonates."
+                )
+            if len(snapshots) >= 2:
+                prev = snapshots[1]
+                if (
+                    latest.sga_to_revenue is not None
+                    and prev.sga_to_revenue is not None
+                    and latest.sga_to_revenue > prev.sga_to_revenue * 1.15
+                ):
+                    gtm_signals.append(
+                        "SG&A spending accelerating YoY (>15% increase) — "
+                        "company is investing in growth."
+                    )
+                elif (
+                    latest.sga_to_revenue is not None
+                    and prev.sga_to_revenue is not None
+                    and latest.sga_to_revenue < prev.sga_to_revenue * 0.85
+                ):
+                    gtm_signals.append(
+                        "SG&A spending contracting YoY (>15% decrease) — "
+                        "cost-cutting mode; position ROI-focused solutions."
+                    )
+
+            logger.info(
+                "market_intel.get_company_gtm_profile.ok",
+                ticker=ticker,
+                exchange=exchange,
+                signals=len(gtm_signals),
+            )
+            return {
+                "company": {
+                    "ticker": company.ticker,
+                    "exchange": company.exchange,
+                    "name": company.name,
+                    "description": company.description,
+                    "employees": company.employees,
+                    "market_cap_sgd": company.market_cap_sgd,
+                },
+                "gtm_spend": gtm_spend,
+                "esg": esg,
+                "analyst_consensus": analyst,
+                "peer_comparison": peer_comparison,
+                "gtm_signals": gtm_signals,
+            }
+
+        except Exception as exc:
+            logger.warning(
+                "market_intel.get_company_gtm_profile.error",
+                ticker=ticker,
+                exchange=exchange,
+                error=str(exc),
+            )
+            return {}
+
+    # ------------------------------------------------------------------
+    # Tool 8: get_company_trajectory
+    # ------------------------------------------------------------------
+
+    async def get_company_trajectory(
+        self, ticker: str, exchange: str = "SG"
+    ) -> dict[str, Any]:
+        """Return growth trajectory analysis for a listed company.
+
+        Loads the last 5 years of CompanyFinancialSnapshot (annual) and
+        computes trajectory metrics using TrajectoryEngine: CAGR, margin
+        trends, SG&A efficiency, acceleration classification, and a
+        deterministic narrative.
+
+        Args:
+            ticker:   Stock code, e.g. "D05" (DBS), "AAPL".
+            exchange: Exchange identifier, default "SG".
+
+        Returns:
+            TrajectoryReport as dict, or {} on error / insufficient data.
+        """
+        try:
+            from packages.scoring.src.trajectory import TrajectoryEngine
+
+            company_stmt = select(ListedCompany).where(
+                ListedCompany.ticker == ticker,
+                ListedCompany.exchange == exchange,
+            )
+            company: ListedCompany | None = await self._session.scalar(company_stmt)
+            if company is None:
+                return {}
+
+            # Load last 5 years of annual snapshots, oldest first
+            snapshots_stmt = (
+                select(CompanyFinancialSnapshot)
+                .where(
+                    CompanyFinancialSnapshot.company_id == company.id,
+                    CompanyFinancialSnapshot.period_type == FinancialPeriodType.ANNUAL,
+                )
+                .order_by(CompanyFinancialSnapshot.period_end_date.asc())
+                .limit(5)
+            )
+            snap_result = await self._session.execute(snapshots_stmt)
+            snapshots: list[CompanyFinancialSnapshot] = list(snap_result.scalars().all())
+
+            if not snapshots:
+                return {"company": {"ticker": ticker, "name": company.name}, "error": "no_financial_data"}
+
+            # Convert ORM objects to dicts for the engine
+            snapshot_dicts = [
+                {
+                    "ticker": company.ticker,
+                    "name": company.name,
+                    "revenue": s.revenue,
+                    "gross_margin": s.gross_margin,
+                    "operating_margin": s.operating_margin,
+                    "net_margin": s.net_margin,
+                    "sga_to_revenue": s.sga_to_revenue,
+                    "rnd_to_revenue": s.rnd_to_revenue,
+                    "free_cash_flow": s.free_cash_flow,
+                    "revenue_growth_yoy": s.revenue_growth_yoy,
+                    "period_end_date": s.period_end_date,
+                }
+                for s in snapshots
+            ]
+
+            engine = TrajectoryEngine()
+            report = engine.compute(snapshot_dicts)
+
+            logger.info(
+                "market_intel.get_company_trajectory.ok",
+                ticker=ticker,
+                periods=report.periods_analyzed,
+                trajectory=report.trajectory_class,
+            )
+            return report.to_dict()
+
+        except Exception as exc:
+            logger.warning(
+                "market_intel.get_company_trajectory.error",
+                ticker=ticker,
+                exchange=exchange,
+                error=str(exc),
+            )
+            return {}
+
+    # ------------------------------------------------------------------
+    # Tool 9: get_gtm_intelligence
+    # ------------------------------------------------------------------
+
+    async def get_gtm_intelligence(
+        self, ticker: str, exchange: str = "SG"
+    ) -> list[dict[str, Any]]:
+        """Return extracted GTM intelligence signals for a company.
+
+        Queries SignalEvent rows where source starts with 'GTMIntel' and
+        the linked company matches the given ticker/exchange.
+
+        Args:
+            ticker:   Stock code.
+            exchange: Exchange identifier, default "SG".
+
+        Returns:
+            List of GTM signal dicts, or [] on error.
+        """
+        try:
+            company_stmt = select(ListedCompany).where(
+                ListedCompany.ticker == ticker,
+                ListedCompany.exchange == exchange,
+            )
+            company: ListedCompany | None = await self._session.scalar(company_stmt)
+            if company is None:
+                return []
+
+            # GTM intel signals are stored with source LIKE 'GTMIntel%',
+            # source_url LIKE 'gtm_intel:%', and headline starts with
+            # "GTM Profile: {ticker}".  Filter by headline prefix for
+            # accurate per-company results.
+            headline_prefix = f"GTM Profile: {_escape_like(ticker)} %"
+            signals_stmt = (
+                select(SignalEvent)
+                .where(
+                    SignalEvent.source.like("GTMIntel%"),
+                    SignalEvent.source_url.like("gtm_intel:%"),
+                    SignalEvent.headline.like(headline_prefix, escape="\\"),
+                )
+                .order_by(desc(SignalEvent.created_at))
+                .limit(20)
+            )
+            result = await self._session.execute(signals_stmt)
+            signals: list[SignalEvent] = list(result.scalars().all())
+
+            if not signals:
+                return []
+
+            logger.info(
+                "market_intel.get_gtm_intelligence.ok",
+                ticker=ticker,
+                signals_found=len(signals),
+            )
+
+            results: list[dict[str, Any]] = []
+            for s in signals:
+                entry: dict[str, Any] = {
+                    "headline": s.headline,
+                    "summary": s.summary,
+                    "source": s.source,
+                    "relevance_score": s.relevance_score,
+                    "created_at": s.created_at.isoformat() if s.created_at else None,
+                }
+                # Parse structured metadata from recommended_action JSON
+                if s.recommended_action:
+                    try:
+                        entry["metadata"] = json.loads(s.recommended_action)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                results.append(entry)
+
+            return results
+
+        except Exception as exc:
+            logger.warning(
+                "market_intel.get_gtm_intelligence.error",
+                ticker=ticker,
+                exchange=exchange,
+                error=str(exc),
+            )
+            return []
+
+    # ------------------------------------------------------------------
+    # Tool 10: get_vertical_intelligence
+    # ------------------------------------------------------------------
+
+    async def get_vertical_intelligence(
+        self, vertical_slug: str
+    ) -> dict[str, Any]:
+        """Return the current synthesized intelligence report for a vertical.
+
+        This is the primary tool for agents needing deep industry knowledge.
+        Returns the latest VerticalIntelligenceReport which includes market
+        overview, key trends, competitive dynamics, financial pulse (SG&A/R&D
+        trends), signal digest, executive movements, and actionable GTM
+        implications.
+
+        Args:
+            vertical_slug: e.g. "fintech", "ict_saas", "biomedical"
+
+        Returns:
+            Full intelligence report dict, or {} when no report is available.
+        """
+        try:
+            from packages.database.src.models import VerticalIntelligenceReport
+
+            # Find the current report for this vertical
+            vert_stmt = select(MarketVertical).where(
+                MarketVertical.slug == vertical_slug
+            )
+            vertical: MarketVertical | None = await self._session.scalar(vert_stmt)
+            if vertical is None:
+                logger.warning(
+                    "market_intel.get_vertical_intelligence.no_vertical",
+                    slug=vertical_slug,
+                )
+                return {}
+
+            report_stmt = (
+                select(VerticalIntelligenceReport)
+                .where(
+                    VerticalIntelligenceReport.vertical_id == vertical.id,
+                    VerticalIntelligenceReport.is_current.is_(True),
+                )
+                .order_by(desc(VerticalIntelligenceReport.computed_at))
+                .limit(1)
+            )
+            report: VerticalIntelligenceReport | None = await self._session.scalar(report_stmt)
+
+            if report is None:
+                logger.warning(
+                    "market_intel.get_vertical_intelligence.no_report",
+                    slug=vertical_slug,
+                )
+                return {}
+
+            logger.info(
+                "market_intel.get_vertical_intelligence.ok",
+                slug=vertical_slug,
+                period=report.report_period,
+            )
+            return {
+                "vertical": {
+                    "slug": vertical.slug,
+                    "name": vertical.name,
+                },
+                "report_period": report.report_period,
+                "computed_at": report.computed_at.isoformat() if report.computed_at else None,
+                "market_overview": report.market_overview,
+                "key_trends": report.key_trends,
+                "competitive_dynamics": report.competitive_dynamics,
+                "financial_pulse": report.financial_pulse,
+                "signal_digest": report.signal_digest,
+                "executive_movements": report.executive_movements,
+                "regulatory_environment": report.regulatory_environment,
+                "gtm_implications": report.gtm_implications,
+                "data_sources": report.data_sources,
+            }
+
+        except Exception as exc:
+            logger.warning(
+                "market_intel.get_vertical_intelligence.error",
+                slug=vertical_slug,
                 error=str(exc),
             )
             return {}

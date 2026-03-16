@@ -81,6 +81,7 @@ class WorkforceArchitectAgent(BaseGTMAgent[WorkforceDefinition]):
         self._campaign_context: dict[str, Any] | None = None
         self._lead_pipeline_size: int = 0
         self._bus_personas: list[dict[str, Any]] = []
+        self._knowledge_pack: dict = {}
         try:
             if self._agent_bus is not None:
                 self._agent_bus.subscribe(
@@ -176,6 +177,16 @@ Singapore context: Focus on PSG grant eligibility, APAC expansion narratives, di
         except Exception as e:
             self._logger.debug("workforce_bus_backfill_failed", error=str(e))
 
+        # Load domain knowledge pack for workforce design grounding
+        try:
+            kmcp_pack = get_knowledge_mcp()
+            self._knowledge_pack = await kmcp_pack.get_agent_knowledge_pack(
+                agent_name="workforce-architect",
+                task_context=task,
+            )
+        except Exception as e:
+            self._logger.debug("workforce_knowledge_pack_failed", error=str(e))
+
         return {
             "company_info": context.get("company_profile", context.get("company_name", "")),
             "personas": context.get("customer_personas", context.get("personas", [])),
@@ -248,6 +259,9 @@ Singapore context: Focus on PSG grant eligibility, APAC expansion narratives, di
         kb_context_str = "\n".join(kb_guidance_lines)
         self._kb_hit = bool(kb_guidance_lines)
 
+        _knowledge_ctx = getattr(self, "_knowledge_pack", {}).get("formatted_injection", "")
+        _knowledge_header = f"{_knowledge_ctx}\n\n---\n\n" if _knowledge_ctx else ""
+
         # Build pipeline context section from A2A bus data
         pipeline_context_lines: list[str] = []
         if self._campaign_context is not None:
@@ -273,7 +287,7 @@ Singapore context: Focus on PSG grant eligibility, APAC expansion narratives, di
             {"role": "system", "content": self.get_system_prompt()},
             {
                 "role": "user",
-                "content": f"""Design a Digital Workforce based on this completed GTM analysis:
+                "content": f"""{_knowledge_header}Design a Digital Workforce based on this completed GTM analysis:
 
 Company: {company_info}
 Industry: {industry}

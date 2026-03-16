@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
 from agents.core.src.mcp_integration import AgentMCPClient
 from packages.core.src.agent_bus import AgentBus, AgentMessage, DiscoveryType, get_agent_bus
+from packages.knowledge.src.knowledge_mcp import get_knowledge_mcp
 
 
 class CRMSyncResult(BaseModel):
@@ -48,6 +49,7 @@ class CRMSyncAgent(BaseGTMAgent[CRMSyncResult]):
         self._mcp = AgentMCPClient()
         self._agent_bus: AgentBus | None = get_agent_bus()
         self._analysis_id: Any = None
+        self._knowledge_pack: dict = {}
         self._workforce_config: dict[str, Any] | None = None  # Populated by WORKFORCE_READY bus events
         self._pending_leads: list[dict[str, Any]] = []  # Populated by LEAD_FOUND bus events
         self._enrichment_data: dict[str, dict[str, Any]] = {}  # keyed by lead_id
@@ -119,6 +121,17 @@ class CRMSyncAgent(BaseGTMAgent[CRMSyncResult]):
     ) -> dict[str, Any]:
         context = context or {}
         self._analysis_id = context.get("analysis_id")
+
+        # Load domain knowledge pack (execution agent — no LLM call in _do(),
+        # but pack is loaded per Rule #6 for future enrichment steps).
+        try:
+            kmcp_pack = get_knowledge_mcp()
+            self._knowledge_pack = await kmcp_pack.get_agent_knowledge_pack(
+                agent_name="crm-sync",
+                task_context=task,
+            )
+        except Exception as _e:
+            self._logger.debug("knowledge_pack_load_failed", error=str(_e))
 
         # Backfill from bus history (handles cases where events were published before
         # this agent started listening).
