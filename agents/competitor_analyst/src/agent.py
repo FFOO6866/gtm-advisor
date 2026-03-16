@@ -397,14 +397,37 @@ Focus on Singapore/APAC competitors when relevant."""
                     landscape = await mcp.get_vertical_landscape(vertical_slug)
                     if landscape:
                         kb_sources.add("MarketIntel DB")
-                        kb_names = [
-                            c.get("name", "") for c in (
-                                landscape.get("leaders", []) + landscape.get("laggards", [])
-                            ) if c.get("name")
-                        ]
-                        # Merge KB names into known, cap at 8 total to stay manageable
-                        all_names = list(dict.fromkeys(known + kb_names))
-                        known = all_names[:8]
+                        # Only use KB leaders as competitor candidates when the user's
+                        # company is NOT a software/SaaS company selling into this vertical.
+                        # SaaS companies compete with other SaaS companies, not their
+                        # customers (the listed companies in the end-market vertical).
+                        _user_industry = plan.get("industry", "").lower()
+                        _is_software_company = any(
+                            kw in _user_industry
+                            for kw in ("saas", "software", "tech", "ai", "digital", "platform")
+                        ) or any(
+                            kw in (plan.get("service_category", "").lower())
+                            for kw in ("software", "saas", "platform", "app", "digital")
+                        )
+                        if not _is_software_company:
+                            # End-market company: KB leaders are real competitors
+                            kb_names = [
+                                c.get("name", "") for c in (
+                                    landscape.get("leaders", []) + landscape.get("laggards", [])
+                                ) if c.get("name")
+                            ]
+                            all_names = list(dict.fromkeys(known + kb_names))
+                            known = all_names[:8]
+                        else:
+                            # Software company selling into this vertical:
+                            # KB leaders are potential CUSTOMERS, not competitors.
+                            # Log for debug visibility but don't add to known.
+                            self._logger.info(
+                                "kb_landscape_skipped_for_software_company",
+                                vertical=vertical_slug,
+                                reason="Listed companies are potential customers, not software competitors",
+                                leaders_count=len(landscape.get("leaders", [])),
+                            )
 
                 # Pull stored articles for each known competitor
                 for comp_name in known[:5]:

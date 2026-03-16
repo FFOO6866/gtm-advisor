@@ -1417,15 +1417,21 @@ Only include archetypes where the product genuinely solves a real problem. Be sp
         # Generic queries like "construction market trends Singapore" return analysis text
         # without naming specific companies, causing 0 extraction downstream.
         specific_queries: list[str] = plan.get("search_queries") or []  # type: ignore[assignment]
+        company_name = plan.get("company_name") or "our product"
+        buyer_signal = (value_prop or description_text or industry)[:120]
+
         if specific_queries and isinstance(specific_queries, list):
             first_query = specific_queries[0]
-            if "singapore" not in first_query.lower():
-                topic = f"List of {first_query} Singapore {current_year} with company names"[:200]
-            else:
-                topic = f"List of {first_query} {current_year} with company names"[:200]
+            region_clause = "" if "singapore" in first_query.lower() else " Singapore"
+            topic = (
+                f"Name 10 specific companies in{region_clause} that {first_query}. "
+                f"For each company provide: company name, what they do, and approximate employee count."
+            )[:300]
         else:
-            buyer_signal = (value_prop or description_text or industry)[:120]
-            topic = f"List of Singapore companies that need {buyer_signal} {current_year}"[:200]
+            topic = (
+                f"Name 10 specific Singapore companies that would be potential customers for "
+                f"{company_name} ({buyer_signal}). For each company provide: name, industry, employee count."
+            )[:300]
 
         try:
             async with asyncio.timeout(30):
@@ -1442,30 +1448,25 @@ Only include archetypes where the product genuinely solves a real problem. Be sp
         if not market_text:
             return []
 
-        company_name = plan.get("company_name") or "our client"
-        # Build a generic buyer description from value_prop so the prompt works
-        # for ANY client type (not just marketing/GTM companies).
-        buyer_context = (
-            f"companies that are potential buyers or clients of {company_name}"
-            + (f", which offers: {value_prop[:200]}" if value_prop else "")
-        )
         messages = [
             {
                 "role": "system",
                 "content": (
-                    f"You extract POTENTIAL CUSTOMER company names from market research text. "
-                    f"Extract {buyer_context}. "
-                    f"These should be real businesses that are actively growing and would "
-                    f"purchase this type of product or service. "
-                    f"Return at most 10 companies. Return as JSON."
+                    "You extract company names from research text. "
+                    "Find every company, organisation, or firm mentioned by name. "
+                    "Include construction firms, engineering companies, property developers, "
+                    "government agencies, and any other named organisations. "
+                    "Return as JSON with at most 10 entries."
                 ),
             },
             {
                 "role": "user",
                 "content": (
-                    f"Extract Singapore/APAC company names that are potential customers "
-                    f"from this market research:\n{market_text[:4000]}\n\n"
-                    f'Return format: {{"companies": [{{"name": "...", "domain": "..."}}]}}'
+                    f"Extract ALL company and organisation names mentioned in this text. "
+                    f"Each must be a real, named entity (not a generic category).\n\n"
+                    f"{market_text[:4000]}\n\n"
+                    f'Return: {{"companies": [{{"name": "Company Name", "domain": "example.com"}}]}}\n'
+                    f"If you cannot determine the domain, set it to null."
                 ),
             },
         ]
