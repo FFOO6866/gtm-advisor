@@ -64,9 +64,15 @@ def _guess_domain(name: str) -> str:
     return f"{slug}.com"
 
 
+class _CompanyEntry(BaseModel):
+    """A single company extracted from research text."""
+    name: str
+    domain: str | None = None
+
+
 class _CompanyList(BaseModel):
     """Structured output for LLM company extraction — defined at module level for schema reuse."""
-    companies: list[dict[str, Any]] = []
+    companies: list[_CompanyEntry] = []
 
 
 class LeadScoringCriteria(BaseModel):
@@ -1250,7 +1256,7 @@ Focus on Singapore/APAC market context."""
                     messages=messages,
                     response_model=_CompanyList,
                 )
-                return result.companies
+                return [c.model_dump() for c in result.companies]
             except Exception as e:
                 self._logger.warning(
                     "company_list_extraction_failed", query=query, error=str(e)
@@ -1382,7 +1388,7 @@ Only include archetypes where the product genuinely solves a real problem. Be sp
                 messages=messages,
                 response_model=_CompanyList,
             )
-            return result.companies
+            return [c.model_dump() for c in result.companies]
         except Exception as e:
             self._logger.warning("llm_company_discovery_failed", error=str(e))
             return []
@@ -1475,7 +1481,7 @@ Only include archetypes where the product genuinely solves a real problem. Be sp
                 messages=messages,
                 response_model=_CompanyList,
             )
-            return result.companies[:10]
+            return [c.model_dump() for c in result.companies[:10]]
         except Exception as e:
             self._logger.debug("perplexity_company_extraction_failed", error=str(e))
             return []
