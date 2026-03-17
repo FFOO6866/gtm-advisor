@@ -310,7 +310,7 @@ async def _run_signal_monitor_all_active() -> None:
             rows = (await db.execute(stmt)).all()
             logger.info("signal_monitor_active_workforces", count=len(rows))
 
-            from packages.database.src.models import SignalEvent, SignalUrgency
+            from packages.database.src.models import SignalEvent, SignalType, SignalUrgency
 
             for _config, company in rows[:20]:  # Cap at 20 per run
                 try:
@@ -342,9 +342,15 @@ async def _run_signal_monitor_all_active() -> None:
                                 urgency = SignalUrgency.THIS_WEEK
                             else:
                                 urgency = SignalUrgency.THIS_MONTH
+                            # Map agent output string to SignalType enum
+                            raw_type = sig.get("signal_type", "general_news")
+                            try:
+                                sig_type = SignalType(raw_type)
+                            except ValueError:
+                                sig_type = SignalType.GENERAL_NEWS
                             db.add(SignalEvent(
                                 company_id=company.id,
-                                signal_type=sig.get("signal_type", "general_news"),
+                                signal_type=sig_type,
                                 urgency=urgency,
                                 headline=sig.get("signal_text", "")[:500],
                                 source=sig.get("source", ""),
@@ -495,23 +501,51 @@ async def _run_weekly_roi_summary() -> None:
 
 
 async def _ingest_rss_feeds() -> None:
-    """Ingest RSS feeds and classify articles into market_articles table."""
+    """Ingest RSS feeds and classify articles into market_articles table.
+
+    Two passes:
+    1. Generic SG feeds (RSS_FEEDS) — stored with is_classified=False so the
+       Article Intelligence Pipeline can classify them later.
+    2. Vertical-specific feeds (VERTICAL_FEEDS + THOUGHT_LEADERSHIP_FEEDS) —
+       stored with vertical_slug and is_classified=True because the vertical
+       is already known from the feed registry; no LLM classifier needed.
+    """
     logger.info("scheduled_job_start", job="rss_ingestion")
     try:
         from sqlalchemy import select
 
         from packages.database.src.models import MarketArticle
         from packages.database.src.session import async_session_factory
-        from packages.integrations.rss.src.client import RSSClient
+        from packages.integrations.rss.src.client import (
+            THOUGHT_LEADERSHIP_FEEDS,
+            VERTICAL_FEEDS,
+            RSSClient,
+        )
 
         client = RSSClient()
-        articles = await client.fetch_recent(hours=3)
+
+        # ── Pass 1: generic SG feeds ──────────────────────────────────────────
+        generic_articles = await client.fetch_recent(hours=3)
+
+        # ── Pass 2: vertical-specific feeds ──────────────────────────────────
+        # Collect (article, vertical_slug) tuples for all registered verticals.
+        vertical_slugs = set(VERTICAL_FEEDS) | set(THOUGHT_LEADERSHIP_FEEDS)
+        vertical_pairs: list[tuple] = []  # (RSSArticle, str)
+        for slug in vertical_slugs:
+            trade_articles = await client.fetch_vertical_feeds(slug, hours=3)
+            thought_articles = await client.fetch_thought_leadership(slug, hours=3)
+            for a in trade_articles + thought_articles:
+                vertical_pairs.append((a, slug))
 
         async with async_session_factory() as db:
             new_count = 0
-            for article in articles:
+
+            # Store generic articles (need LLM classification later)
+            for article in generic_articles:
                 existing = await db.execute(
-                    select(MarketArticle.id).where(MarketArticle.source_url == article.url).limit(1)
+                    select(MarketArticle.id)
+                    .where(MarketArticle.source_url == article.url)
+                    .limit(1)
                 )
                 if existing.scalar_one_or_none():
                     continue
@@ -524,8 +558,36 @@ async def _ingest_rss_feeds() -> None:
                     is_classified=False,
                 ))
                 new_count += 1
+
+            # Store vertical-specific articles (vertical already known)
+            vertical_new_count = 0
+            for article, vertical_slug in vertical_pairs:
+                existing = await db.execute(
+                    select(MarketArticle.id)
+                    .where(MarketArticle.source_url == article.url)
+                    .limit(1)
+                )
+                if existing.scalar_one_or_none():
+                    continue
+                db.add(MarketArticle(
+                    source_name=article.source_name,
+                    source_url=article.url,
+                    title=article.title,
+                    summary=article.summary,
+                    published_at=article.published_at,
+                    vertical_slug=vertical_slug,
+                    is_classified=True,
+                ))
+                vertical_new_count += 1
+
             await db.commit()
-        logger.info("rss_ingestion_complete", new_articles=new_count, total_fetched=len(articles))
+
+        logger.info(
+            "rss_ingestion_complete",
+            generic_new=new_count,
+            vertical_new=vertical_new_count,
+            total_fetched=len(generic_articles) + len(vertical_pairs),
+        )
     except Exception as e:
         logger.error("scheduled_job_failed", job="rss_ingestion", error=str(e))
 

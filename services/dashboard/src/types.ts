@@ -284,6 +284,7 @@ export const INDUSTRIES = [
   { value: 'proptech', label: 'Proptech' },
   { value: 'logistics', label: 'Logistics' },
   { value: 'manufacturing', label: 'Manufacturing' },
+  { value: 'marketing_comms', label: 'Marketing & Creative' },
   { value: 'professional_services', label: 'Professional Services' },
   { value: 'other', label: 'Other' },
 ] as const;

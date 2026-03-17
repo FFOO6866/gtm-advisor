@@ -57,6 +57,7 @@ from .routers import (  # noqa: E402
     icps,
     insights,
     leads,
+    market_data,
     playbooks,
     sequences,
     settings,
@@ -248,6 +249,7 @@ app.include_router(sequences.router, prefix="/api/v1/companies", tags=["Sequence
 app.include_router(approvals.router, prefix="/api/v1/companies", tags=["Approvals"])
 app.include_router(playbooks.router, prefix="/api/v1/companies", tags=["Playbooks"])
 app.include_router(attribution.router, prefix="/api/v1/companies", tags=["Attribution"])
+app.include_router(market_data.router, prefix="/api/v1/companies", tags=["Market Data"])
 app.include_router(webhooks.router, prefix="/api/v1", tags=["Webhooks"])
 app.include_router(documents.router, tags=["Documents"])
 

@@ -95,6 +95,7 @@ class IndustryVertical(str, Enum):
     PROPTECH = "proptech"
     LOGISTICS = "logistics"
     MANUFACTURING = "manufacturing"
+    MARKETING_COMMS = "marketing_comms"
     PROFESSIONAL_SERVICES = "professional_services"
     OTHER = "other"
 

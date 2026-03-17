@@ -42,6 +42,44 @@ RSS_FEEDS: dict[str, str] = {
     # The Edge Singapore HTTP 403 — removed
 }
 
+# Vertical-specific industry trade publication feeds.
+# Each entry: {"url": str, "name": str}.
+# These are ingested alongside RSS_FEEDS but with vertical_slug pre-assigned —
+# no LLM classifier needed.
+VERTICAL_FEEDS: dict[str, list[dict[str, str]]] = {
+    "marketing_comms": [
+        # ── Verified working (2026-03-17) ──────────────────────────────────
+        {"url": "https://feeds.feedburner.com/socialmediaexaminer", "name": "Social Media Examiner"},
+        {"url": "https://blog.hubspot.com/marketing/rss.xml", "name": "HubSpot Marketing Blog"},
+        {"url": "https://sproutsocial.com/insights/feed/", "name": "Sprout Social Insights"},
+        {"url": "https://martech.org/feed/", "name": "MarTech"},
+        {"url": "https://www.marketingdive.com/feeds/news/", "name": "Marketing Dive"},
+        {"url": "https://digiday.com/feed/", "name": "Digiday"},
+        # Campaign Asia (500), The Drum (404), PRWeek (directory page),
+        # Marketing Interactive (404), Mumbrella Asia (403),
+        # Content Marketing Institute (HTML not RSS) — all broken as of 2026-03-17
+    ],
+    "fintech": [
+        {"url": "https://www.finextra.com/rss/headlines.aspx", "name": "Finextra"},
+        {"url": "https://www.fintechnews.sg/feed/", "name": "Fintech News SG"},
+    ],
+    "ict_saas": [
+        {"url": "https://techcrunch.com/feed/", "name": "TechCrunch"},
+        {"url": "https://feeds.feedburner.com/venturebeat/SZYF", "name": "VentureBeat"},
+    ],
+}
+
+# Thought-leadership feeds from major agency / consultancy blogs.
+# Grouped by vertical, same shape as VERTICAL_FEEDS.
+THOUGHT_LEADERSHIP_FEEDS: dict[str, list[dict[str, str]]] = {
+    "marketing_comms": [
+        # ── Verified working (2026-03-17) ──────────────────────────────────
+        {"url": "https://fleishmanhillard.com/feed/", "name": "FleishmanHillard"},
+        # Edelman (403), Ogilvy (404), Weber Shandwick (403) — no RSS feeds.
+        # Compensated by MarTech, Marketing Dive, Digiday in VERTICAL_FEEDS.
+    ],
+}
+
 _ARTICLE_LIMIT = 50
 _SUMMARY_MAX_CHARS = 500
 
@@ -201,6 +239,86 @@ class RSSClient:
         since = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=hours)
         results = await self.fetch_all(since=since)
         return self.get_all_articles_flat(results)
+
+    async def fetch_vertical_feeds(
+        self,
+        vertical_slug: str,
+        hours: int = 24,
+    ) -> list[RSSArticle]:
+        """Fetch industry trade publication feeds for a specific vertical.
+
+        Unlike ``fetch_recent()``, the vertical is KNOWN at call time, so no
+        LLM classifier is required. The returned articles already have their
+        ``source_name`` set to the feed's human-readable name; callers are
+        responsible for stamping ``vertical_slug`` on the database row.
+
+        Args:
+            vertical_slug: Key into ``VERTICAL_FEEDS`` (e.g. ``"marketing_comms"``).
+            hours: Look-back window in hours (default 24).
+
+        Returns:
+            Flat list of articles sorted by ``published_at`` descending.
+            Returns [] when the slug is not registered in ``VERTICAL_FEEDS``.
+        """
+        feeds = VERTICAL_FEEDS.get(vertical_slug)
+        if not feeds:
+            logger.debug("fetch_vertical_feeds.unknown_slug", vertical_slug=vertical_slug)
+            return []
+
+        since = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=hours)
+        tasks = [
+            self.fetch_feed(feed["name"], feed["url"], since=since)
+            for feed in feeds
+        ]
+        results: list[list[RSSArticle]] = await asyncio.gather(*tasks)
+        flat: list[RSSArticle] = [a for batch in results for a in batch]
+        flat.sort(key=lambda a: a.published_at, reverse=True)
+        logger.debug(
+            "fetch_vertical_feeds.done",
+            vertical_slug=vertical_slug,
+            article_count=len(flat),
+        )
+        return flat
+
+    async def fetch_thought_leadership(
+        self,
+        vertical_slug: str,
+        hours: int = 24,
+    ) -> list[RSSArticle]:
+        """Fetch agency/consultancy thought-leadership feeds for a vertical.
+
+        Same contract as ``fetch_vertical_feeds()`` but reads from
+        ``THOUGHT_LEADERSHIP_FEEDS``.
+
+        Args:
+            vertical_slug: Key into ``THOUGHT_LEADERSHIP_FEEDS``.
+            hours: Look-back window in hours (default 24).
+
+        Returns:
+            Flat list sorted by ``published_at`` descending. Returns [] when
+            the slug is not registered in ``THOUGHT_LEADERSHIP_FEEDS``.
+        """
+        feeds = THOUGHT_LEADERSHIP_FEEDS.get(vertical_slug)
+        if not feeds:
+            logger.debug(
+                "fetch_thought_leadership.unknown_slug", vertical_slug=vertical_slug
+            )
+            return []
+
+        since = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=hours)
+        tasks = [
+            self.fetch_feed(feed["name"], feed["url"], since=since)
+            for feed in feeds
+        ]
+        results: list[list[RSSArticle]] = await asyncio.gather(*tasks)
+        flat: list[RSSArticle] = [a for batch in results for a in batch]
+        flat.sort(key=lambda a: a.published_at, reverse=True)
+        logger.debug(
+            "fetch_thought_leadership.done",
+            vertical_slug=vertical_slug,
+            article_count=len(flat),
+        )
+        return flat
 
     def get_all_articles_flat(
         self, results: dict[str, list[RSSArticle]]
