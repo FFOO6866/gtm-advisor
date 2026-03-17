@@ -1472,6 +1472,13 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
 
             # Bridge: materialize analysis results → SignalEvent rows so TodayPage
             # can display intelligence immediately (before scheduler runs).
+            # Clear previous analysis-generated signals to avoid duplicates on re-run.
+            await db.execute(
+                SignalEvent.__table__.delete().where(
+                    SignalEvent.company_id == analysis.company_id,
+                    SignalEvent.source_type == "analysis",
+                )
+            )
             _INSIGHT_CATEGORY_MAP: dict[str, SignalType] = {
                 "trend": SignalType.MARKET_TREND,
                 "opportunity": SignalType.MARKET_TREND,
