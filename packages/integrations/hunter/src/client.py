@@ -13,6 +13,7 @@ Endpoint reference: https://hunter.io/api-documentation/v2
 
 from __future__ import annotations
 
+import asyncio
 import os
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -88,6 +89,10 @@ class HunterClient:
     return as "data unavailable, proceed without it".
     """
 
+    # Hunter.io free plan returns 403 when too many concurrent requests
+    # arrive from the same key. Limit to 3 parallel calls.
+    _semaphore: asyncio.Semaphore = asyncio.Semaphore(3)
+
     def __init__(self, api_key: str | None = None) -> None:
         self._api_key = api_key or os.getenv("HUNTER_API_KEY", "")
         self._http = httpx.AsyncClient(timeout=15.0)
@@ -105,29 +110,30 @@ class HunterClient:
         """
         if not self.is_configured:
             return None
-        try:
-            resp = await self._http.get(
-                f"{_BASE_URL}/email-verifier",
-                params={"email": email, "api_key": self._api_key},
-            )
-            resp.raise_for_status()
-            data: dict[str, Any] = resp.json().get("data", {})
-            return EmailVerification(
-                email=data.get("email", email),
-                status=data.get("status", "unknown"),
-                result=data.get("result", "unknown"),
-                score=int(data.get("score") or 0),
-                mx_records=bool(data.get("mx_records")),
-                smtp_server=bool(data.get("smtp_server")),
-                smtp_check=bool(data.get("smtp_check")),
-                disposable=bool(data.get("disposable")),
-                webmail=bool(data.get("webmail")),
-                gibberish=bool(data.get("gibberish")),
-                block=bool(data.get("block")),
-            )
-        except Exception as exc:
-            logger.debug("hunter.verify_email.failed", email=email, error=str(exc))
-            return None
+        async with self._semaphore:
+            try:
+                resp = await self._http.get(
+                    f"{_BASE_URL}/email-verifier",
+                    params={"email": email, "api_key": self._api_key},
+                )
+                resp.raise_for_status()
+                data: dict[str, Any] = resp.json().get("data", {})
+                return EmailVerification(
+                    email=data.get("email", email),
+                    status=data.get("status", "unknown"),
+                    result=data.get("result", "unknown"),
+                    score=int(data.get("score") or 0),
+                    mx_records=bool(data.get("mx_records")),
+                    smtp_server=bool(data.get("smtp_server")),
+                    smtp_check=bool(data.get("smtp_check")),
+                    disposable=bool(data.get("disposable")),
+                    webmail=bool(data.get("webmail")),
+                    gibberish=bool(data.get("gibberish")),
+                    block=bool(data.get("block")),
+                )
+            except Exception as exc:
+                logger.debug("hunter.verify_email.failed", email=email, error=str(exc))
+                return None
 
     async def find_email(
         self,
@@ -142,36 +148,37 @@ class HunterClient:
         """
         if not self.is_configured or not domain or not first_name or not last_name:
             return None
-        try:
-            resp = await self._http.get(
-                f"{_BASE_URL}/email-finder",
-                params={
-                    "domain": domain,
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "api_key": self._api_key,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json().get("data", {})
-            return EmailFindResult(
-                email=data.get("email"),
-                score=int(data.get("score") or 0),
-                first_name=data.get("first_name"),
-                last_name=data.get("last_name"),
-                position=data.get("position"),
-                company=data.get("company"),
-                domain=data.get("domain"),
-                sources=data.get("sources") or [],
-            )
-        except Exception as exc:
-            logger.debug(
-                "hunter.find_email.failed",
-                domain=domain,
-                name=f"{first_name} {last_name}",
-                error=str(exc),
-            )
-            return None
+        async with self._semaphore:
+            try:
+                resp = await self._http.get(
+                    f"{_BASE_URL}/email-finder",
+                    params={
+                        "domain": domain,
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "api_key": self._api_key,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json().get("data", {})
+                return EmailFindResult(
+                    email=data.get("email"),
+                    score=int(data.get("score") or 0),
+                    first_name=data.get("first_name"),
+                    last_name=data.get("last_name"),
+                    position=data.get("position"),
+                    company=data.get("company"),
+                    domain=data.get("domain"),
+                    sources=data.get("sources") or [],
+                )
+            except Exception as exc:
+                logger.debug(
+                    "hunter.find_email.failed",
+                    domain=domain,
+                    name=f"{first_name} {last_name}",
+                    error=str(exc),
+                )
+                return None
 
     async def domain_search(
         self,
@@ -186,26 +193,27 @@ class HunterClient:
         """
         if not self.is_configured or not domain:
             return []
-        try:
-            resp = await self._http.get(
-                f"{_BASE_URL}/domain-search",
-                params={"domain": domain, "limit": limit, "api_key": self._api_key},
-            )
-            resp.raise_for_status()
-            emails_raw: list[dict[str, Any]] = resp.json().get("data", {}).get("emails", [])
-            return [
-                DomainSearchResult(
-                    email=e["value"],
-                    first_name=e.get("first_name"),
-                    last_name=e.get("last_name"),
-                    position=e.get("position"),
-                    confidence=int(e.get("confidence") or 0),
+        async with self._semaphore:
+            try:
+                resp = await self._http.get(
+                    f"{_BASE_URL}/domain-search",
+                    params={"domain": domain, "limit": limit, "api_key": self._api_key},
                 )
-                for e in emails_raw
-                if e.get("value")
-            ]
-        except Exception as exc:
-            logger.debug("hunter.domain_search.failed", domain=domain, error=str(exc))
+                resp.raise_for_status()
+                emails_raw: list[dict[str, Any]] = resp.json().get("data", {}).get("emails", [])
+                return [
+                    DomainSearchResult(
+                        email=e["value"],
+                        first_name=e.get("first_name"),
+                        last_name=e.get("last_name"),
+                        position=e.get("position"),
+                        confidence=int(e.get("confidence") or 0),
+                    )
+                    for e in emails_raw
+                    if e.get("value")
+                ]
+            except Exception as exc:
+                logger.debug("hunter.domain_search.failed", domain=domain, error=str(exc))
             return []
 
 
