@@ -66,7 +66,7 @@ def _guess_domain(name: str) -> str:
 
 class _CompanyList(BaseModel):
     """Structured output for LLM company extraction — defined at module level for schema reuse."""
-    companies: list[dict[str, str]] = []
+    companies: list[dict[str, Any]] = []
 
 
 class LeadScoringCriteria(BaseModel):
