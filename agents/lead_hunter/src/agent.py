@@ -633,9 +633,12 @@ Focus on Singapore/APAC market context."""
                             p.fit_reasons.append(f"Segment: {segment['name']}")
 
         # Convert to LeadProfile
-        # Lower threshold when all prospects came from LLM fallback (no tool enrichment)
-        tool_enriched = any(p.scoring_method == "algorithm" for p in prospects)
-        _qualification_threshold = 0.5 if tool_enriched else 0.3
+        # Adaptive threshold: strict when enrichment data is available, lenient otherwise
+        _has_enriched = any(
+            p.scoring_method == "algorithm" and (p.employee_count or p.website)
+            for p in prospects
+        )
+        _qualification_threshold = 0.5 if _has_enriched else 0.25
         qualified_leads = []
         for p in prospects:
             if p.fit_score >= _qualification_threshold:
@@ -659,6 +662,30 @@ Focus on Singapore/APAC market context."""
                     contact_linkedin=p.contact_info.linkedin_company_url or None,
                 )
                 qualified_leads.append(lead)
+
+        # Safety net: if we found prospects but none qualified, return the top ones
+        # with low scores rather than returning empty (better UX than "no leads found")
+        if not qualified_leads and prospects:
+            prospects.sort(key=lambda p: p.fit_score, reverse=True)
+            for p in prospects[:min(5, plan.get("target_count", 10))]:
+                qualified_leads.append(LeadProfile(
+                    company_name=p.company_name,
+                    industry=p.industry,
+                    employee_count=self._parse_employee_count(p.employee_count),
+                    location=p.location,
+                    website=p.website,
+                    status=LeadStatus.NEW,
+                    fit_score=p.fit_score,
+                    intent_score=p.intent_score,
+                    overall_score=(p.fit_score * 0.6 + p.intent_score * 0.4),
+                    pain_points=p.potential_pain_points,
+                    trigger_events=p.trigger_events,
+                    source="lead_hunter_best_effort",
+                    contact_name=p.contact_info.estimated_decision_maker_name or None,
+                    contact_title=p.contact_info.estimated_decision_maker_title or None,
+                    contact_email=p.contact_info.guessed_email or None,
+                    contact_linkedin=p.contact_info.linkedin_company_url or None,
+                ))
 
         # Sort by overall score
         qualified_leads.sort(key=lambda lead: lead.overall_score, reverse=True)
