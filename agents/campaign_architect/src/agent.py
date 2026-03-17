@@ -557,7 +557,7 @@ CRITICAL: All content must be COMPLETE and IMMEDIATELY USABLE.
         r"\[[A-Z][A-Z0-9 _/]{2,}\](?!\()"
         # Instruction-word bracket placeholders: [Recipient Name], [Insert Value], [your name]
         # (?i:...) inline flag makes only this alternative case-insensitive.
-        r"|(?i:\[(?:insert|your|recipient|placeholder|company|contact|product|first|last|name|email|value|role|title)[^\]]*\](?!\())"
+        r"|(?i:\[(?:insert|your|recipient|placeholder|company|contact|product|first|last|name|email|value|role|title|head|director|manager|ceo|cfo|cto|cio|vp|marketing|sales|operations|engineering|founder)[^\]]*\](?!\())"
         # Curly-brace variables: {first_name}, {COMPANY_NAME}, {value_prop}
         # No spaces allowed — prevents {Q3 results} from matching (space breaks the pattern).
         r"|\{[A-Za-z][A-Za-z0-9_]{1,}\}",
