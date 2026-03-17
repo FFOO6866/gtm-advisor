@@ -960,6 +960,10 @@ Focus on Singapore/APAC market context."""
             }
         else:
             company_data = company_info
+            # If domain is None/empty, guess from company name
+            if not company_data.get("domain") and company_data.get("name"):
+                company_data["domain"] = _guess_domain(company_data["name"])
+                company_data["domain_verified"] = False
 
         # Step 2: OPERATIONAL - Enrich company data
         domain = (
