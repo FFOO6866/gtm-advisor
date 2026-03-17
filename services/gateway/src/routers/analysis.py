@@ -234,10 +234,38 @@ async def start_analysis(
     user = getattr(request.state, "user", None)
     user_id = user.id if user else None
 
-    # Create or get company
+    # Create or get company — deduplicate by name + owner
     company_id = analysis_request.company_id
     if not company_id:
-        # Create a new company record for this analysis
+        # Check for existing company with same name (owned by same user or unowned)
+        _dedup_filters = [Company.name == analysis_request.company_name]
+        if user_id:
+            _dedup_filters.append(Company.owner_id == user_id)
+        else:
+            _dedup_filters.append(Company.owner_id.is_(None))
+        _existing_co = await db.scalar(
+            select(Company).where(*_dedup_filters).order_by(Company.created_at.desc()).limit(1)
+        )
+        if _existing_co:
+            company_id = _existing_co.id
+            # Update fields with latest input
+            _existing_co.description = analysis_request.description or _existing_co.description
+            _existing_co.industry = analysis_request.industry.value
+            _existing_co.website = analysis_request.website or _existing_co.website
+            _existing_co.goals = analysis_request.goals or _existing_co.goals
+            _existing_co.challenges = analysis_request.challenges or _existing_co.challenges
+            _existing_co.competitors = analysis_request.competitors or _existing_co.competitors
+            _existing_co.target_markets = analysis_request.target_markets or _existing_co.target_markets
+            _existing_co.value_proposition = analysis_request.value_proposition or _existing_co.value_proposition
+            if analysis_request.additional_context:
+                sources: list[dict] = list(_existing_co.context_sources or [])
+                new_entry = _make_source_entry("document", "uploaded_document", analysis_request.additional_context)
+                sources = [s for s in sources if not (s.get("type") == "document" and s.get("name") == "uploaded_document")]
+                sources.append(new_entry)
+                _existing_co.context_sources = sources
+            await db.flush()
+
+    if not company_id:
         company = Company(
             name=analysis_request.company_name,
             website=analysis_request.website,
@@ -571,6 +599,47 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 "value_proposition": request.value_proposition,
                 "additional_context": additional_context,
             }
+
+            # ── Pre-flight: ensure vertical intelligence report exists ──
+            # Agents query VerticalIntelligenceReport via MCP during their runs.
+            # If no report exists for this vertical, synthesize one now (fast,
+            # deterministic — no LLM calls, just DB aggregation).
+            try:
+                from packages.core.src.vertical import detect_vertical_slug
+                from packages.intelligence.src.vertical_synthesizer import (
+                    VerticalIntelligenceSynthesizer,
+                )
+
+                _vi_text = f"{request.industry.value} {request.description} {request.value_proposition or ''}"
+                _vi_slug = detect_vertical_slug(_vi_text)
+                if _vi_slug:
+                    async with async_session_factory() as _vi_db:
+                        from packages.database.src.models import (
+                            MarketVertical,
+                            VerticalIntelligenceReport,
+                        )
+                        _vi_vert = await _vi_db.scalar(
+                            select(MarketVertical).where(MarketVertical.slug == _vi_slug)
+                        )
+                        if _vi_vert:
+                            _vi_report = await _vi_db.scalar(
+                                select(VerticalIntelligenceReport).where(
+                                    VerticalIntelligenceReport.vertical_id == _vi_vert.id,
+                                    VerticalIntelligenceReport.is_current.is_(True),
+                                )
+                            )
+                            if not _vi_report:
+                                logger.info(
+                                    "vi_preflight_synthesizing",
+                                    vertical=_vi_slug,
+                                    reason="no current report in DB",
+                                )
+                                synth = VerticalIntelligenceSynthesizer(_vi_db)
+                                await synth.synthesize_vertical(_vi_slug)
+                                await _vi_db.commit()
+                    context["_detected_vertical"] = _vi_slug
+            except Exception as _vi_err:
+                logger.debug("vi_preflight_failed", error=str(_vi_err))
 
             result = GTMAnalysisResult(
                 id=analysis_id,
