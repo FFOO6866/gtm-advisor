@@ -48,6 +48,9 @@ from packages.database.src.models import (
     CampaignStatus,
     Company,
     Lead,
+    SignalEvent,
+    SignalType,
+    SignalUrgency,
 )
 from packages.database.src.models import AnalysisStatus as DBAnalysisStatus
 from packages.database.src.models import (
@@ -638,6 +641,17 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                                 await synth.synthesize_vertical(_vi_slug)
                                 await _vi_db.commit()
                     context["_detected_vertical"] = _vi_slug
+                    # Override the generic industry with the more specific vertical
+                    # so all agents detect the right vertical from their context.
+                    # E.g., "professional_services" → "marketing_comms" when the
+                    # description mentions marketing campaigns and GTM.
+                    if _vi_slug != request.industry.value:
+                        context["industry"] = _vi_slug
+                        logger.info(
+                            "vi_vertical_override",
+                            original=request.industry.value,
+                            detected=_vi_slug,
+                        )
             except Exception as _vi_err:
                 logger.debug("vi_preflight_failed", error=str(_vi_err))
 
@@ -1387,6 +1401,9 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     fit_score=int(lead_profile.fit_score * 100),
                     intent_score=int(lead_profile.intent_score * 100),
                     overall_score=int(lead_profile.overall_score * 100),
+                    pain_points=lead_profile.pain_points or [],
+                    trigger_events=lead_profile.trigger_events or [],
+                    recommended_approach=lead_profile.recommended_approach,
                 ))
 
             # Materialize market insights → MarketInsight table (powers /insights page)
@@ -1452,6 +1469,76 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
             analysis.total_confidence = result.total_confidence
             analysis.processing_time_seconds = result.processing_time_seconds
             analysis.agents_used = result.agents_used
+
+            # Bridge: materialize analysis results → SignalEvent rows so TodayPage
+            # can display intelligence immediately (before scheduler runs).
+            _INSIGHT_CATEGORY_MAP: dict[str, SignalType] = {
+                "trend": SignalType.MARKET_TREND,
+                "opportunity": SignalType.MARKET_TREND,
+                "threat": SignalType.COMPETITOR_NEWS,
+                "regulation": SignalType.REGULATION,
+                "news": SignalType.GENERAL_NEWS,
+                "market": SignalType.MARKET_TREND,
+                "general": SignalType.GENERAL_NEWS,
+            }
+            for insight in result.market_insights:
+                sig_type = _INSIGHT_CATEGORY_MAP.get(
+                    (insight.category or "general").lower(), SignalType.GENERAL_NEWS
+                )
+                confidence = insight.confidence or 0.0
+                urgency = (
+                    SignalUrgency.THIS_WEEK if confidence >= 0.7
+                    else SignalUrgency.THIS_MONTH if confidence >= 0.4
+                    else SignalUrgency.MONITOR
+                )
+                summary_parts = []
+                if insight.key_findings:
+                    summary_parts.extend(insight.key_findings[:3])
+                if insight.implications:
+                    summary_parts.extend(insight.implications[:2])
+                db.add(SignalEvent(
+                    company_id=analysis.company_id,
+                    signal_type=sig_type,
+                    urgency=urgency,
+                    headline=insight.title,
+                    summary=insight.summary + ("\n" + " | ".join(summary_parts) if summary_parts else ""),
+                    source="Market Intelligence Agent",
+                    source_type="analysis",
+                    relevance_score=confidence,
+                    recommended_action="; ".join(insight.recommendations[:2]) if insight.recommendations else None,
+                ))
+
+            for comp in result.competitor_analysis:
+                # Create a signal per competitor with their key intelligence
+                headline_parts = [comp.competitor_name]
+                if comp.strategic_moves:
+                    headline_parts.append(comp.strategic_moves[0])
+                elif comp.recent_news:
+                    headline_parts.append(comp.recent_news[0])
+                else:
+                    headline_parts.append(comp.positioning or comp.description[:100] if comp.description else "competitor identified")
+
+                summary_lines = []
+                if comp.strengths:
+                    summary_lines.append(f"Strengths: {', '.join(comp.strengths[:3])}")
+                if comp.weaknesses:
+                    summary_lines.append(f"Gaps: {', '.join(comp.weaknesses[:3])}")
+                if comp.key_differentiators:
+                    summary_lines.append(f"Differentiators: {', '.join(comp.key_differentiators[:3])}")
+
+                db.add(SignalEvent(
+                    company_id=analysis.company_id,
+                    signal_type=SignalType.COMPETITOR_NEWS,
+                    urgency=SignalUrgency.THIS_WEEK if comp.confidence >= 0.7 else SignalUrgency.THIS_MONTH,
+                    headline=" — ".join(headline_parts),
+                    summary="\n".join(summary_lines) if summary_lines else comp.description,
+                    source="Competitor Analyst Agent",
+                    source_type="analysis",
+                    relevance_score=comp.confidence,
+                    competitors_mentioned=[comp.competitor_name],
+                    recommended_action=f"Review {comp.competitor_name}'s positioning and adjust your differentiation strategy.",
+                ))
+
             await db.commit()
 
             # Mark GTM Strategist as complete before broadcasting analysis_completed
