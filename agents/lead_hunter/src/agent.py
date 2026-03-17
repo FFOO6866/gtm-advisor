@@ -1332,21 +1332,32 @@ Focus on Singapore/APAC market context."""
         if not product_context:
             return []
 
+        # Include known competitors so the LLM doesn't confuse competitors with buyers
+        known_competitors = context.get("known_competitors", [])
+        competitor_clause = ""
+        if known_competitors:
+            competitor_clause = (
+                f"\n\nKnown competitors: {', '.join(known_competitors[:5])}. "
+                f"Companies similar to these competitors are NOT buyers — they are rival products. "
+                f"The buyers are the END USERS who currently use these competitor tools or "
+                f"hire agencies/consultancies instead of using {company_name}."
+            )
+
         prompt = f"""You are a B2B sales strategist. A company called "{company_name}" offers:
 
-{product_context}
+{product_context}{competitor_clause}
 
-Identify 5 DISTINCT buyer archetypes — types of companies that would PURCHASE this product.
-For each archetype, think about WHO has the pain that this product solves.
+Identify 5 DISTINCT buyer archetypes — types of END-USER companies that would PURCHASE this product.
+These are the companies that HAVE THE PROBLEM this product solves — not companies that offer similar solutions.
 
 Return a JSON array of 5 objects, each with:
-- "vertical": specific industry vertical (e.g. "advertising agencies", "management consulting", "fintech SaaS", "law firms")
+- "vertical": specific industry vertical of the BUYER (e.g. "fintech startups", "e-commerce brands", "law firms", "logistics companies")
 - "company_size": headcount sweet spot (e.g. "50-500 employees")
 - "pain_point": one-sentence specific pain this product solves for them
 - "buying_trigger": one signal that shows they are in-market now (e.g. "recent funding", "hiring surge", "digital transformation initiative")
-- "queries": array of 2 search strings to find these buyers in {location}, e.g. ["top advertising agencies Singapore 2026 hiring", "Singapore creative agencies 50-200 staff digital tools"]
+- "queries": array of 2 search strings to find these buyers in {location}, e.g. ["top fintech startups Singapore 2026", "Singapore e-commerce brands 50-200 staff growth"]
 
-Only include archetypes where the product genuinely solves a real problem. Be specific — not generic industry names."""
+CRITICAL: Buyers are the END USERS of the product, not companies in the same space as the competitors. Do NOT include marketing agencies, GTM tools, sales platforms, or similar companies as buyer archetypes."""
 
         messages = [
             {"role": "system", "content": "Return only valid JSON. No markdown. No explanation."},
