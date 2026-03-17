@@ -604,7 +604,9 @@ Focus on Singapore/APAC market context."""
             llm_decisions += 1
 
         # Step 2-5: Process each company through the pipeline (parallel enrichment)
-        batch = seed_companies[: min(plan.get("target_count", 25), 50)]
+        # Process 3x the target count to ensure enough survive the qualification filter
+        _enrich_count = min(plan.get("target_count", 25) * 3, 50)
+        batch = seed_companies[:_enrich_count]
         raw_results = await asyncio.gather(
             *[self._process_company(seed, criteria) for seed in batch],
             return_exceptions=True,
@@ -667,7 +669,7 @@ Focus on Singapore/APAC market context."""
         # with low scores rather than returning empty (better UX than "no leads found")
         if not qualified_leads and prospects:
             prospects.sort(key=lambda p: p.fit_score, reverse=True)
-            for p in prospects[:min(5, plan.get("target_count", 10))]:
+            for p in prospects[:plan.get("target_count", 10)]:
                 qualified_leads.append(LeadProfile(
                     company_name=p.company_name,
                     industry=p.industry,
