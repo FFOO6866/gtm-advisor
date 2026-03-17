@@ -435,7 +435,7 @@ Focus on Singapore/APAC market context."""
             if archetypes:
                 # Build 2 queries per archetype (up to 5 archetypes = up to 10 queries)
                 search_queries = []
-                for archetype in archetypes[:5]:
+                for archetype in archetypes[:8]:
                     search_queries.extend(archetype.get("queries", [])[:2])
                 self._logger.info(
                     "buyer_archetypes_derived",
@@ -567,7 +567,7 @@ Focus on Singapore/APAC market context."""
                         "description": f"Companies needing: {archetype.get('pain_point', '')}. Size: {archetype.get('company_size', '')}. Trigger: {archetype.get('buying_trigger', '')}",
                         "search_queries": archetype.get("queries", []),
                     }
-                    for archetype in archetypes[:5]
+                    for archetype in archetypes[:8]
                 ]
                 perplexity_rounds = await asyncio.gather(
                     *[self._discover_companies_via_perplexity(aq, criteria) for aq in archetype_queries],
@@ -1349,17 +1349,23 @@ Focus on Singapore/APAC market context."""
 
 {product_context}{competitor_clause}
 
-Identify 5 DISTINCT buyer archetypes — types of END-USER companies that would PURCHASE this product.
-These are the companies that HAVE THE PROBLEM this product solves — not companies that offer similar solutions.
+Identify 8 DISTINCT buyer archetypes — types of END-USER companies that would PURCHASE this product.
+These are SMEs that HAVE THE PROBLEM this product solves — across a WIDE range of industries.
 
-Return a JSON array of 5 objects, each with:
-- "vertical": specific industry vertical of the BUYER (e.g. "fintech startups", "e-commerce brands", "law firms", "logistics companies")
-- "company_size": headcount sweet spot (e.g. "50-500 employees")
+IMPORTANT: Cover DIVERSE industries, not just tech. SMEs in every sector need go-to-market help:
+- Traditional: law firms, accounting practices, recruitment agencies, real estate agencies
+- Services: F&B chains, beauty/wellness, fitness studios, dental/medical clinics
+- Tech: SaaS startups, fintech, e-commerce brands
+- Industrial: logistics companies, manufacturers, construction firms
+
+Return a JSON array of 8 objects, each with:
+- "vertical": specific industry (e.g. "law firms", "F&B restaurant groups", "recruitment agencies", "dental clinic chains", "fintech startups")
+- "company_size": headcount sweet spot (e.g. "10-50 employees", "50-200 employees")
 - "pain_point": one-sentence specific pain this product solves for them
-- "buying_trigger": one signal that shows they are in-market now (e.g. "recent funding", "hiring surge", "digital transformation initiative")
-- "queries": array of 2 search strings to find these buyers in {location}, e.g. ["top fintech startups Singapore 2026", "Singapore e-commerce brands 50-200 staff growth"]
+- "buying_trigger": one signal that shows they are in-market now (e.g. "opening new outlets", "hiring marketing staff", "recent funding round")
+- "queries": array of 2 search strings to find these buyers in {location}, e.g. ["growing law firms {location} 2026", "{location} F&B chains expanding 2026"]
 
-CRITICAL: Buyers are the END USERS of the product, not companies in the same space as the competitors. Do NOT include marketing agencies, GTM tools, sales platforms, or similar companies as buyer archetypes."""
+CRITICAL: Buyers are END USERS, not companies in the same space as the competitors. Ensure at least 4 of 8 archetypes are NON-TECH industries."""
 
         messages = [
             {"role": "system", "content": "Return only valid JSON. No markdown. No explanation."},
@@ -1371,7 +1377,7 @@ CRITICAL: Buyers are the END USERS of the product, not companies in the same spa
             cleaned = _re.sub(r"```[a-zA-Z]*\n?", "", raw or "").strip()
             archetypes = json.loads(cleaned)
             if isinstance(archetypes, list):
-                return archetypes[:5]
+                return archetypes[:8]
         except Exception as e:
             self._logger.debug("archetype_derivation_failed", error=str(e))
         return []
