@@ -214,10 +214,10 @@ const SIGNAL_TYPE_LABELS: Record<string, string> = {
 };
 
 const URGENCY_BADGE: Record<string, string> = {
-  critical: 'text-red-400 bg-red-500/10 border-red-500/20',
-  high: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-  medium: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-  low: 'text-white/40 bg-white/5 border-white/10',
+  immediate: 'text-red-400 bg-red-500/10 border-red-500/20',
+  this_week: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  this_month: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+  monitor: 'text-white/40 bg-white/5 border-white/10',
 };
 
 const PIPELINE_STATUSES = ['new', 'qualified', 'contacted', 'converted', 'lost'] as const;
@@ -297,7 +297,7 @@ function signalIcon(type: string) {
 
 function SignalRow({ signal }: { signal: MarketSignal }) {
   const badgeColor =
-    URGENCY_BADGE[signal.urgency] ?? URGENCY_BADGE.low;
+    URGENCY_BADGE[signal.urgency] ?? URGENCY_BADGE.monitor;
   const typeLabel =
     SIGNAL_TYPE_LABELS[signal.signal_type] ??
     signal.signal_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -1284,15 +1284,15 @@ export function TodayPage() {
     ).finally(() => setLoading(false));
   }, [companyId]);
 
-  // Compute urgent signals from competitor signals (high urgency)
+  // Compute urgent signals — match backend SignalUrgency enum values
   const urgentCompetitorSignals = useMemo(
-    () => competitorSignals.filter((s) => s.urgency === 'critical' || s.urgency === 'high'),
+    () => competitorSignals.filter((s) => s.urgency === 'immediate' || s.urgency === 'this_week'),
     [competitorSignals]
   );
   const urgentIndustrySignals = useMemo(
     () =>
       (industryData?.signals ?? []).filter(
-        (s) => s.urgency === 'critical' || s.urgency === 'high'
+        (s) => s.urgency === 'immediate' || s.urgency === 'this_week'
       ),
     [industryData]
   );
@@ -1313,13 +1313,18 @@ export function TodayPage() {
     [industryData, competitorSignals, pipelineData, pendingApprovals]
   );
 
-  // Determine if this is a first-run (empty) state
+  // Determine if this is a first-run (empty) state.
+  // Show the briefing even if no analysis was run — signals and articles from
+  // the intelligence pipeline (RSS, curated intel) are always available.
+  const hasAnyIntel =
+    (industryData?.signals.length ?? 0) > 0 ||
+    (industryData?.articles.length ?? 0) > 0 ||
+    competitorSignals.length > 0 ||
+    (pipelineData?.total_leads ?? 0) > 0;
   const isFirstRun =
+    !hasAnyIntel &&
     briefingStatus != null &&
-    !briefingStatus.has_completed_analysis &&
-    (industryData?.signals.length ?? 0) === 0 &&
-    competitorSignals.length === 0 &&
-    (pipelineData?.total_leads ?? 0) === 0;
+    !briefingStatus.has_completed_analysis;
 
   // ---- No company selected ----
   if (!companyId) {
