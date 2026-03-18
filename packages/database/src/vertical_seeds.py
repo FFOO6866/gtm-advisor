@@ -208,6 +208,26 @@ VERTICAL_SEEDS: list[dict] = [
         ],
         "is_reit_vertical": False,
     },
+    {
+        "slug": "marketing_comms",
+        "name": "Marketing, Communications & Advertising",
+        "description": (
+            "Advertising holding groups, creative agencies, media buying, digital marketing, "
+            "public relations, influencer marketing, martech/adtech platforms, "
+            "experiential marketing, OOH, and market research firms in Singapore and globally."
+        ),
+        "ssic_sections": ["M", "J"],
+        "ssic_codes": ["73100", "73200", "70201", "63910", "59110"],
+        "gics_sectors": ["Communication Services", "Consumer Discretionary"],
+        "keywords": [
+            "advertising", "creative agency", "media agency", "public relations",
+            "digital marketing", "influencer marketing", "martech", "adtech",
+            "media buying", "branding", "communications", "marketing agency",
+            "out-of-home", "experiential", "content marketing", "performance marketing",
+            "social media marketing", "programmatic", "market research", "PR agency",
+        ],
+        "is_reit_vertical": False,
+    },
 ]
 
 # Curated list of Singapore-founded / Singapore-HQ'd companies listed on non-SGX exchanges.

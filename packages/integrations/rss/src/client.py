@@ -48,16 +48,22 @@ RSS_FEEDS: dict[str, str] = {
 # no LLM classifier needed.
 VERTICAL_FEEDS: dict[str, list[dict[str, str]]] = {
     "marketing_comms": [
-        # ── Verified working (2026-03-17) ──────────────────────────────────
+        # ── PR & Comms trade publications (verified 2026-03-17) ─────────
+        {"url": "https://www.prdaily.com/feed/", "name": "PR Daily"},
+        {"url": "https://www.odwyerpr.com/feed", "name": "O'Dwyer's PR News"},
+        {"url": "https://www.prnewsonline.com/feed/", "name": "PRNEWS"},
+        {"url": "https://campaignbriefasia.com/feed/", "name": "Campaign Brief Asia"},
+        # ── Advertising & marketing (verified 2026-03-17) ───────────────
+        {"url": "https://www.adweek.com/feed/", "name": "Adweek"},
+        {"url": "https://digiday.com/feed/", "name": "Digiday"},
         {"url": "https://feeds.feedburner.com/socialmediaexaminer", "name": "Social Media Examiner"},
         {"url": "https://blog.hubspot.com/marketing/rss.xml", "name": "HubSpot Marketing Blog"},
         {"url": "https://sproutsocial.com/insights/feed/", "name": "Sprout Social Insights"},
         {"url": "https://martech.org/feed/", "name": "MarTech"},
         {"url": "https://www.marketingdive.com/feeds/news/", "name": "Marketing Dive"},
-        {"url": "https://digiday.com/feed/", "name": "Digiday"},
-        # Campaign Asia (500), The Drum (404), PRWeek (directory page),
-        # Marketing Interactive (404), Mumbrella Asia (403),
-        # Content Marketing Institute (HTML not RSS) — all broken as of 2026-03-17
+        # Broken as of 2026-03-17: Campaign Asia (500), The Drum (404),
+        # PRWeek (JS-rendered), Marketing Interactive (404), Mumbrella Asia (HTML),
+        # PRovoke Media (403), Ad Age (404), Content Marketing Institute (HTML)
     ],
     "fintech": [
         {"url": "https://www.finextra.com/rss/headlines.aspx", "name": "Finextra"},

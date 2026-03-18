@@ -182,6 +182,12 @@ class CompetitorAnalystAgent(BaseGTMAgent[CompetitorIntelOutput]):
 
     async def _on_company_profile(self, message: AgentMessage) -> None:
         """Handle company profile discovery for context enrichment."""
+        if (
+            self._analysis_id
+            and message.analysis_id
+            and message.analysis_id != self._analysis_id
+        ):
+            return
         self._logger.debug(
             "company_profile_received",
             company=message.content.get("company_name"),
@@ -1155,7 +1161,7 @@ Do not use generic phrases like "strong brand" without supporting detail.""",
         if total_competitors > 0 and competitors_with_data > 0:
             # Named competitors analysed with real MCP data — highest quality path
             data_coverage = competitors_with_data / total_competitors
-            base_score = 0.3 + 0.2 * data_coverage  # 0.3–0.5
+            base_score = 0.2 + 0.15 * data_coverage  # 0.2–0.35
             cap = 1.0
         elif total_competitors > 0 and competitors_with_data == 0:
             # Competitors found but MCP data unavailable (first-cut / unconfigured).
@@ -1165,7 +1171,7 @@ Do not use generic phrases like "strong brand" without supporting detail.""",
             cap = 0.65
         else:
             # No named competitors at all — valid state, no data failure
-            base_score = 0.35
+            base_score = 0.20
             cap = 1.0
 
         score = base_score

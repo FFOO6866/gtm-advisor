@@ -552,6 +552,16 @@ _FX_TO_SGD: dict[str, float] = {
     "HKD": 0.17,
     "MYR": 0.30,
     "AUD": 0.88,
+    "GBP": 1.71,    # WPP, S4 Capital, M&C Saatchi
+    "EUR": 1.46,    # Publicis, Havas, JCDecaux
+    "JPY": 0.0090,  # Dentsu, Hakuhodo DY
+    "KRW": 0.00099,  # Cheil Worldwide, INNOCEAN
+    "CNY": 0.19,    # BlueFocus
+    "SEK": 0.13,    # Essity, Ericsson (other Nordics)
+    "CHF": 1.53,    # Swiss companies
+    "INR": 0.016,   # Indian companies
+    "TWD": 0.042,   # Taiwanese companies
+    "THB": 0.038,   # Thai companies
 }
 
 

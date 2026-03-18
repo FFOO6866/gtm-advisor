@@ -143,7 +143,7 @@ def _make_signal_monitor_agent() -> SignalMonitorAgent:
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_competitor_check_no_competitors_base_score():
-    """Empty competitors list with no real data → base score of 0.35 only."""
+    """Empty competitors list with no real data → base score of 0.20 only."""
     agent = _make_competitor_agent()
     agent._competitors_with_real_data = set()
 
@@ -155,8 +155,8 @@ async def test_competitor_check_no_competitors_base_score():
     )
     score = await agent._check(result)
 
-    # Path: no competitors → base_score = 0.35, no bonuses
-    assert score == pytest.approx(0.35)
+    # Path: no competitors → base_score = 0.20, no bonuses (Rule #4)
+    assert score == pytest.approx(0.20)
 
 
 @pytest.mark.unit

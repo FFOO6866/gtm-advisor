@@ -1,7 +1,8 @@
 """Campaign Architect Agent - Messaging and campaign planning.
 
 Creates actionable campaign plans with messaging, content, and outreach templates.
-Pulls LEAD_FOUND and PERSONA_DEFINED history from the bus to personalize campaigns.
+Pulls LEAD_FOUND, PERSONA_DEFINED, COMPETITOR_WEAKNESS, COMPANY_TECH_STACK, and
+MARKET_TREND history from the bus to personalize campaigns.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
 from packages.algorithms.src.scoring import MessageAlignmentScorer
-from packages.core.src.agent_bus import AgentBus, DiscoveryType
+from packages.core.src.agent_bus import AgentBus, AgentMessage, DiscoveryType, get_agent_bus
 from packages.core.src.types import CampaignBrief
 from packages.core.src.vertical import detect_vertical_slug
 from packages.database.src.session import async_session_factory
@@ -111,12 +112,50 @@ class CampaignArchitectAgent(BaseGTMAgent[CampaignPlanOutput]):
                 AgentCapability(name="channel-strategy", description="Plan multi-channel approach"),
             ],
         )
-        self._bus = bus
+        self._agent_bus: AgentBus | None = bus or get_agent_bus()
+        # Keep self._bus as an alias so existing publish/get_history callsites are unchanged.
+        self._bus = self._agent_bus
         self._bus_personas: list[dict[str, Any]] = []
         self._bus_leads: list[dict[str, Any]] = []
         self._bus_competitor_weaknesses: list[dict[str, Any]] = []
+        self._bus_tech_stack: list[dict] = []
+        self._bus_market_trends: list[dict] = []
         self._current_analysis_id: Any = None
         self._perplexity = get_llm_manager().perplexity
+        try:
+            if self._agent_bus is not None:
+                self._agent_bus.subscribe(
+                    agent_id=self.name,
+                    discovery_type=DiscoveryType.COMPANY_TECH_STACK,
+                    handler=self._on_tech_stack,
+                )
+                self._agent_bus.subscribe(
+                    agent_id=self.name,
+                    discovery_type=DiscoveryType.MARKET_TREND,
+                    handler=self._on_market_trend,
+                )
+        except Exception:
+            pass
+
+    async def _on_tech_stack(self, message: AgentMessage) -> None:
+        """Cache tech stack info for tech-aware messaging."""
+        if (
+            self._current_analysis_id
+            and message.analysis_id
+            and str(message.analysis_id) != str(self._current_analysis_id)
+        ):
+            return
+        self._bus_tech_stack.append(message.content)
+
+    async def _on_market_trend(self, message: AgentMessage) -> None:
+        """Cache market trend data for timely, relevant campaigns."""
+        if (
+            self._current_analysis_id
+            and message.analysis_id
+            and str(message.analysis_id) != str(self._current_analysis_id)
+        ):
+            return
+        self._bus_market_trends.append(message.content)
 
     def get_system_prompt(self) -> str:
         return """You are the Campaign Architect, an expert in B2B marketing for Singapore/APAC markets.
@@ -163,6 +202,8 @@ Templates should be ready to personalize and send."""
         self._bus_personas.clear()
         self._bus_leads.clear()
         self._bus_competitor_weaknesses.clear()
+        self._bus_tech_stack.clear()
+        self._bus_market_trends.clear()
         self._current_analysis_id = analysis_id
 
         # Pull personas and leads from bus history (supplementing any live subscriptions)
@@ -204,6 +245,24 @@ Templates should be ready to personalize and send."""
                     seen_weakness_titles.add(key)
                     bus_weaknesses.append({"title": msg.title, **msg.content})
             self._bus_competitor_weaknesses.extend(bus_weaknesses)
+
+            tech_history = self._bus.get_history(
+                analysis_id=analysis_id,
+                discovery_type=DiscoveryType.COMPANY_TECH_STACK,
+                limit=5,
+            )
+            for msg in tech_history:
+                if msg.content not in self._bus_tech_stack:
+                    self._bus_tech_stack.append(msg.content)
+
+            trend_history = self._bus.get_history(
+                analysis_id=analysis_id,
+                discovery_type=DiscoveryType.MARKET_TREND,
+                limit=10,
+            )
+            for msg in trend_history:
+                if msg.content not in self._bus_market_trends:
+                    self._bus_market_trends.append(msg.content)
 
         # Repopulate instance lists from history pull so _check() grounding bonus works.
         # Bus history pull is the authoritative data source for personas and leads.
@@ -450,6 +509,36 @@ Templates should be ready to personalize and send."""
                 persona_lines.append(line)
             persona_context = "\nBus-sourced Personas:\n" + "\n".join(persona_lines)
 
+        # Tech stack context — enables tech-aware messaging (e.g. integration angles)
+        pipeline_context_lines: list[str] = []
+        if self._bus_tech_stack:
+            tech_names = [
+                t.get("technology", t.get("name", ""))
+                for t in self._bus_tech_stack
+                if isinstance(t, dict)
+            ]
+            tech_names = [n for n in tech_names if n]
+            if tech_names:
+                pipeline_context_lines.append(
+                    f"- Client tech stack: {', '.join(tech_names[:10])}"
+                )
+        if self._bus_market_trends:
+            trend_titles = [
+                t.get("trend", t.get("title", ""))
+                for t in self._bus_market_trends
+                if isinstance(t, dict)
+            ]
+            trend_titles = [n for n in trend_titles if n]
+            if trend_titles:
+                pipeline_context_lines.append(
+                    f"- Market trends: {', '.join(trend_titles[:5])}"
+                )
+        pipeline_context_str = ""
+        if pipeline_context_lines:
+            pipeline_context_str = "\nAdditional Pipeline Context:\n" + "\n".join(
+                pipeline_context_lines
+            )
+
         # Summarize lead signals for personalization hints
         lead_context = f"{len(leads)} leads identified"
         if leads:
@@ -482,6 +571,10 @@ Templates should be ready to personalize and send."""
             self._campaign_data_sources.append("AgentBus (Leads)")
         if self._bus_competitor_weaknesses:
             self._campaign_data_sources.append("AgentBus (Competitor Weaknesses)")
+        if self._bus_tech_stack:
+            self._campaign_data_sources.append("AgentBus (Tech Stack)")
+        if self._bus_market_trends:
+            self._campaign_data_sources.append("AgentBus (Market Trends)")
         if plan.get("kb_vertical_context"):
             self._campaign_data_sources.append("Market Intel DB")
 
@@ -510,7 +603,7 @@ Compliance requirements for Singapore outreach (mandatory — include in all ema
 
 Company: {company_text}
 Value Proposition: {plan.get("value_proposition", "Not specified")}{persona_context}{weakness_context}{kb_vertical_str}{kb_framework_str}{competitor_intel_str}
-Campaign Goal: {plan.get("campaign_goal")}{vi_context}{bench_context}
+Campaign Goal: {plan.get("campaign_goal")}{vi_context}{bench_context}{pipeline_context_str}
 Target Leads: {lead_context}
 {compliance_prompt}
 Create:

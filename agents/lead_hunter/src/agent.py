@@ -256,6 +256,10 @@ class LeadHunterAgent(ToolEmpoweredAgent[LeadHuntingOutput]):
         self._market_opportunities: list[dict] = []
         # Competitor weaknesses from CompetitorAnalyst (via bus)
         self._competitor_weaknesses: list[dict] = []
+        # Company products from company_enricher (via bus) — used to refine targeting
+        self._bus_company_products: list[dict] = []
+        # ICP segments from company_enricher (via bus) — used to sharpen search queries
+        self._bus_icp_segments: list[dict] = []
         if self._agent_bus is not None:
             self._agent_bus.subscribe(
                 agent_id=self.name,
@@ -271,6 +275,16 @@ class LeadHunterAgent(ToolEmpoweredAgent[LeadHuntingOutput]):
                 agent_id=self.name,
                 discovery_type=DiscoveryType.COMPETITOR_WEAKNESS,
                 handler=self._on_competitor_weakness,
+            )
+            self._agent_bus.subscribe(
+                agent_id=self.name,
+                discovery_type=DiscoveryType.COMPANY_PRODUCTS,
+                handler=self._on_company_products,
+            )
+            self._agent_bus.subscribe(
+                agent_id=self.name,
+                discovery_type=DiscoveryType.ICP_SEGMENT,
+                handler=self._on_icp_segment,
             )
 
     async def _on_persona_defined(self, message: AgentMessage) -> None:
@@ -318,6 +332,26 @@ class LeadHunterAgent(ToolEmpoweredAgent[LeadHuntingOutput]):
                 competitor=message.content.get("competitor_name", ""),
                 from_agent=message.from_agent,
             )
+
+    async def _on_company_products(self, message: AgentMessage) -> None:
+        """Cache company product info from company_enricher for targeting refinement."""
+        if (
+            self._analysis_id
+            and message.analysis_id
+            and str(message.analysis_id) != str(self._analysis_id)
+        ):
+            return
+        self._bus_company_products.append(message.content)
+
+    async def _on_icp_segment(self, message: AgentMessage) -> None:
+        """Cache ICP segment data from company_enricher for search query refinement."""
+        if (
+            self._analysis_id
+            and message.analysis_id
+            and str(message.analysis_id) != str(self._analysis_id)
+        ):
+            return
+        self._bus_icp_segments.append(message.content)
 
     def get_system_prompt(self) -> str:
         return """You are the Lead Hunter, a specialist in B2B lead generation.
@@ -395,6 +429,32 @@ Focus on Singapore/APAC market context."""
                         self._competitor_weaknesses.append(msg.content)
             except Exception as _e:
                 self._logger.debug("competitor_weakness_history_failed", error=str(_e))
+
+            # Backfill company products
+            try:
+                products_history = self._agent_bus.get_history(
+                    analysis_id=self._analysis_id,
+                    discovery_type=DiscoveryType.COMPANY_PRODUCTS,
+                    limit=5,
+                )
+                for msg in products_history:
+                    if msg.content not in self._bus_company_products:
+                        self._bus_company_products.append(msg.content)
+            except Exception as _e:
+                self._logger.debug("company_products_history_failed", error=str(_e))
+
+            # Backfill ICP segments
+            try:
+                icp_history = self._agent_bus.get_history(
+                    analysis_id=self._analysis_id,
+                    discovery_type=DiscoveryType.ICP_SEGMENT,
+                    limit=5,
+                )
+                for msg in icp_history:
+                    if msg.content not in self._bus_icp_segments:
+                        self._bus_icp_segments.append(msg.content)
+            except Exception as _e:
+                self._logger.debug("icp_segment_history_failed", error=str(_e))
 
         # Build scoring criteria from context
         criteria = LeadScoringCriteria(
@@ -527,6 +587,25 @@ Focus on Singapore/APAC market context."""
                 existing = set(criteria.pain_points)
                 criteria.pain_points = list(existing | set(persona_pain_points[:5]))
 
+        # Enrich criteria with ICP segment data (company_enricher bus events)
+        # Segments provide refined industry/role targeting not present in initial context.
+        if self._bus_icp_segments:
+            segment_pain_points = [
+                pp
+                for seg in self._bus_icp_segments
+                for pp in (seg.get("pain_points") or seg.get("challenges") or [])
+            ]
+            if segment_pain_points:
+                existing = set(criteria.pain_points)
+                criteria.pain_points = list(existing | set(segment_pain_points[:5]))
+            segment_roles = [
+                role
+                for seg in self._bus_icp_segments
+                for role in (seg.get("decision_maker_roles") or seg.get("roles") or [])
+            ]
+            if segment_roles and not criteria.ideal_roles:
+                criteria.ideal_roles = segment_roles[:3]
+
         prospects: list[ProspectCompany] = []
         algorithm_decisions = 0
         llm_decisions = 0
@@ -546,6 +625,25 @@ Focus on Singapore/APAC market context."""
                 for kw in opp_keywords:
                     if kw:
                         base_queries.append(f"Singapore companies in {kw} segment")
+            # Boost search queries with product use-cases from company_enricher
+            if self._bus_company_products:
+                product_names = [
+                    p.get("name", "") for p in self._bus_company_products if p.get("name")
+                ]
+                if product_names:
+                    product_label = ", ".join(product_names[:3])
+                    base_queries.append(
+                        f"Singapore companies that need {product_label} solutions"
+                    )
+            # Boost search queries with ICP segment targeting criteria
+            if self._bus_icp_segments:
+                for segment in self._bus_icp_segments[:2]:
+                    seg_name = segment.get("segment_name", segment.get("name", ""))
+                    seg_industry = segment.get("industry", segment.get("vertical", ""))
+                    if seg_name:
+                        base_queries.append(
+                            f"Singapore {seg_industry or ''} companies {seg_name} segment 2025".strip()
+                        )
             # Use news_scraper tool to find companies from search (single pass for speed)
             seed_companies = await self._search_for_companies(
                 base_queries[:3],  # first 3 queries via tool
@@ -723,6 +821,7 @@ Focus on Singapore/APAC market context."""
                 qualified_leads[:3],
                 competitor_weaknesses=self._competitor_weaknesses,
                 kb_qualification=self._kb_qualification,
+                company_products=self._bus_company_products or None,
             )
             llm_decisions += 1
             # Attach a short data-driven approach hint to each qualified lead
@@ -1542,6 +1641,7 @@ CRITICAL: Buyers are END USERS, not companies in the same space as the competito
         top_leads: list[LeadProfile],
         competitor_weaknesses: list[dict] | None = None,
         kb_qualification: dict | None = None,
+        company_products: list[dict] | None = None,
     ) -> str:
         """Generate outreach approach using LLM (COGNITIVE layer)."""
         if not top_leads:
@@ -1581,6 +1681,23 @@ CRITICAL: Buyers are END USERS, not companies in the same space as the competito
                 f"\n\nQualification frameworks in use: {bant_name} (BANT/SPIN criteria), {icp_name}. "
                 "Scores are derived from these frameworks — reference them when explaining lead fit."
             )
+
+        # Build product context when available (from company_enricher bus events)
+        product_section = ""
+        if company_products:
+            product_names = [p.get("name", "") for p in company_products if p.get("name")]
+            product_descriptions = [
+                p.get("description", "") for p in company_products if p.get("description")
+            ]
+            if product_names:
+                product_detail = "; ".join(
+                    f"{n}: {d}" if d else n
+                    for n, d in zip(product_names[:3], product_descriptions[:3] + [""] * 3)
+                )
+                product_section = (
+                    f"\n\nProducts/services being sold: {product_detail}. "
+                    "Reference specific product benefits when explaining why each lead is a fit."
+                )
 
         _knowledge_ctx = getattr(self, "_knowledge_pack", {}).get("formatted_injection", "")
         _knowledge_header = f"{_knowledge_ctx}\n\n---\n\n" if _knowledge_ctx else ""

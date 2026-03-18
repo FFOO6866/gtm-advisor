@@ -61,6 +61,11 @@ export interface Lead {
   verified_email?: boolean;
   email_domain_valid?: boolean;
   buying_cycle_stage?: string | null;
+  contact_linkedin?: string | null;
+  status?: string;  // "new" | "qualified" | "contacted" | "converted" | "lost"
+  source_url?: string | null;
+  last_enriched_at?: string | null;
+  created_at?: string;
 }
 
 export interface MarketInsight {
@@ -73,6 +78,9 @@ export interface MarketInsight {
   recommendations: string[];
   sources: string[];
   confidence: number;
+  relevant_industries?: string[];
+  relevant_to_company?: boolean;
+  created_at?: string;
 }
 
 export interface CompetitorAnalysis {
@@ -88,6 +96,35 @@ export interface CompetitorAnalysis {
   positioning: string | null;
   key_differentiators: string[];
   confidence: number;
+  founded_year?: number | null;
+  employee_count?: number | null;
+  funding_raised?: number | null;
+  headquarters?: string | null;
+  pricing_model?: string | null;
+  target_market?: string | null;
+  market_share_estimate?: string | null;
+  recent_news?: string[];
+  strategic_moves?: string[];
+  pricing_tiers?: Array<{
+    tier_name: string;
+    price_sgd?: number | null;
+    price_usd?: number | null;
+    frequency: string;
+    features_summary: string;
+    source: string;
+  }>;
+  latest_funding?: {
+    round_type: string;
+    amount_usd?: number | null;
+    announced_date?: string | null;
+    investors: string[];
+    use_of_funds: string;
+  } | null;
+  employee_count_estimate?: number | null;
+  hiring_velocity?: string;
+  recent_executive_moves?: string[];
+  sources?: string[];
+  created_at?: string;
 }
 
 export interface CustomerPersona {
@@ -100,6 +137,18 @@ export interface CustomerPersona {
   challenges: string[];
   pain_points: string[];
   preferred_channels: string[];
+  age_range?: string | null;
+  experience_level?: string | null;
+  education?: string | null;
+  company_stage?: string | null;
+  motivations?: string[];
+  objections?: string[];
+  information_sources?: string[];
+  decision_criteria?: string[];
+  buying_process?: string | null;
+  content_preferences?: string[];
+  messaging_tone?: string | null;
+  created_at?: string;
 }
 
 export interface CampaignBrief {
@@ -113,6 +162,12 @@ export interface CampaignBrief {
   channels: string[];
   email_templates: string[];
   linkedin_posts: string[];
+  target_industries?: string[];
+  target_company_size?: string | null;
+  target_geography?: string[];
+  budget_sgd?: number | null;
+  content_ideas?: string[];
+  created_at?: string;
 }
 
 export interface GTMAnalysisResult {
@@ -378,6 +433,7 @@ export function storeAuthTokens(accessToken: string, refreshToken: string): void
 export function clearAuthTokens(): void {
   localStorage.removeItem('gtm_access_token');
   localStorage.removeItem('gtm_refresh_token');
+  localStorage.removeItem('gtm_user_name');
 }
 
 export function getStoredToken(): string | null {

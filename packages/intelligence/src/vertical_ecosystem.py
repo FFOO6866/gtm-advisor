@@ -166,7 +166,7 @@ class VerticalEcosystem:
         if self.publications:
             lines.append("\n### Trade Publications")
             sorted_pubs = sorted(self.publications, key=lambda o: relevance_order.get(o.sg_relevance, 3))
-            for pub in sorted_pubs[:8]:
+            for pub in sorted_pubs[:15]:
                 lines.append(f"- {pub.name}: {pub.description[:100]}")
 
         if self.awards_bodies:
@@ -425,12 +425,17 @@ def clear_ecosystem_cache() -> None:
 
 VERTICAL_RSS_FEEDS: dict[str, list[dict[str, str]]] = {
     "marketing_comms": [
-        {"url": "https://www.campaignasia.com/rss", "name": "Campaign Asia-Pacific", "category": "trade_publication", "priority": "high"},
-        {"url": "https://www.marketing-interactive.com/rss.xml", "name": "Marketing-Interactive", "category": "trade_publication", "priority": "high"},
-        {"url": "https://www.thedrum.com/feeds/all.rss", "name": "The Drum", "category": "trade_publication", "priority": "medium"},
-        {"url": "https://adage.com/arc/outboundfeeds/rss/", "name": "Ad Age", "category": "trade_publication", "priority": "medium"},
+        # PR & Comms trade pubs (verified working 2026-03-17)
+        {"url": "https://www.prdaily.com/feed/", "name": "PR Daily", "category": "trade_publication", "priority": "high"},
+        {"url": "https://www.odwyerpr.com/feed", "name": "O'Dwyer's PR News", "category": "trade_publication", "priority": "high"},
+        {"url": "https://www.prnewsonline.com/feed/", "name": "PRNEWS", "category": "trade_publication", "priority": "medium"},
+        {"url": "https://campaignbriefasia.com/feed/", "name": "Campaign Brief Asia", "category": "trade_publication", "priority": "high"},
+        # Advertising & marketing (verified working)
         {"url": "https://www.adweek.com/feed/", "name": "Adweek", "category": "trade_publication", "priority": "medium"},
-        {"url": "https://feeds.feedburner.com/Mumbrella", "name": "Mumbrella Asia", "category": "trade_publication", "priority": "medium"},
+        {"url": "https://digiday.com/feed/", "name": "Digiday", "category": "trade_publication", "priority": "medium"},
+        {"url": "https://www.marketingdive.com/feeds/news/", "name": "Marketing Dive", "category": "trade_publication", "priority": "medium"},
+        # Broken: Campaign Asia (500), Marketing-Interactive (404), The Drum (404),
+        # Ad Age (404), Mumbrella Asia (HTML), PRWeek (JS), PRovoke (403)
     ],
     "fintech": [
         {"url": "https://fintechnews.sg/feed/", "name": "Fintech News Singapore", "category": "trade_publication", "priority": "high"},
@@ -470,10 +475,11 @@ VERTICAL_RSS_FEEDS: dict[str, list[dict[str, str]]] = {
 
 VERTICAL_RESEARCH_ANGLES: dict[str, list[str]] = {
     "marketing_comms": [
-        "Recent advertising and marketing awards: Cannes Lions, Effies, Spikes Asia, Campaign AOY, Marketing-Interactive AOY. Wins, shortlists, jury roles in last 2 years.",
-        "Conference participation: Spikes Asia, ADFEST, Campaign360, Advertising Week, CES, SXSW. Speaking, sponsoring, or attending in last year.",
-        "Industry body roles: AAMS, SAA, IPRS, MIS, IAB SEA+India, PRCA APAC. Board positions, committee leadership, published papers.",
-        "Thought leadership: articles in Campaign Asia, Marketing-Interactive, The Drum, Ad Age, Adweek, Mumbrella, PRWeek Asia. Op-eds, research reports, podcast appearances.",
+        "Recent advertising and marketing awards: Cannes Lions, Effies, Spikes Asia, Campaign AOY, Marketing-Interactive AOY, PRWeek Awards, PRISM Awards, SABRE Awards, Clio Awards, ADFEST Lotus. Wins, shortlists, jury roles in last 2 years.",
+        "Conference participation: Spikes Asia (March, Singapore), ADFEST (March, Thailand), Cannes Lions (June), Campaign AOY (December), Advertising Week (October), Effie APAC (November, Singapore), Singapore Creative Circle Awards (September). Speaking, sponsoring, or attending in last year.",
+        "Industry body roles: AAMS, SAA, IPRS, MIS, IAB SEA+India, PRCA APAC, MMA APAC. Board positions, committee leadership, published papers.",
+        "Thought leadership and media coverage in: PRWeek, PR Daily, O'Dwyer's, PRovoke Media, Campaign Asia, Marketing-Interactive, The Drum, Ad Age, Adweek, Mumbrella, Digiday, PRNEWS, Campaign Brief Asia. Op-eds, interviews, research reports, agency rankings, podcast appearances.",
+        "Agency rankings and benchmarking: PRovoke Global 250, PRWeek Agency Business Report, Ad Age A-List, Campaign AOY rankings, RECMA media agency rankings, COMvergence new business barometer, R3/MediaSense pitch data.",
         "Social media thought leadership: LinkedIn posts by company leaders, viral campaign posts, industry commentary on Instagram/Twitter/TikTok.",
     ],
     "fintech": [

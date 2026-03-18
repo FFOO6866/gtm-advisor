@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from agents.core.src.base_agent import AgentCapability, BaseGTMAgent
-from packages.core.src.agent_bus import AgentBus, DiscoveryType, get_agent_bus
+from packages.core.src.agent_bus import AgentBus, AgentMessage, DiscoveryType, get_agent_bus
 from packages.core.src.types import CustomerPersona
 from packages.core.src.vertical import detect_vertical_slug
 from packages.database.src.models import ListedCompany, MarketVertical
@@ -77,6 +77,16 @@ class CustomerProfilerAgent(BaseGTMAgent[CustomerProfileOutput]):
         self._bus = bus or get_agent_bus()
         self._newsapi = NewsAPIClient()
         self._analysis_id: Any = None
+        self._bus_market_trends: list[dict] = []
+        try:
+            if self._bus is not None:
+                self._bus.subscribe(
+                    agent_id=self.name,
+                    discovery_type=DiscoveryType.MARKET_TREND,
+                    handler=self._on_market_trend,
+                )
+        except Exception:
+            pass
 
     def get_system_prompt(self) -> str:
         return """You are the Customer Profiler, an expert in B2B customer segmentation for Singapore/APAC markets.
@@ -103,6 +113,16 @@ For Singapore SMEs, consider:
 Be specific - vague personas like "Tech Manager" are useless.
 Each persona must have a SPECIFIC job title (e.g. "Head of Sales Operations, 3â€“5 person team, Series A SaaS startup")."""
 
+    async def _on_market_trend(self, message: AgentMessage) -> None:
+        """Live bus handler â€” accumulates MARKET_TREND events for the current analysis."""
+        if (
+            self._analysis_id
+            and message.analysis_id
+            and str(message.analysis_id) != str(self._analysis_id)
+        ):
+            return
+        self._bus_market_trends.append(message.content)
+
     async def _plan(
         self,
         task: str,
@@ -127,7 +147,9 @@ Each persona must have a SPECIFIC job title (e.g. "Head of Sales Operations, 3â€
         )
 
         # Pull real signals from bus history if available
-        market_signals: list[dict[str, Any]] = []
+        # MARKET_TREND backfill populates self._bus_market_trends so that live events
+        # arriving via _on_market_trend() during concurrent execution are merged in _do().
+        self._bus_market_trends = []
         competitor_signals: list[dict[str, Any]] = []
         company_data: dict[str, Any] = context.get("company_profile", {})
 
@@ -137,7 +159,7 @@ Each persona must have a SPECIFIC job title (e.g. "Head of Sales Operations, 3â€
                 discovery_type=DiscoveryType.MARKET_TREND,
                 limit=10,
             ):
-                market_signals.append({"title": msg.title, **msg.content})
+                self._bus_market_trends.append({"title": msg.title, **msg.content})
 
             for msg in self._bus.get_history(
                 analysis_id=analysis_id,
@@ -159,7 +181,6 @@ Each persona must have a SPECIFIC job title (e.g. "Head of Sales Operations, 3â€
         return {
             "company_info": company_data,
             "market_insights": context.get("market_insights", {}),
-            "market_signals": market_signals,
             "competitor_signals": competitor_signals,
             "value_proposition": context.get("value_proposition", ""),
             "target_industries": context.get("target_industries", []),
@@ -171,7 +192,9 @@ Each persona must have a SPECIFIC job title (e.g. "Head of Sales Operations, 3â€
         context: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> CustomerProfileOutput:
-        market_signals = plan.get("market_signals", [])
+        # Use the live-accumulating instance list so events published between _plan() and
+        # _do() (during concurrent A2A execution) are captured alongside the backfill.
+        market_signals = list(self._bus_market_trends)
         competitor_signals = plan.get("competitor_signals", [])
 
         # --- Phase 0: KB â€” Vertical landscape + ICP framework from knowledge library ---

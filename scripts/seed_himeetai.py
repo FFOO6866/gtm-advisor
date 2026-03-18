@@ -74,7 +74,7 @@ def _build_request(document_text: str | None) -> AnalysisRequest:
             "competitive intelligence and GTM strategy to content, outreach, and "
             "performance optimisation — at machine speed."
         ),
-        industry=IndustryVertical.PROFESSIONAL_SERVICES,
+        industry=IndustryVertical.MARKETING_COMMS,
         goals=[
             "Establish Hi Meet.AI as Singapore's leading AI-native growth firm",
             "Win retainer clients across three tiers: Foundation SMEs, Core Growth mid-market, Enterprise",
@@ -88,14 +88,21 @@ def _build_request(document_text: str | None) -> AnalysisRequest:
             "Pricing the proprietary multi-agent architecture vs hourly agency billing",
         ],
         competitors=[
-            "Traditional marketing agencies (Publicis, Dentsu, Ogilvy Singapore)",
-            "Digital growth agencies (FirstPage, MediaOne)",
-            "AI marketing tools (Jasper, Copy.ai, HubSpot AI)",
+            "WPP Group (Ogilvy, VML, GroupM, AKQA) — global holding company",
+            "Publicis Groupe (Sapient, Epsilon, Leo Burnett, Hepmil) — data-driven holding company",
+            "Omnicom (BBDO, TBWA, DDB, FleishmanHillard) — largest holding company post-IPG acquisition",
+            "Dentsu (iProspect, Carat, dentsu X) — One Dentsu integrated model",
+            "Accenture Song — consulting-to-agency hybrid, world's largest digital agency",
+            "Deloitte Digital — consulting-agency hybrid model",
+            "Independent SG agencies (GOVT, TSLA, BLKJ Havas, Goodstuph, Fishermen Integrated)",
+            "Digital performance agencies (Heroes of Digital, FirstPage, MediaOne, 2Stallions)",
+            "AI marketing tools (Jasper, Copy.ai, HubSpot AI, Salesforce Marketing Cloud)",
         ],
         target_markets=[
-            "Singapore SMEs and startups seeking enterprise-level GTM resources",
-            "Mid-market firms scaling APAC operations",
-            "Enterprise brands looking to replace legacy agency model",
+            "Singapore SMEs and startups that currently outsource to traditional agencies",
+            "Mid-market firms spending $50K-$500K/year on agency retainers",
+            "Enterprise brands evaluating AI-augmented marketing vs legacy agency model",
+            "Marketing, Communications & Advertising firms seeking AI transformation",
         ],
         value_proposition=(
             "Hi Meet.AI delivers the strategic bench strength of a full agency team "
@@ -108,7 +115,7 @@ def _build_request(document_text: str | None) -> AnalysisRequest:
         include_customer_profiling=True,
         include_lead_generation=True,
         include_campaign_planning=True,
-        lead_count=25,
+        lead_count=50,
     )
 
 
@@ -167,7 +174,7 @@ async def main() -> None:
                 name="Hi Meet.AI",
                 website="https://himeetai.com",
                 description=HIMEETAI_REQUEST.description,
-                industry="professional_services",
+                industry="marketing_comms",
                 headquarters="Singapore",
                 employee_count="11-50",
                 funding_stage="Seed",

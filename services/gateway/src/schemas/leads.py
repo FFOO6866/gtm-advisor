@@ -109,6 +109,11 @@ class LeadResponse(BaseModel):
     source: str | None
     source_url: str | None
 
+    # Intelligence (from Lead Hunter analysis)
+    pain_points: list[str] = []
+    trigger_events: list[str] = []
+    recommended_approach: str | None = None
+
     # Engagement
     notes: str | None
     tags: list[str]

@@ -149,44 +149,93 @@ def validate_publish(
 
 
 # ---------------------------------------------------------------------------
-# Default signatures for the 6 GTM agents
+# Default signatures for all GTM agents
 # ---------------------------------------------------------------------------
 
 def _register_default_signatures() -> None:
+    # ── Analysis tier: first-mover agents ─────────────────────────────────
+
+    # company-enricher: first agent in the flow — scrapes/enriches company
+    # profile and seeds the bus with everything downstream agents consume.
+    register_signature(AgentSignature(
+        agent_name="company-enricher",
+        emits_discovery_types=[
+            DiscoveryType.COMPANY_PROFILE,
+            DiscoveryType.COMPANY_PRODUCTS,
+            DiscoveryType.COMPANY_TECH_STACK,
+            DiscoveryType.COMPETITOR_FOUND,
+            DiscoveryType.ICP_SEGMENT,
+        ],
+        consumes_discovery_types=[],
+        required_context_keys=["company_name"],
+        payload_schemas={
+            DiscoveryType.COMPANY_PROFILE.value: {"company_name": "str"},
+            DiscoveryType.COMPETITOR_FOUND.value: {"name": "str"},
+        },
+    ))
+
+    # gtm-strategist: orchestrator — publishes COMPANY_PROFILE + MARKET_TREND
+    # (market sizing/sales motion); backfills CAMPAIGN_READY, LEAD_FOUND,
+    # PERSONA_DEFINED to synthesise specialist results into the final output.
+    register_signature(AgentSignature(
+        agent_name="gtm-strategist",
+        emits_discovery_types=[
+            DiscoveryType.COMPANY_PROFILE,
+            DiscoveryType.MARKET_TREND,
+        ],
+        consumes_discovery_types=[
+            DiscoveryType.CAMPAIGN_READY,
+            DiscoveryType.LEAD_FOUND,
+            DiscoveryType.PERSONA_DEFINED,
+        ],
+        required_context_keys=["company_name", "industry"],
+        payload_schemas={
+            DiscoveryType.COMPANY_PROFILE.value: {"company_name": "str"},
+        },
+    ))
+
+    # market-intelligence: publishes trends and opportunities; backfills the
+    # enriched COMPANY_PROFILE from the orchestrator for grounding.
     register_signature(AgentSignature(
         agent_name="market-intelligence",
         emits_discovery_types=[
             DiscoveryType.MARKET_TREND,
             DiscoveryType.MARKET_OPPORTUNITY,
-            DiscoveryType.MARKET_THREAT,
         ],
         consumes_discovery_types=[DiscoveryType.COMPANY_PROFILE],
         required_context_keys=["company_name"],
         payload_schemas={
-            DiscoveryType.MARKET_TREND.value: {"trend": "str", "confidence": "float"},
+            DiscoveryType.MARKET_TREND.value: {"name": "str"},
+            DiscoveryType.MARKET_OPPORTUNITY.value: {"title": "str"},
         },
     ))
 
+    # competitor-analyst: discovers new competitors and publishes their
+    # weaknesses; subscribes to COMPETITOR_FOUND (from company-enricher /
+    # other agents) and COMPANY_PROFILE for context.
     register_signature(AgentSignature(
         agent_name="competitor-analyst",
         emits_discovery_types=[
             DiscoveryType.COMPETITOR_FOUND,
             DiscoveryType.COMPETITOR_WEAKNESS,
-            DiscoveryType.COMPETITOR_SIGNAL,
         ],
-        consumes_discovery_types=[DiscoveryType.COMPANY_PROFILE],
+        consumes_discovery_types=[
+            DiscoveryType.COMPETITOR_FOUND,
+            DiscoveryType.COMPANY_PROFILE,
+        ],
         required_context_keys=["company_name"],
         payload_schemas={
             DiscoveryType.COMPETITOR_FOUND.value: {"name": "str"},
+            DiscoveryType.COMPETITOR_WEAKNESS.value: {"competitor_name": "str"},
         },
     ))
 
+    # customer-profiler: emits one PERSONA_DEFINED per buyer persona;
+    # consumes market and competitor signals to ground ICP firmographics.
     register_signature(AgentSignature(
         agent_name="customer-profiler",
         emits_discovery_types=[
-            DiscoveryType.ICP_SEGMENT,
             DiscoveryType.PERSONA_DEFINED,
-            DiscoveryType.PAIN_POINT,
         ],
         consumes_discovery_types=[
             DiscoveryType.MARKET_TREND,
@@ -199,16 +248,18 @@ def _register_default_signatures() -> None:
         },
     ))
 
+    # lead-hunter: emits one LEAD_FOUND per qualified prospect;
+    # consumes personas, market opportunities, and competitor weaknesses for
+    # ICP refinement and lead prioritisation.
     register_signature(AgentSignature(
         agent_name="lead-hunter",
         emits_discovery_types=[
             DiscoveryType.LEAD_FOUND,
-            DiscoveryType.LEAD_QUALIFIED,
-            DiscoveryType.LEAD_ENRICHED,
         ],
         consumes_discovery_types=[
-            DiscoveryType.ICP_SEGMENT,
             DiscoveryType.PERSONA_DEFINED,
+            DiscoveryType.MARKET_OPPORTUNITY,
+            DiscoveryType.COMPETITOR_WEAKNESS,
         ],
         required_context_keys=["company_name"],
         payload_schemas={
@@ -216,24 +267,124 @@ def _register_default_signatures() -> None:
         },
     ))
 
+    # campaign-architect: builds campaigns from personas, leads, and
+    # competitor weaknesses; emits CAMPAIGN_READY so execution agents fire.
     register_signature(AgentSignature(
         agent_name="campaign-architect",
         emits_discovery_types=[
-            DiscoveryType.CHANNEL_RECOMMENDED,
+            DiscoveryType.CAMPAIGN_READY,
+        ],
+        consumes_discovery_types=[
+            DiscoveryType.PERSONA_DEFINED,
+            DiscoveryType.LEAD_FOUND,
+            DiscoveryType.COMPETITOR_WEAKNESS,
+        ],
+        required_context_keys=["company_name", "value_proposition"],
+        payload_schemas={
+            DiscoveryType.CAMPAIGN_READY.value: {"content_pieces_count": "int"},
+        },
+    ))
+
+    # ── Execution tier: Phase 2 agents ────────────────────────────────────
+
+    # workforce-architect: designs the AI agent roster from completed GTM
+    # analysis; consumes campaign and persona context to right-size the team.
+    register_signature(AgentSignature(
+        agent_name="workforce-architect",
+        emits_discovery_types=[
+            DiscoveryType.WORKFORCE_READY,
+        ],
+        consumes_discovery_types=[
+            DiscoveryType.CAMPAIGN_READY,
+            DiscoveryType.PERSONA_DEFINED,
+            DiscoveryType.LEAD_FOUND,
+        ],
+        required_context_keys=["company_name"],
+        payload_schemas={
+            DiscoveryType.WORKFORCE_READY.value: {"agent_count": "int"},
+        },
+    ))
+
+    # outreach-executor: sends personalised emails via SendGrid; gates on
+    # WORKFORCE_READY (approved roster check) and LEAD_ENRICHED (email
+    # deliverability); emits MESSAGE_CRAFTED on successful send.
+    register_signature(AgentSignature(
+        agent_name="outreach-executor",
+        emits_discovery_types=[
             DiscoveryType.MESSAGE_CRAFTED,
         ],
         consumes_discovery_types=[
-            DiscoveryType.LEAD_FOUND,
-            DiscoveryType.PERSONA_DEFINED,
+            DiscoveryType.WORKFORCE_READY,
+            DiscoveryType.CAMPAIGN_READY,
+            DiscoveryType.LEAD_ENRICHED,
         ],
-        required_context_keys=["company_name", "value_proposition"],
+        required_context_keys=["lead_id", "lead_email"],
+        payload_schemas={
+            DiscoveryType.MESSAGE_CRAFTED.value: {"lead_id": "str", "status": "str"},
+        },
     ))
 
+    # crm-sync: upserts HubSpot contacts; consumes WORKFORCE_READY for
+    # workforce metadata, LEAD_FOUND for batch CRM population, and
+    # LEAD_ENRICHED for email-verification fields; emits LEAD_QUALIFIED
+    # once a contact is confirmed in the CRM.
     register_signature(AgentSignature(
-        agent_name="gtm-strategist",
-        emits_discovery_types=[DiscoveryType.INSIGHT],
-        consumes_discovery_types=[],
-        required_context_keys=["company_name", "industry"],
+        agent_name="crm-sync",
+        emits_discovery_types=[
+            DiscoveryType.LEAD_QUALIFIED,
+        ],
+        consumes_discovery_types=[
+            DiscoveryType.WORKFORCE_READY,
+            DiscoveryType.LEAD_FOUND,
+            DiscoveryType.LEAD_ENRICHED,
+        ],
+        required_context_keys=["lead_id"],
+        payload_schemas={
+            DiscoveryType.LEAD_QUALIFIED.value: {"lead_id": "str", "crm_platform": "str"},
+        },
+    ))
+
+    # ── Operational tier: Phase 2.1 agents ────────────────────────────────
+
+    # signal-monitor: scheduled surveillance agent; subscribes to
+    # COMPETITOR_FOUND to keep its watchlist current; emits SIGNAL_DETECTED
+    # for every actionable (relevance >= 0.50) market signal.
+    register_signature(AgentSignature(
+        agent_name="signal-monitor",
+        emits_discovery_types=[
+            DiscoveryType.SIGNAL_DETECTED,
+        ],
+        consumes_discovery_types=[
+            DiscoveryType.COMPETITOR_FOUND,
+        ],
+        required_context_keys=["company_id", "industry"],
+        payload_schemas={
+            DiscoveryType.SIGNAL_DETECTED.value: {
+                "signal_text": "str",
+                "relevance_score": "float",
+            },
+        },
+    ))
+
+    # lead-enrichment: validates emails (DNS MX + Hunter.io), ACRA registry
+    # lookup, and financial data enrichment; subscribes to LEAD_FOUND to
+    # auto-enrich on discovery; emits LEAD_ENRICHED with quality gate result.
+    register_signature(AgentSignature(
+        agent_name="lead-enrichment",
+        emits_discovery_types=[
+            DiscoveryType.LEAD_ENRICHED,
+        ],
+        consumes_discovery_types=[
+            DiscoveryType.LEAD_FOUND,
+        ],
+        required_context_keys=["company_id"],
+        payload_schemas={
+            DiscoveryType.LEAD_ENRICHED.value: {
+                "lead_id": "str",
+                "email_valid": "bool",
+                "qualifies_for_sequence": "bool",
+            },
+        },
     ))
 
 

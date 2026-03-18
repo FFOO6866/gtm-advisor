@@ -37,6 +37,21 @@ export function LoginPage() {
       sessionStorage.removeItem('gtm_current_company');
       sessionStorage.removeItem('gtm_agent_back');
 
+      // Fetch user profile so the greeting can use their first name.
+      try {
+        const meRes = await fetch(`${apiBase}/api/v1/auth/me`, {
+          headers: { Authorization: `Bearer ${token.access_token}` },
+        });
+        if (meRes.ok) {
+          const me = await meRes.json();
+          if (me.full_name) {
+            localStorage.setItem('gtm_user_name', me.full_name);
+          }
+        }
+      } catch {
+        // Non-fatal — greeting falls back to company name
+      }
+
       // Auto-resolve user's primary company so AppShell can hydrate immediately.
       // Only set if not already present (teaser-to-paid flow already sets it).
       if (!localStorage.getItem('gtm_company_id')) {

@@ -108,6 +108,9 @@ _PRIVATE_SEGMENTS: dict[str, dict[str, str]] = {
         "VIRTUE-ASIA": "social_first",
         # Consulting-agency hybrids
         "DELOITTE-DIGITAL-SG": "digital_performance", "PWC-DIGITAL-SG": "digital_performance",
+        "IBMIX-SG": "digital_performance",
+        # Independent creative networks
+        "MCSAATCHI-SG": "independent_creative",
         # Full-service / holding group SG ops
         "CHEIL-SG": "creative", "MINDSHARE-SG": "media",
         "SERVICEPLAN-SG": "creative", "BLUEFOCUS-SG": "digital_performance",
@@ -146,6 +149,10 @@ _HOLDING_GROUP_MAP: dict[str, dict[str, str]] = {
         "ARCHETYPE-SG": "Next Fifteen",
         # BlueFocus (China — owns We Are Social)
         "WEARESOCIAL-SG": "BlueFocus", "BLUEFOCUS-SG": "BlueFocus",
+        # IBM iX (consulting-agency hybrid)
+        "IBMIX-SG": "IBM",
+        # M&C Saatchi (independent network — NOT Publicis's Saatchi & Saatchi)
+        "MCSAATCHI-SG": "M&C Saatchi",
         # Deloitte / PwC (consulting-agency hybrids)
         "DELOITTE-DIGITAL-SG": "Deloitte", "PWC-DIGITAL-SG": "PwC",
         # Serviceplan (Germany's largest independent)
@@ -158,7 +165,7 @@ _HOLDING_GROUP_MAP: dict[str, dict[str, str]] = {
         # Listed company tickers → their holding group
         "OMC": "Omnicom", "IPG": "Omnicom", "WPP": "WPP",
         "PUB": "Publicis", "STGW": "Stagwell", "SFOR": "S4 Capital",
-        "ACN": "Accenture Song", "SAA": "M&C Saatchi", "ADV": "Advantage Solutions",
+        "ACN": "Accenture Song", "IBM": "IBM", "SAA": "M&C Saatchi", "ADV": "Advantage Solutions",
         "030000": "Cheil", "214320": "Innocean (Hyundai)",
         "0752": "Pico Holdings (HK)", "HAVAS": "Havas",
         "VIV": "Vivendi/Havas", "DEC": "JCDecaux",
@@ -987,9 +994,17 @@ class VerticalIntelligenceSynthesizer:
                     if ft == "company_info" and "employee_count" in fd:
                         headcount = fd["employee_count"]
 
-            # Awards — scan ALL sections for award mentions
+            # Awards — scan ALL sections for award mentions (full content)
             awards_text_parts: list[str] = []
             positioning = ""
+            _award_scan_kws = [
+                "cannes", "spikes", "effie", "agency of the year",
+                "d&ad", "clio", "prism", "sabre", "one show", "adfest",
+                "won ", "awarded", "shortlisted", "grand prix", "gold",
+                "silver", "bronze", "network of the year", "webby",
+                "campaign asia", "marketing-interactive", "mumbrella",
+                "a-list", "big won",
+            ]
             if isinstance(research, dict):
                 for _key, section in research.items():
                     if not isinstance(section, dict):
@@ -998,19 +1013,14 @@ class VerticalIntelligenceSynthesizer:
                     if not isinstance(content, str):
                         continue
                     if "award" in _key.lower() or "news" in _key.lower():
-                        awards_text_parts.append(content[:600])
-                    elif any(
-                        kw in content.lower()
-                        for kw in [
-                            "cannes", "spikes", "effie", "agency of the year",
-                            "d&ad", "clio", "prism", "sabre", "one show", "adfest",
-                            "won ", "awarded", "shortlisted", "grand prix",
-                        ]
-                    ):
-                        awards_text_parts.append(content[:400])
+                        # Primary award sections — take full content
+                        awards_text_parts.append(content)
+                    elif any(kw in content.lower() for kw in _award_scan_kws):
+                        # Other sections with award mentions — take full content
+                        awards_text_parts.append(content)
                     if "overview" in _key.lower() or "leadership" in _key.lower():
                         positioning = content[:200]
-            awards_text = "\n".join(awards_text_parts)[:1500]
+            awards_text = "\n".join(awards_text_parts)[:4000]
 
             # Strip prompt-template boilerplate
             awards_text_clean = re.sub(
@@ -1018,17 +1028,29 @@ class VerticalIntelligenceSynthesizer:
                 "", awards_text, flags=re.IGNORECASE,
             )
 
-            # Award detection with negation check
+            # Award detection with sentence-level negation check
             award_keywords = [
                 "cannes", "spikes", "effie", "lions", "campaign asia",
                 "agency of the year", "prism", "sabre", "d&ad",
+                "clio", "adfest", "one show", "webby", "grand prix",
+                "network of the year", "most awarded", "a-list",
+                "won gold", "won silver", "won bronze",
             ]
-            _clean_lower = awards_text_clean.lower()
-            has_awards = any(
-                kw in _clean_lower
-                and not VerticalIntelligenceSynthesizer._is_negated(_clean_lower, kw)
-                for kw in award_keywords
+            # Split into sentences for per-sentence negation checking
+            _award_sentences = VerticalIntelligenceSynthesizer._split_into_sentences(
+                awards_text_clean,
             )
+            has_awards = False
+            for sent in _award_sentences:
+                sent_lower = sent.lower()
+                for kw in award_keywords:
+                    if kw in sent_lower and not VerticalIntelligenceSynthesizer._is_negated(
+                        sent_lower, kw,
+                    ):
+                        has_awards = True
+                        break
+                if has_awards:
+                    break
 
             # Holding group
             holding_groups = _HOLDING_GROUP_MAP.get(vertical_slug, {})
@@ -1061,7 +1083,7 @@ class VerticalIntelligenceSynthesizer:
                     if any(kw in oc_lower for kw in kws):
                         service_lines.append(svc)
 
-            # Specific awards won
+            # Specific awards won — sentence-level detection
             awards_won: list[str] = []
             award_names: dict[str, str] = {
                 "cannes": "Cannes Lions", "spikes asia": "Spikes Asia",
@@ -1076,16 +1098,23 @@ class VerticalIntelligenceSynthesizer:
                 "mumbrella": "Mumbrella Awards", "pr daily": "PR Daily Awards",
                 "holmes report": "Holmes Report", "provoke": "PRovoke Awards",
                 "won gold": "Gold Award", "won silver": "Silver Award",
+                "won bronze": "Bronze Award", "network of the year": "Network of the Year",
+                "most awarded": "Most Awarded", "a-list": "Ad Age A-List",
+                "creative circle": "Creative Circle Awards",
+                "big won": "Big Won Rankings",
             }
             if awards_text_clean:
-                at_lower = awards_text_clean.lower()
-                for trigger, label in award_names.items():
-                    if (
-                        trigger in at_lower
-                        and not VerticalIntelligenceSynthesizer._is_negated(at_lower, trigger)
-                        and label not in awards_won
-                    ):
-                        awards_won.append(label)
+                for sent in _award_sentences:
+                    sent_lower = sent.lower()
+                    for trigger, label in award_names.items():
+                        if (
+                            trigger in sent_lower
+                            and not VerticalIntelligenceSynthesizer._is_negated(
+                                sent_lower, trigger,
+                            )
+                            and label not in awards_won
+                        ):
+                            awards_won.append(label)
 
             agencies.append({
                 "name": name,

@@ -35,6 +35,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useCompany, useCompanyId } from '../context/CompanyContext';
 import { apiClient } from '../api/client';
+import { fetchVerticalIntelligence, type VerticalIntelligenceData } from '../api/verticalIntelligence';
 import { AgentTeamRoster } from '../components/AgentTeamRoster';
 
 // ============================================================================
@@ -168,11 +169,19 @@ function getUserFirstName(): string | null {
   return first || null;
 }
 
+const ACRONYMS = new Set(['AI', 'SaaS', 'CRM', 'API', 'GTM', 'SME', 'CEO', 'CFO', 'CTO', 'CMO', 'PSG', 'PDPA', 'SG', 'SEA', 'APAC', 'HQ', 'ROI', 'KPI']);
+
 function titleCase(name: string): string {
   return name
     .split(' ')
     .map((word) => {
-      if (word.length <= 3 && word === word.toUpperCase()) return word;
+      // Preserve words already in ALL-CAPS (e.g. "AI" passed as-is)
+      if (word.length <= 4 && word === word.toUpperCase() && word.length > 1) return word;
+      // Check if this word is a known acronym (case-insensitive)
+      const upper = word.toUpperCase();
+      for (const acr of ACRONYMS) {
+        if (upper === acr) return acr;
+      }
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
     .join(' ');
@@ -1096,6 +1105,163 @@ function ActivityFeed({ items }: { items: ActivityItem[] }) {
 }
 
 // ============================================================================
+// Section: GTM Implications (from Vertical Intelligence)
+// ============================================================================
+
+const PRIORITY_COLORS: Record<string, string> = {
+  high: 'text-red-400 bg-red-500/10 border-red-500/20',
+  medium: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  low: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+};
+
+function GTMImplicationsSection({
+  intelligence,
+}: {
+  intelligence: VerticalIntelligenceData | null;
+}) {
+  const navigate = useNavigate();
+
+  if (!intelligence || !intelligence.id) return null;
+
+  const implications = intelligence.gtm_implications ?? [];
+  const financialPulse = intelligence.financial_pulse;
+  const keyTrends = intelligence.key_trends ?? [];
+
+  const hasContent = implications.length > 0 || keyTrends.length > 0 || financialPulse?.sga_median != null;
+  if (!hasContent) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.12 }}
+      className="glass-card rounded-xl border border-white/10"
+    >
+      <SectionHeader
+        title="Strategic Intelligence"
+        action="Deep dive"
+        onAction={() => navigate('/insights')}
+      />
+      <div className="px-5 pb-4">
+        {/* GTM Implications — top 3 */}
+        {implications.length > 0 && (
+          <div className="space-y-3 py-3">
+            {implications.slice(0, 3).map((impl, i) => {
+              const priorityColor = PRIORITY_COLORS[impl.priority ?? 'medium'] ?? PRIORITY_COLORS.medium;
+              return (
+                <div key={i} className="flex gap-3">
+                  <div className={`mt-0.5 p-2 rounded-lg flex-shrink-0 ${priorityColor.split(' ').slice(1).join(' ')}`}>
+                    <Zap className={`w-4 h-4 ${priorityColor.split(' ')[0]}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${priorityColor}`}>
+                        {impl.priority ?? 'medium'}
+                      </span>
+                    </div>
+                    <p className="text-sm font-medium text-white leading-snug line-clamp-2">
+                      {impl.insight}
+                    </p>
+                    {impl.evidence && (
+                      <p className="text-xs text-white/50 mt-0.5 leading-relaxed line-clamp-2">
+                        {impl.evidence}
+                      </p>
+                    )}
+                    {impl.recommended_action && (
+                      <p className="text-xs text-purple-400 mt-1 leading-snug">
+                        &rarr; {impl.recommended_action}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Key Trends — compact list */}
+        {keyTrends.length > 0 && (
+          <div className="mt-2 pt-3 border-t border-white/5">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-white/20 mb-2">
+              Key trends
+            </p>
+            <div className="space-y-2">
+              {keyTrends.slice(0, 3).map((trend, i) => (
+                <div key={i} className="flex items-start gap-2">
+                  <TrendingUp className="w-3 h-3 text-emerald-400/60 mt-1 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-white/60 line-clamp-1">{trend.trend}</p>
+                    {trend.impact && (
+                      <p className="text-[10px] text-white/30 line-clamp-1">{trend.impact}</p>
+                    )}
+                  </div>
+                  {trend.source_count != null && trend.source_count > 0 && (
+                    <span className="text-[10px] text-white/20 flex-shrink-0">
+                      {trend.source_count} sources
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Financial Pulse — inline stats */}
+        {financialPulse && financialPulse.sga_median != null && (
+          <div className="mt-3 pt-3 border-t border-white/5">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-white/20 mb-2">
+              Financial pulse
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {financialPulse.sga_median != null && (
+                <span className="text-xs">
+                  <span className="text-white/50">SG&A ratio</span>{' '}
+                  <span className="text-white/70 font-medium">
+                    {financialPulse.sga_median.toFixed(1)}%
+                  </span>
+                  {financialPulse.sga_trend && (
+                    <span className="text-white/30 ml-1">({financialPulse.sga_trend})</span>
+                  )}
+                </span>
+              )}
+              {financialPulse.rnd_median != null && (
+                <span className="text-xs">
+                  <span className="text-white/50">R&D intensity</span>{' '}
+                  <span className="text-white/70 font-medium">
+                    {financialPulse.rnd_median.toFixed(1)}%
+                  </span>
+                  {financialPulse.rnd_trend && (
+                    <span className="text-white/30 ml-1">({financialPulse.rnd_trend})</span>
+                  )}
+                </span>
+              )}
+              {financialPulse.margin_compression_or_expansion && (
+                <span className="text-xs">
+                  <span className="text-white/50">Margins</span>{' '}
+                  <span className={`font-medium ${financialPulse.margin_compression_or_expansion === 'expansion' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {financialPulse.margin_compression_or_expansion}
+                  </span>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Report timestamp */}
+        {intelligence.computed_at && (
+          <div className="mt-3 pt-2 border-t border-white/5">
+            <span className="text-[10px] text-white/15">
+              {intelligence.vertical_name ?? 'Industry'} intelligence &middot;{' '}
+              {intelligence.report_period} &middot; updated {timeAgo(intelligence.computed_at)}
+            </span>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// ============================================================================
 // Empty State — first-run experience
 // ============================================================================
 
@@ -1232,6 +1398,7 @@ export function TodayPage() {
   const [pendingApprovals, setPendingApprovals] = useState(0);
   const [attribution, setAttribution] = useState<AttributionSummary | null>(null);
   const [briefingStatus, setBriefingStatus] = useState<BriefingStatus | null>(null);
+  const [intelligence, setIntelligence] = useState<VerticalIntelligenceData | null>(null);
 
   useEffect(() => {
     if (!companyId) {
@@ -1263,6 +1430,7 @@ export function TodayPage() {
       apiClient
         .get<BriefingStatus>(`/companies/${companyId}/market-data/briefing-status`)
         .catch(() => null),
+      fetchVerticalIntelligence(companyId),
     ]).then(
       ([
         vertical,
@@ -1272,6 +1440,7 @@ export function TodayPage() {
         approvals,
         attr,
         briefing,
+        intel,
       ]) => {
         setVerticalData(vertical);
         setIndustryData(industry);
@@ -1280,6 +1449,7 @@ export function TodayPage() {
         setPendingApprovals(approvals.pending ?? 0);
         setAttribution(attr);
         setBriefingStatus(briefing);
+        setIntelligence(intel);
       }
     ).finally(() => setLoading(false));
   }, [companyId]);
@@ -1320,7 +1490,8 @@ export function TodayPage() {
     (industryData?.signals.length ?? 0) > 0 ||
     (industryData?.articles.length ?? 0) > 0 ||
     competitorSignals.length > 0 ||
-    (pipelineData?.total_leads ?? 0) > 0;
+    (pipelineData?.total_leads ?? 0) > 0 ||
+    (intelligence?.id ? true : false);
   const isFirstRun =
     !hasAnyIntel &&
     briefingStatus != null &&
@@ -1378,6 +1549,9 @@ export function TodayPage() {
               industryData={industryData}
               verticalData={verticalData}
             />
+
+            {/* Vertical Intelligence — GTM implications + financial pulse + trends */}
+            <GTMImplicationsSection intelligence={intelligence} />
 
             <CompetitorSection competitorSignals={competitorSignals} />
 

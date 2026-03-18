@@ -102,6 +102,8 @@ generated/
 data/knowledge/
 # Qdrant vector store (large binary files, generated locally)
 data/qdrant/
+# Vertical intelligence data (generated locally, too large for git)
+data/intel/
 
 # Node modules (for dashboard)
 node_modules/

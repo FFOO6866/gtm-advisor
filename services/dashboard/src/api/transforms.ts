@@ -44,6 +44,11 @@ export function transformLead(backend: BackendLead): Lead {
     verifiedEmail: backend.verified_email,
     emailDomainValid: backend.email_domain_valid,
     buyingCycleStage: backend.buying_cycle_stage ?? undefined,
+    contactLinkedin: backend.contact_linkedin ?? undefined,
+    status: backend.status ?? undefined,
+    sourceUrl: backend.source_url ?? undefined,
+    lastEnrichedAt: backend.last_enriched_at ?? undefined,
+    createdAt: backend.created_at ?? undefined,
   };
 }
 
@@ -58,6 +63,9 @@ export function transformMarketInsight(backend: BackendInsight): MarketInsight {
     recommendations: backend.recommendations,
     sources: backend.sources,
     confidence: backend.confidence,
+    relevantIndustries: backend.relevant_industries ?? [],
+    relevantToCompany: backend.relevant_to_company ?? true,
+    createdAt: backend.created_at ?? undefined,
   };
 }
 
@@ -75,6 +83,35 @@ export function transformCompetitor(backend: BackendCompetitor): CompetitorAnaly
     positioning: backend.positioning,
     keyDifferentiators: backend.key_differentiators,
     confidence: backend.confidence,
+    foundedYear: backend.founded_year ?? undefined,
+    employeeCount: backend.employee_count ?? undefined,
+    fundingRaised: backend.funding_raised ?? undefined,
+    headquarters: backend.headquarters ?? undefined,
+    pricingModel: backend.pricing_model ?? undefined,
+    targetMarket: backend.target_market ?? undefined,
+    marketShareEstimate: backend.market_share_estimate ?? undefined,
+    recentNews: backend.recent_news ?? [],
+    strategicMoves: backend.strategic_moves ?? [],
+    pricingTiers: (backend.pricing_tiers ?? []).map(t => ({
+      tierName: t.tier_name,
+      priceSgd: t.price_sgd,
+      priceUsd: t.price_usd,
+      frequency: t.frequency,
+      featuresSummary: t.features_summary,
+      source: t.source,
+    })),
+    latestFunding: backend.latest_funding ? {
+      roundType: backend.latest_funding.round_type,
+      amountUsd: backend.latest_funding.amount_usd,
+      announcedDate: backend.latest_funding.announced_date,
+      investors: backend.latest_funding.investors,
+      useOfFunds: backend.latest_funding.use_of_funds,
+    } : undefined,
+    employeeCountEstimate: backend.employee_count_estimate ?? undefined,
+    hiringVelocity: backend.hiring_velocity ?? undefined,
+    recentExecutiveMoves: backend.recent_executive_moves ?? [],
+    sources: backend.sources ?? [],
+    createdAt: backend.created_at ?? undefined,
   };
 }
 
@@ -89,6 +126,18 @@ export function transformPersona(backend: BackendPersona): CustomerPersona {
     challenges: backend.challenges,
     painPoints: backend.pain_points,
     preferredChannels: backend.preferred_channels,
+    ageRange: backend.age_range ?? undefined,
+    experienceLevel: backend.experience_level ?? undefined,
+    education: backend.education ?? undefined,
+    companyStage: backend.company_stage ?? undefined,
+    motivations: backend.motivations ?? [],
+    objections: backend.objections ?? [],
+    informationSources: backend.information_sources ?? [],
+    decisionCriteria: backend.decision_criteria ?? [],
+    buyingProcess: backend.buying_process ?? undefined,
+    contentPreferences: backend.content_preferences ?? [],
+    messagingTone: backend.messaging_tone ?? undefined,
+    createdAt: backend.created_at ?? undefined,
   };
 }
 
@@ -104,6 +153,12 @@ export function transformCampaignBrief(backend: BackendCampaign): CampaignBrief 
     channels: backend.channels,
     emailTemplates: backend.email_templates,
     linkedinPosts: backend.linkedin_posts,
+    targetIndustries: backend.target_industries ?? [],
+    targetCompanySize: backend.target_company_size ?? undefined,
+    targetGeography: backend.target_geography ?? [],
+    budgetSgd: backend.budget_sgd ?? undefined,
+    contentIdeas: backend.content_ideas ?? [],
+    createdAt: backend.created_at ?? undefined,
   };
 }
 

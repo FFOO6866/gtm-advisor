@@ -53,6 +53,7 @@ class CRMSyncAgent(BaseGTMAgent[CRMSyncResult]):
         self._workforce_config: dict[str, Any] | None = None  # Populated by WORKFORCE_READY bus events
         self._pending_leads: list[dict[str, Any]] = []  # Populated by LEAD_FOUND bus events
         self._enrichment_data: dict[str, dict[str, Any]] = {}  # keyed by lead_id
+        self._bus_messages_crafted: list[dict] = []
         try:
             if self._agent_bus is not None:
                 self._agent_bus.subscribe(
@@ -69,6 +70,11 @@ class CRMSyncAgent(BaseGTMAgent[CRMSyncResult]):
                     agent_id=self.name,
                     discovery_type=DiscoveryType.LEAD_ENRICHED,
                     handler=self._on_lead_enriched,
+                )
+                self._agent_bus.subscribe(
+                    agent_id=self.name,
+                    discovery_type=DiscoveryType.MESSAGE_CRAFTED,
+                    handler=self._on_message_crafted,
                 )
         except Exception:
             pass
@@ -109,6 +115,21 @@ class CRMSyncAgent(BaseGTMAgent[CRMSyncResult]):
         lead_id = message.content.get("lead_id", "")
         if lead_id:
             self._enrichment_data[lead_id] = message.content
+
+    async def _on_message_crafted(self, message: AgentMessage) -> None:
+        """Cache sent-message events so CRM activity logs stay in sync."""
+        if (
+            self._analysis_id
+            and message.analysis_id
+            and str(message.analysis_id) != str(self._analysis_id)
+        ):
+            return
+        self._bus_messages_crafted.append(message.content)
+        self._logger.debug(
+            "message_crafted_received",
+            email_to=message.content.get("email_to"),
+            from_agent=message.from_agent,
+        )
 
     def get_system_prompt(self) -> str:
         return "CRM sync agent. Writes lead data to HubSpot."
@@ -162,6 +183,15 @@ class CRMSyncAgent(BaseGTMAgent[CRMSyncResult]):
                 lead_id = msg.content.get("lead_id", "")
                 if lead_id and lead_id not in self._enrichment_data:
                     self._enrichment_data[lead_id] = msg.content
+
+            message_history = self._agent_bus.get_history(
+                analysis_id=self._analysis_id,
+                discovery_type=DiscoveryType.MESSAGE_CRAFTED,
+                limit=50,
+            )
+            for msg in message_history:
+                if msg.content not in self._bus_messages_crafted:
+                    self._bus_messages_crafted.append(msg.content)
 
         name_parts = (context.get("name") or "").split(" ", 1)
         return {
@@ -274,11 +304,19 @@ class CRMSyncAgent(BaseGTMAgent[CRMSyncResult]):
             )
 
     async def _check(self, result: CRMSyncResult) -> float:
-        if result.crm_contact_id and result.action_taken == "contact_synced":
-            return 0.90  # CRM confirmed contact ID — verified write
-        if result.action_taken in ("skipped_no_email", "skipped_no_config"):
-            return 0.75  # Expected skip — not a failure
-        return 0.0  # failed
+        score = 0.2  # base — must be earned from data quality
+        if result.action_taken == "contact_synced":
+            score += 0.30  # sync completed
+            if result.crm_contact_id:
+                score += 0.30  # CRM confirmed with contact ID
+            if result.lead_id:
+                score += 0.05  # lead traceability maintained
+            if result.crm_deal_id:
+                score += 0.05  # deal also created
+        elif result.action_taken in ("skipped_no_email", "skipped_no_config"):
+            score += 0.45  # expected skip — correct decision
+        # else: failed → stays at base 0.2
+        return min(score, 1.0)
 
     async def _act(self, result: CRMSyncResult, confidence: float) -> CRMSyncResult:
         # Publish LEAD_QUALIFIED after a successful CRM sync so downstream agents

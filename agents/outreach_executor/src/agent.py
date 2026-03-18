@@ -75,6 +75,8 @@ class OutreachExecutorAgent(BaseGTMAgent[OutreachResult]):
         self._workforce_config: dict[str, Any] | None = None  # Populated by WORKFORCE_READY bus events
         self._campaign_context: dict[str, Any] | None = None  # Populated by CAMPAIGN_READY bus events
         self._enriched_leads: dict[str, dict[str, Any]] = {}  # keyed by lead_id
+        self._bus_qualified_leads: list[dict] = []
+        self._bus_signals: list[dict] = []
         try:
             if self._agent_bus is not None:
                 self._agent_bus.subscribe(
@@ -91,6 +93,16 @@ class OutreachExecutorAgent(BaseGTMAgent[OutreachResult]):
                     agent_id=self.name,
                     discovery_type=DiscoveryType.LEAD_ENRICHED,
                     handler=self._on_lead_enriched,
+                )
+                self._agent_bus.subscribe(
+                    agent_id=self.name,
+                    discovery_type=DiscoveryType.LEAD_QUALIFIED,
+                    handler=self._on_lead_qualified,
+                )
+                self._agent_bus.subscribe(
+                    agent_id=self.name,
+                    discovery_type=DiscoveryType.SIGNAL_DETECTED,
+                    handler=self._on_signal_detected,
                 )
         except Exception:
             pass
@@ -135,6 +147,26 @@ class OutreachExecutorAgent(BaseGTMAgent[OutreachResult]):
         lead_id = message.content.get("lead_id", "")
         if lead_id:
             self._enriched_leads[lead_id] = message.content
+
+    async def _on_lead_qualified(self, message: AgentMessage) -> None:
+        """Cache HubSpot-synced qualified leads for follow-up outreach prioritisation."""
+        if (
+            self._analysis_id
+            and message.analysis_id
+            and str(message.analysis_id) != str(self._analysis_id)
+        ):
+            return
+        self._bus_qualified_leads.append(message.content)
+
+    async def _on_signal_detected(self, message: AgentMessage) -> None:
+        """Cache market signals from SignalMonitor to trigger signal-based outreach."""
+        if (
+            self._analysis_id
+            and message.analysis_id
+            and str(message.analysis_id) != str(self._analysis_id)
+        ):
+            return
+        self._bus_signals.append(message.content)
 
     def get_system_prompt(self) -> str:
         return """You are an outreach execution agent. Your only job is to personalise
@@ -194,6 +226,24 @@ Rules:
                 lead_id = msg.content.get("lead_id", "")
                 if lead_id and lead_id not in self._enriched_leads:
                     self._enriched_leads[lead_id] = msg.content
+
+            qualified_history = self._agent_bus.get_history(
+                analysis_id=self._analysis_id,
+                discovery_type=DiscoveryType.LEAD_QUALIFIED,
+                limit=50,
+            )
+            for msg in qualified_history:
+                if msg.content not in self._bus_qualified_leads:
+                    self._bus_qualified_leads.append(msg.content)
+
+            signal_history = self._agent_bus.get_history(
+                analysis_id=self._analysis_id,
+                discovery_type=DiscoveryType.SIGNAL_DETECTED,
+                limit=20,
+            )
+            for msg in signal_history:
+                if msg.content not in self._bus_signals:
+                    self._bus_signals.append(msg.content)
 
         return {
             "lead_id": context.get("lead_id", ""),
@@ -496,13 +546,19 @@ Return ONLY a JSON object with:
         )
 
     async def _check(self, result: OutreachResult) -> float:
-        if result.status == "sent" and result.message_id:
-            return 0.90  # Delivery confirmed via message_id
+        score = 0.2  # base — must earn confidence from data
         if result.status == "sent":
-            return 0.60  # Status sent but no message_id proof
-        if result.status in ("skipped_no_email", "skipped_no_config"):
-            return 0.75  # Expected skip — not a failure
-        return 0.0  # failed
+            score += 0.30  # email was sent
+            if result.message_id:
+                score += 0.30  # delivery confirmed via SendGrid message_id
+            if result.subject:
+                score += 0.05  # subject line present
+            if result.email_to:
+                score += 0.05  # recipient address present
+        elif result.status in ("skipped_no_email", "skipped_no_config"):
+            score += 0.45  # expected skip — correct decision, not a failure
+        # else: failed → stays at base 0.2
+        return min(score, 1.0)
 
     async def _act(self, result: OutreachResult, confidence: float) -> OutreachResult:
         # Publish MESSAGE_CRAFTED so CRM Sync, Campaign Architect, and attribution

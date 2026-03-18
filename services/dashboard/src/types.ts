@@ -71,6 +71,11 @@ export interface Lead {
   verifiedEmail?: boolean;
   emailDomainValid?: boolean;
   buyingCycleStage?: string;
+  contactLinkedin?: string | null;
+  status?: string;
+  sourceUrl?: string | null;
+  lastEnrichedAt?: string | null;
+  createdAt?: string;
 }
 
 // Market insight from backend
@@ -84,6 +89,9 @@ export interface MarketInsight {
   recommendations: string[];
   sources: string[];
   confidence: number;
+  relevantIndustries?: string[];
+  relevantToCompany?: boolean;
+  createdAt?: string;
 }
 
 // Competitor analysis from backend
@@ -100,6 +108,35 @@ export interface CompetitorAnalysis {
   positioning: string | null;
   keyDifferentiators: string[];
   confidence: number;
+  foundedYear?: number | null;
+  employeeCount?: number | null;
+  fundingRaised?: number | null;
+  headquarters?: string | null;
+  pricingModel?: string | null;
+  targetMarket?: string | null;
+  marketShareEstimate?: string | null;
+  recentNews?: string[];
+  strategicMoves?: string[];
+  pricingTiers?: Array<{
+    tierName: string;
+    priceSgd?: number | null;
+    priceUsd?: number | null;
+    frequency: string;
+    featuresSummary: string;
+    source: string;
+  }>;
+  latestFunding?: {
+    roundType: string;
+    amountUsd?: number | null;
+    announcedDate?: string | null;
+    investors: string[];
+    useOfFunds: string;
+  } | null;
+  employeeCountEstimate?: number | null;
+  hiringVelocity?: string;
+  recentExecutiveMoves?: string[];
+  sources?: string[];
+  createdAt?: string;
 }
 
 // Customer persona from backend
@@ -113,6 +150,18 @@ export interface CustomerPersona {
   challenges: string[];
   painPoints: string[];
   preferredChannels: string[];
+  ageRange?: string | null;
+  experienceLevel?: string | null;
+  education?: string | null;
+  companyStage?: string | null;
+  motivations?: string[];
+  objections?: string[];
+  informationSources?: string[];
+  decisionCriteria?: string[];
+  buyingProcess?: string | null;
+  contentPreferences?: string[];
+  messagingTone?: string | null;
+  createdAt?: string;
 }
 
 // Campaign brief from backend
@@ -127,6 +176,12 @@ export interface CampaignBrief {
   channels: string[];
   emailTemplates: string[];
   linkedinPosts: string[];
+  targetIndustries?: string[];
+  targetCompanySize?: string | null;
+  targetGeography?: string[];
+  budgetSgd?: number | null;
+  contentIdeas?: string[];
+  createdAt?: string;
 }
 
 // Decision attribution for transparency

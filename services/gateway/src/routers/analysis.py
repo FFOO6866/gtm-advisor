@@ -1348,9 +1348,11 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
 
             # Market insight action
             if top_insight and top_insight.recommendations:
-                key_recommendations.append(
-                    f"Market action: {top_insight.recommendations[0][:200]}"
-                )
+                _first_rec = top_insight.recommendations[0]
+                if _first_rec:
+                    key_recommendations.append(
+                        f"Market action: {_first_rec[:200]}"
+                    )
             elif top_insight:
                 key_recommendations.append(
                     f"Market signal: {top_insight.summary[:200]}"
@@ -1476,7 +1478,7 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
             await db.execute(
                 SignalEvent.__table__.delete().where(
                     SignalEvent.company_id == analysis.company_id,
-                    SignalEvent.source_type == "analysis",
+                    SignalEvent.source == "analysis",
                 )
             )
             _INSIGHT_CATEGORY_MAP: dict[str, SignalType] = {
@@ -1500,19 +1502,18 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 )
                 summary_parts = []
                 if insight.key_findings:
-                    summary_parts.extend(insight.key_findings[:3])
+                    summary_parts.extend(f for f in insight.key_findings[:3] if f)
                 if insight.implications:
-                    summary_parts.extend(insight.implications[:2])
+                    summary_parts.extend(i for i in insight.implications[:2] if i)
                 db.add(SignalEvent(
                     company_id=analysis.company_id,
                     signal_type=sig_type,
                     urgency=urgency,
                     headline=insight.title,
                     summary=insight.summary + ("\n" + " | ".join(summary_parts) if summary_parts else ""),
-                    source="Market Intelligence Agent",
-                    source_type="analysis",
+                    source="analysis",
                     relevance_score=confidence,
-                    recommended_action="; ".join(insight.recommendations[:2]) if insight.recommendations else None,
+                    recommended_action="; ".join(r for r in insight.recommendations[:2] if r) if insight.recommendations else None,
                 ))
 
             for comp in result.competitor_analysis:
@@ -1539,8 +1540,7 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     urgency=SignalUrgency.THIS_WEEK if comp.confidence >= 0.7 else SignalUrgency.THIS_MONTH,
                     headline=" — ".join(headline_parts),
                     summary="\n".join(summary_lines) if summary_lines else comp.description,
-                    source="Competitor Analyst Agent",
-                    source_type="analysis",
+                    source="analysis",
                     relevance_score=comp.confidence,
                     competitors_mentioned=[comp.competitor_name],
                     recommended_action=f"Review {comp.competitor_name}'s positioning and adjust your differentiation strategy.",

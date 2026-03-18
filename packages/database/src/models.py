@@ -456,6 +456,11 @@ class Lead(Base):
     source = Column(String(100))  # How the lead was found
     source_url = Column(String(500))
 
+    # Intelligence (from Lead Hunter analysis)
+    pain_points = Column(JSON, default=list)
+    trigger_events = Column(JSON, default=list)
+    recommended_approach = Column(Text)
+
     # Engagement
     notes = Column(Text)
     tags = Column(JSON, default=list)

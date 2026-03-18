@@ -40,6 +40,7 @@ members = [
     "gtm-advisor-scoring",
     "gtm-advisor-signal-monitor",
     "gtm-advisor-tools",
+    "gtm-advisor-vertical-intelligence",
     "gtm-advisor-workforce-architect",
     "gtm-company-enricher",
     "intelligence",
@@ -1739,6 +1740,21 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "structlog", specifier = ">=24.0" },
+]
+
+[[package]]
+name = "gtm-advisor-vertical-intelligence"
+version = "0.1.0"
+source = { editable = "agents/vertical_intelligence" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "structlog", specifier = ">=24.0" },
 ]

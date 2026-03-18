@@ -1,10 +1,11 @@
 """Market Data router — exposes KB intelligence to the frontend.
 
 Endpoints:
-  GET /{company_id}/market-data/vertical-summary    — vertical benchmarks + landscape
-  GET /{company_id}/market-data/competitor-signals   — competitor move signals
-  GET /{company_id}/market-data/industry-signals     — market/industry signals
-  GET /{company_id}/market-data/pipeline-summary     — lead pipeline stats
+  GET /{company_id}/market-data/vertical-summary          — vertical benchmarks + landscape
+  GET /{company_id}/market-data/competitor-signals         — competitor move signals
+  GET /{company_id}/market-data/industry-signals           — market/industry signals
+  GET /{company_id}/market-data/pipeline-summary           — lead pipeline stats
+  GET /{company_id}/market-data/vertical-intelligence      — full vertical intelligence report
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from packages.database.src.models import (
     SignalEvent,
     SignalType,
     VerticalBenchmark,
+    VerticalIntelligenceReport,
 )
 from packages.database.src.models import AnalysisStatus as DBAnalysisStatus
 from packages.database.src.session import get_db_session
@@ -471,6 +473,79 @@ async def pipeline_summary(
 # ---------------------------------------------------------------------------
 
 
+class GTMImplicationResponse(BaseModel):
+    insight: str
+    evidence: str | None = None
+    recommended_action: str | None = None
+    priority: str | None = None
+
+
+class FinancialPulseResponse(BaseModel):
+    sga_median: float | None = None
+    sga_trend: str | None = None
+    rnd_median: float | None = None
+    rnd_trend: str | None = None
+    margin_compression_or_expansion: str | None = None
+    capex_intensity: float | None = None
+    top_spenders: list[dict] = []
+
+
+class CompetitiveDynamicsResponse(BaseModel):
+    leaders: list[dict] = []
+    challengers: list[dict] = []
+    movers: list[dict] = []
+    new_entrants: list[dict] = []
+    exits: list[dict] = []
+
+
+class SignalDigestItem(BaseModel):
+    headline: str
+    signal_type: str | None = None
+    source: str | None = None
+    published_at: str | None = None
+    companies_mentioned: list[str] = []
+
+
+class ExecutiveMovementResponse(BaseModel):
+    company: str | None = None
+    name: str | None = None
+    old_title: str | None = None
+    new_title: str | None = None
+    change_type: str | None = None
+    date: str | None = None
+
+
+class RegulatoryItemResponse(BaseModel):
+    title: str
+    summary: str | None = None
+    source: str | None = None
+    impact: str | None = None
+
+
+class KeyTrendResponse(BaseModel):
+    trend: str
+    evidence: str | None = None
+    impact: str | None = None
+    source_count: int | None = None
+
+
+class VerticalIntelligenceResponse(BaseModel):
+    id: str
+    vertical_slug: str | None = None
+    vertical_name: str | None = None
+    report_period: str
+    computed_at: str | None = None
+    market_overview: dict = {}
+    key_trends: list[KeyTrendResponse] = []
+    competitive_dynamics: CompetitiveDynamicsResponse = CompetitiveDynamicsResponse()
+    financial_pulse: FinancialPulseResponse = FinancialPulseResponse()
+    signal_digest: list[SignalDigestItem] = []
+    executive_movements: list[ExecutiveMovementResponse] = []
+    regulatory_environment: list[RegulatoryItemResponse] = []
+    gtm_implications: list[GTMImplicationResponse] = []
+    data_sources: dict = {}
+
+
 class BriefingStatusResponse(BaseModel):
     has_completed_analysis: bool = False
     last_analysis_at: str | None = None
@@ -501,9 +576,151 @@ async def briefing_status(
     )
 
 
+@router.get(
+    "/{company_id}/market-data/vertical-intelligence",
+    response_model=VerticalIntelligenceResponse,
+)
+async def vertical_intelligence(
+    company_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> VerticalIntelligenceResponse:
+    """Full vertical intelligence report — the canonical source of industry data.
+
+    Returns the current (``is_current=True``) ``VerticalIntelligenceReport`` for
+    the company's vertical.  Used by TodayPage (GTM implications + financial
+    pulse), SignalsFeed (trends + landscape), CampaignsPage (market context),
+    and other pages that need industry intelligence.
+    """
+    await validate_company_access(company_id, current_user, db)
+
+    company = await db.get(Company, company_id)
+    vertical = await _resolve_vertical(company.industry if company else None, db)
+    if not vertical:
+        return VerticalIntelligenceResponse(
+            id="", report_period="", vertical_slug=None, vertical_name=None,
+        )
+
+    stmt = (
+        select(VerticalIntelligenceReport)
+        .where(
+            VerticalIntelligenceReport.vertical_id == vertical.id,
+            VerticalIntelligenceReport.is_current.is_(True),
+        )
+        .order_by(desc(VerticalIntelligenceReport.computed_at))
+        .limit(1)
+    )
+    report = await db.scalar(stmt)
+    if not report:
+        return VerticalIntelligenceResponse(
+            id="", report_period="",
+            vertical_slug=vertical.slug, vertical_name=vertical.name,
+        )
+
+    return _report_to_response(report, vertical)
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _report_to_response(
+    report: VerticalIntelligenceReport,
+    vertical: MarketVertical,
+) -> VerticalIntelligenceResponse:
+    """Convert a DB VerticalIntelligenceReport to API response."""
+    # Parse JSON sections with safe defaults
+    key_trends_raw = report.key_trends or []
+    key_trends = [
+        KeyTrendResponse(
+            trend=t.get("trend", "") if isinstance(t, dict) else str(t),
+            evidence=t.get("evidence") if isinstance(t, dict) else None,
+            impact=t.get("impact") if isinstance(t, dict) else None,
+            source_count=t.get("source_count") if isinstance(t, dict) else None,
+        )
+        for t in key_trends_raw
+    ]
+
+    comp_dyn = report.competitive_dynamics or {}
+    competitive = CompetitiveDynamicsResponse(
+        leaders=comp_dyn.get("leaders", []),
+        challengers=comp_dyn.get("challengers", []),
+        movers=comp_dyn.get("movers", []),
+        new_entrants=comp_dyn.get("new_entrants", []),
+        exits=comp_dyn.get("exits", []),
+    )
+
+    fp = report.financial_pulse or {}
+    financial_pulse = FinancialPulseResponse(
+        sga_median=fp.get("sga_median"),
+        sga_trend=fp.get("sga_trend"),
+        rnd_median=fp.get("rnd_median"),
+        rnd_trend=fp.get("rnd_trend"),
+        margin_compression_or_expansion=fp.get("margin_compression_or_expansion"),
+        capex_intensity=fp.get("capex_intensity"),
+        top_spenders=fp.get("top_spenders", []),
+    )
+
+    signal_digest = [
+        SignalDigestItem(
+            headline=s.get("headline", "") if isinstance(s, dict) else str(s),
+            signal_type=s.get("signal_type") if isinstance(s, dict) else None,
+            source=s.get("source") if isinstance(s, dict) else None,
+            published_at=s.get("published_at") if isinstance(s, dict) else None,
+            companies_mentioned=s.get("companies_mentioned", []) if isinstance(s, dict) else [],
+        )
+        for s in (report.signal_digest or [])
+    ]
+
+    exec_moves = [
+        ExecutiveMovementResponse(
+            company=e.get("company") if isinstance(e, dict) else None,
+            name=e.get("name") if isinstance(e, dict) else None,
+            old_title=e.get("old_title") if isinstance(e, dict) else None,
+            new_title=e.get("new_title") if isinstance(e, dict) else None,
+            change_type=e.get("change_type") if isinstance(e, dict) else None,
+            date=e.get("date") if isinstance(e, dict) else None,
+        )
+        for e in (report.executive_movements or [])
+    ]
+
+    regulatory = [
+        RegulatoryItemResponse(
+            title=r.get("title", "") if isinstance(r, dict) else str(r),
+            summary=r.get("summary") if isinstance(r, dict) else None,
+            source=r.get("source") if isinstance(r, dict) else None,
+            impact=r.get("impact") if isinstance(r, dict) else None,
+        )
+        for r in (report.regulatory_environment or [])
+    ]
+
+    gtm_impl = [
+        GTMImplicationResponse(
+            insight=g.get("insight", "") if isinstance(g, dict) else str(g),
+            evidence=g.get("evidence") if isinstance(g, dict) else None,
+            recommended_action=g.get("recommended_action") if isinstance(g, dict) else None,
+            priority=g.get("priority") if isinstance(g, dict) else None,
+        )
+        for g in (report.gtm_implications or [])
+    ]
+
+    return VerticalIntelligenceResponse(
+        id=str(report.id),
+        vertical_slug=vertical.slug,
+        vertical_name=vertical.name,
+        report_period=report.report_period,
+        computed_at=report.computed_at.isoformat() if report.computed_at else None,
+        market_overview=report.market_overview or {},
+        key_trends=key_trends,
+        competitive_dynamics=competitive,
+        financial_pulse=financial_pulse,
+        signal_digest=signal_digest,
+        executive_movements=exec_moves,
+        regulatory_environment=regulatory,
+        gtm_implications=gtm_impl,
+        data_sources=report.data_sources or {},
+    )
 
 
 def _to_market_signal(s: SignalEvent) -> MarketSignalResponse:
