@@ -1,4 +1,4 @@
-"""Authentication module for GTM Advisor Gateway."""
+"""Authentication module for Kairos Gateway."""
 
 from packages.database.src.models import SubscriptionTier
 

@@ -25,16 +25,22 @@ export function Header({ companyName, teaser = false }: HeaderProps) {
             </motion.div>
             <div>
               <h1 className="font-semibold text-white flex items-center gap-2">
-                GTM Advisor
-                <span className="px-2 py-0.5 text-[10px] rounded-full bg-purple-500/20 text-purple-300 font-medium">
-                  BETA
-                </span>
+                Hi Meet.AI
               </h1>
-              <p className="hidden sm:block text-xs text-white/40">AI-Powered Go-To-Market</p>
+              <p className="hidden sm:block text-xs text-white/40">Intelligence to Execution</p>
             </div>
           </div>
         )}
-        {isAuthenticated && <div />}
+        {isAuthenticated && (
+          <span className="text-sm text-white/50">
+            {(() => {
+              const h = new Date().getHours();
+              const g = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+              const name = localStorage.getItem('gtm_user_name')?.split(' ')[0];
+              return name ? `${g}, ${name}` : g;
+            })()}
+          </span>
+        )}
 
         {/* Center — teaser only: show company being analysed */}
         {!isAuthenticated && companyName && (
@@ -80,7 +86,7 @@ export function Header({ companyName, teaser = false }: HeaderProps) {
               onClick={() => { window.location.href = '/register'; }}
               className="btn-primary"
             >
-              <span>Upgrade</span>
+              <span>Get Access</span>
             </button>
           )}
         </div>

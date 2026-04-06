@@ -1,4 +1,4 @@
-"""API Schemas for GTM Advisor."""
+"""API Schemas for Kairos."""
 
 from .campaigns import (
     CampaignCreate,

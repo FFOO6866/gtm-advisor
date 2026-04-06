@@ -1,11 +1,11 @@
-"""GTM Advisor Scoring Methodology — The 'Why Us vs ChatGPT' Document.
+"""Kairos Scoring Methodology — The 'Why Us vs ChatGPT' Document.
 
-This module documents the intellectual property at the core of GTM Advisor:
+This module documents the intellectual property at the core of Kairos:
 a multi-layer scoring stack that combines real data with deterministic algorithms.
 
 This is NOT a prompt. It is a methodology.
 
-Why SMEs choose GTM Advisor over ChatGPT / Claude:
+Why SMEs choose Kairos over ChatGPT / Claude:
 -------------------------------------------------------
 1. PERSISTENT CONTEXT    — remembers your company, leads, history
 2. LIVE DATA             — EODHD (today's market), NewsAPI (today's news), ACRA (company registry)
@@ -42,7 +42,7 @@ class CompetitiveAdvantage:
 
 
 class WhyUsMethodology:
-    """Documents the GTM Advisor methodology and competitive differentiation.
+    """Documents the Kairos methodology and competitive differentiation.
 
     Use this in onboarding, sales, and support to explain the product's value.
     """
@@ -144,17 +144,17 @@ class WhyUsMethodology:
     @classmethod
     def get_elevator_pitch(cls) -> str:
         return (
-            "GTM Advisor is not a chatbot. It's an always-on AI workforce that monitors "
+            "Kairos is not a chatbot. It's an always-on AI workforce that monitors "
             "your market every hour, scores your leads against live economic data, and "
             "executes personalised outreach sequences on your behalf — with human approval "
-            "before every send. ChatGPT gives you advice. GTM Advisor takes action."
+            "before every send. ChatGPT gives you advice. Kairos takes action."
         )
 
     @classmethod
     def get_sme_objection_handlers(cls) -> dict[str, str]:
         return {
             "Can't I just use ChatGPT for free?": (
-                "ChatGPT gives you a one-time answer. GTM Advisor gives you a running system. "
+                "ChatGPT gives you a one-time answer. Kairos gives you a running system. "
                 "ChatGPT can't send an email, can't check if your lead's email is valid, "
                 "can't monitor when your competitor raises funding at 2am, and can't prove "
                 "it generated a single SGD of pipeline. We can."
@@ -170,7 +170,7 @@ class WhyUsMethodology:
                 "a right-to-deletion endpoint. All data can be hosted in Singapore."
             ),
             "How is this different from HubSpot or Apollo?": (
-                "HubSpot and Apollo are tools you configure. GTM Advisor is a workforce that works. "
+                "HubSpot and Apollo are tools you configure. Kairos is a workforce that works. "
                 "It monitors signals, scores opportunities, designs the playbook, drafts the emails, "
                 "and manages the sequences — with you approving actions, not configuring workflows. "
                 "Plus it's built for Singapore SMEs with ACRA data and PSG grant context."

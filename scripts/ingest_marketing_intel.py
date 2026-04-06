@@ -17,8 +17,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent.parent / "gtm_dev.db"
-COMPANY_ID = "956b788f3e734e528fed6c97c1309790"
 NOW = datetime.now(UTC).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
+
+# Dynamically resolve the Hi Meet.AI company ID so this script works after
+# a fresh seed run without needing to update a hardcoded UUID.
+def _resolve_company_id() -> str | None:
+    if not DB_PATH.exists():
+        return None
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id FROM companies WHERE name LIKE '%Hi Meet%' OR name LIKE '%HiMeet%' LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+COMPANY_ID = _resolve_company_id()
 
 # ---------------------------------------------------------------------------
 # Signal definitions
@@ -343,6 +356,11 @@ INSERT OR REPLACE INTO signal_events (
 def main() -> None:
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database not found: {DB_PATH}")
+    if COMPANY_ID is None:
+        raise ValueError(
+            "Hi Meet.AI company not found in database. "
+            "Run: uv run python scripts/seed_himeetai.py first."
+        )
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -354,7 +372,7 @@ def main() -> None:
         company = cursor.fetchone()
         if company is None:
             raise ValueError(
-                f"Company {COMPANY_ID} not found. "
+                f"Company {COMPANY_ID} not found in companies table. "
                 "Run: uv run python scripts/seed_himeetai.py first."
             )
         print(f"Target company: {company['name']} ({COMPANY_ID})")

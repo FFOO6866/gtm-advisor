@@ -1,4 +1,4 @@
-"""GTM Advisor Protocols - Interface definitions for agents and integrations."""
+"""Kairos Protocols - Interface definitions for agents and integrations."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ T = TypeVar("T")
 
 @runtime_checkable
 class AgentProtocol(Protocol[T]):
-    """Protocol for all GTM Advisor agents.
+    """Protocol for all Kairos agents.
 
     All agents must implement PDCA methods for self-correcting execution.
     """

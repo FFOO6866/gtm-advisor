@@ -1,4 +1,4 @@
-"""GTM Advisor Algorithms Package.
+"""Kairos Algorithms Package.
 
 Deterministic algorithms for scoring, clustering, and calculations.
 These replace LLM reasoning where repeatability and explainability matter.

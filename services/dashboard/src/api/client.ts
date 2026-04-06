@@ -1,5 +1,5 @@
 /**
- * GTM Advisor API Client
+ * Hi Meet.AI API Client
  *
  * Production-ready API client for connecting to the backend gateway.
  * NO mock data, NO fallbacks - real API calls only.
@@ -230,9 +230,32 @@ class APIError extends Error {
   }
 }
 
+let _refreshPromise: Promise<boolean> | null = null;
+
+async function tryRefreshToken(): Promise<boolean> {
+  const refreshToken = localStorage.getItem('gtm_refresh_token');
+  if (!refreshToken) return false;
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    localStorage.setItem('gtm_access_token', data.access_token);
+    localStorage.setItem('gtm_refresh_token', data.refresh_token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchAPI<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  _retried = false,
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
@@ -249,6 +272,24 @@ async function fetchAPI<T>(
     ...options,
     headers,
   });
+
+  // Auto-refresh on 401 — deduplicated so concurrent calls share one refresh
+  if (response.status === 401 && !_retried) {
+    if (!_refreshPromise) {
+      _refreshPromise = tryRefreshToken().finally(() => { _refreshPromise = null; });
+    }
+    const refreshed = await _refreshPromise;
+    if (refreshed) {
+      return fetchAPI<T>(endpoint, options, true);
+    }
+    // Refresh failed — redirect to login
+    const currentPath = window.location.pathname;
+    if (currentPath !== '/login' && currentPath !== '/register') {
+      localStorage.removeItem('gtm_access_token');
+      localStorage.removeItem('gtm_refresh_token');
+      window.location.href = `/login?next=${encodeURIComponent(currentPath)}`;
+    }
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

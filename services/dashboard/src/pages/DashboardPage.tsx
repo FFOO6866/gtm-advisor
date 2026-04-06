@@ -1,5 +1,5 @@
 /**
- * DashboardPage — Metrics overview for the GTM Advisor dashboard.
+ * DashboardPage — Metrics overview for the Hi Meet.AI dashboard.
  *
  * Shows pending approvals, active leads, market signals, active sequences,
  * and a recent executions list. All data is fetched in parallel.
@@ -212,7 +212,7 @@ export function DashboardPage() {
       {/* Header */}
       <div className="flex-shrink-0 px-6 py-4 border-b border-white/10">
         <h1 className="text-lg font-semibold text-white">Dashboard</h1>
-        <p className="text-sm text-white/40 mt-0.5">Overview of your GTM activity</p>
+        <p className="text-sm text-white/40 mt-0.5">Overview of your growth activity</p>
       </div>
 
       {/* Body */}

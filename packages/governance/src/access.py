@@ -306,9 +306,9 @@ class AccessControl:
         return [r.to_dict() for r in self._roles.values()]
 
 
-# Pre-configured agent permissions for GTM Advisor
+# Pre-configured agent permissions for Kairos
 def create_gtm_agent_permissions() -> dict[str, AgentPermissions]:
-    """Create default permissions for GTM Advisor agents."""
+    """Create default permissions for Kairos agents."""
     return {
         "gtm_strategist": AgentPermissions(
             agent_id="gtm_strategist",

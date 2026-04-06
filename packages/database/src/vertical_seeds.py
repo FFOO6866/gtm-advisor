@@ -13,6 +13,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "fintech",
         "name": "Fintech / Financial Services",
+        "industry_category": "Financial Services",
         "description": (
             "Digital payments, wealth technology, insurance technology, digital banking, "
             "lending platforms, and regulated financial institutions in Singapore."
@@ -30,6 +31,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "biomedical",
         "name": "Biomedical / HealthTech",
+        "industry_category": "Healthcare & Life Sciences",
         "description": (
             "Pharmaceutical manufacturing, medical devices, contract research organisations, "
             "health IT, diagnostics, and biotech R&D in Singapore."
@@ -47,6 +49,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "advanced_manufacturing",
         "name": "Advanced Manufacturing",
+        "industry_category": "Manufacturing & Engineering",
         "description": (
             "Precision engineering, semiconductor equipment, aerospace MRO, "
             "electronics manufacturing, and Industry 4.0 in Singapore."
@@ -64,6 +67,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "logistics",
         "name": "Logistics / Supply Chain",
+        "industry_category": "Trade & Logistics",
         "description": (
             "Third-party logistics, cold chain, port operations, last-mile delivery, "
             "freight forwarding, and supply chain technology in Singapore."
@@ -81,6 +85,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "retail_ecommerce",
         "name": "Retail / E-commerce",
+        "industry_category": "Consumer & Retail",
         "description": (
             "Physical retail, direct-to-consumer brands, marketplaces, omnichannel retail, "
             "and retail technology in Singapore and Southeast Asia."
@@ -97,6 +102,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "proptech",
         "name": "PropTech / Real Estate",
+        "industry_category": "Real Estate",
         "description": (
             "Real estate technology, property developers, construction technology, "
             "smart buildings, and REITs (tracked separately under 'reits' vertical)."
@@ -113,6 +119,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "reits",
         "name": "REITs & Business Trusts",
+        "industry_category": "Real Estate",
         "description": (
             "Singapore-listed Real Estate Investment Trusts and Business Trusts. "
             "Benchmarked separately using DPU yield, NAV premium, and gearing ratio."
@@ -129,6 +136,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "clean_energy",
         "name": "Clean Energy / GreenTech",
+        "industry_category": "Energy & Sustainability",
         "description": (
             "Solar energy, carbon markets, waste management technology, water treatment, "
             "energy efficiency, and sustainability technology."
@@ -146,6 +154,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "maritime",
         "name": "Maritime",
+        "industry_category": "Trade & Logistics",
         "description": (
             "Shipping, marine offshore, port technology, ship management, "
             "bunker trading, and maritime digitalisation."
@@ -162,6 +171,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "professional_services",
         "name": "Professional Services",
+        "industry_category": "Professional Services",
         "description": (
             "Legal technology, HR technology, management consulting, accounting, "
             "recruitment, and B2B professional services."
@@ -178,6 +188,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "edtech",
         "name": "EdTech / Education",
+        "industry_category": "Education",
         "description": (
             "Education technology, private education institutions, corporate training, "
             "SkillsFuture programmes, and K-12 technology."
@@ -194,6 +205,7 @@ VERTICAL_SEEDS: list[dict] = [
     {
         "slug": "ict_saas",
         "name": "ICT / SaaS / Tech",
+        "industry_category": "Technology",
         "description": (
             "Software-as-a-Service, cybersecurity, cloud computing, AI/ML platforms, "
             "IT services, and telecommunications in Singapore."
@@ -210,7 +222,8 @@ VERTICAL_SEEDS: list[dict] = [
     },
     {
         "slug": "marketing_comms",
-        "name": "Marketing, Communications & Advertising",
+        "name": "Marketing, Communications & PR",
+        "industry_category": "Professional Services",
         "description": (
             "Advertising holding groups, creative agencies, media buying, digital marketing, "
             "public relations, influencer marketing, martech/adtech platforms, "
@@ -317,9 +330,11 @@ async def seed_verticals(session: AsyncSession) -> int:  # type: ignore[name-def
             session.add(MarketVertical(**seed))
             count += 1
         else:
-            # Update keywords / gics_sectors in case they changed
+            # Update mutable fields in case they changed
+            existing.name = seed["name"]
             existing.keywords = seed["keywords"]
             existing.gics_sectors = seed["gics_sectors"]
             existing.description = seed["description"]
+            existing.industry_category = seed["industry_category"]
     await session.flush()
     return count

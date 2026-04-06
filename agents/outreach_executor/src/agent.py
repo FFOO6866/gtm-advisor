@@ -258,7 +258,7 @@ Rules:
             "qualification_reasons": context.get("qualification_reasons", []),
             "campaign_brief": context.get("campaign_brief", {}),
             "from_email": os.getenv("WORKFORCE_OUTREACH_FROM_EMAIL", ""),
-            "from_name": os.getenv("WORKFORCE_OUTREACH_FROM_NAME", "GTM Advisor"),
+            "from_name": os.getenv("WORKFORCE_OUTREACH_FROM_NAME", "Kairos"),
         }
 
     async def _do(
@@ -515,7 +515,7 @@ Return ONLY a JSON object with:
                     subject=subject,
                     body=body,
                     from_email=from_email,
-                    from_name=plan.get("from_name", "GTM Advisor"),
+                    from_name=plan.get("from_name", "Kairos"),
                     categories=["gtm-outreach"],
                     custom_args={"lead_id": lead_id},
                 )

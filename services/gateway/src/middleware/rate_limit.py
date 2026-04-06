@@ -1,4 +1,4 @@
-"""Rate limiting middleware for GTM Advisor API.
+"""Rate limiting middleware for Kairos API.
 
 Implements tier-based rate limiting that respects subscription levels.
 Uses Redis for distributed rate limiting in production.

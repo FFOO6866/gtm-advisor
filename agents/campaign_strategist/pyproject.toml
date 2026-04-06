@@ -1,0 +1,8 @@
+[project]
+name = "gtm-campaign-strategist"
+version = "0.1.0"
+description = "Campaign Strategist Agent — AI marketing director that produces phased GTM roadmaps"
+requires-python = ">=3.12"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

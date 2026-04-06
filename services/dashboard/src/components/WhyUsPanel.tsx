@@ -1,5 +1,5 @@
 /**
- * WhyUsPanel — Embedded "Why GTM Advisor vs ChatGPT" differentiator.
+ * WhyUsPanel — Embedded "Why Hi Meet.AI vs ChatGPT" differentiator.
  *
  * Shown in the onboarding flow and accessible from the dashboard.
  * Answers the #1 SME objection: "Can't I just use ChatGPT for this?"
@@ -36,7 +36,7 @@ const COMPARISONS = [
   {
     icon: TrendingUp,
     dimension: 'ROI Proof',
-    us: 'Tracks outreach → reply → meeting → pipeline value',
+    us: 'Tracks outreach → reply automatically; you log meetings & deals',
     them: 'Cannot prove it generated a single dollar of revenue',
     color: 'text-purple-400',
     bg: 'bg-purple-500/10',
@@ -44,7 +44,7 @@ const COMPARISONS = [
   {
     icon: Shield,
     dimension: 'Compliance',
-    us: 'PDPA consent tracking, audit trail, unsubscribe management',
+    us: 'PDPA-aware unsubscribe management, approval audit trail',
     them: 'No compliance layer, no PDPA awareness',
     color: 'text-red-400',
     bg: 'bg-red-500/10',
@@ -52,7 +52,7 @@ const COMPARISONS = [
   {
     icon: Globe,
     dimension: 'Singapore Context',
-    us: 'PSG grant plays, ACRA company data, MAS regulatory signals',
+    us: 'PSG & EDG grant intelligence, ACRA company data, SG market benchmarks',
     them: 'Generic global knowledge — no ACRA, no PSG grants',
     color: 'text-cyan-400',
     bg: 'bg-cyan-500/10',
@@ -68,8 +68,8 @@ export function WhyUsPanel({ compact = false }: WhyUsPanelProps) {
     <div className={`space-y-${compact ? '2' : '3'}`}>
       {!compact && (
         <div className="text-center mb-4">
-          <h3 className="text-lg font-semibold text-white">Why GTM Advisor?</h3>
-          <p className="text-sm text-white/50 mt-1">Not a chatbot. An always-on AI workforce.</p>
+          <h3 className="text-lg font-semibold text-white">Why Hi Meet.AI?</h3>
+          <p className="text-sm text-white/50 mt-1">Not a chatbot. A strategic growth system.</p>
         </div>
       )}
       {COMPARISONS.map(({ icon: Icon, dimension, us, them, color, bg }) => (
@@ -87,7 +87,7 @@ export function WhyUsPanel({ compact = false }: WhyUsPanelProps) {
               <p className="text-xs font-semibold text-white/80 mb-1">{dimension}</p>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <p className="text-[10px] text-green-400 font-medium mb-0.5">GTM Advisor</p>
+                  <p className="text-[10px] text-green-400 font-medium mb-0.5">Hi Meet.AI</p>
                   <p className="text-xs text-white/70">{us}</p>
                 </div>
                 <div>
@@ -102,7 +102,7 @@ export function WhyUsPanel({ compact = false }: WhyUsPanelProps) {
       {!compact && (
         <div className="glass-card p-4 rounded-xl border border-purple-500/20 mt-4">
           <p className="text-sm text-purple-300 font-medium text-center">
-            "GTM Advisor doesn't give you advice. It takes action."
+            "Hi Meet.AI doesn't just advise. It researches, strategizes, and executes."
           </p>
         </div>
       )}

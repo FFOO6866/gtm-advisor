@@ -410,7 +410,7 @@ export function ResultsPage() {
             </div>
             <div>
               <h1 className="text-lg font-semibold text-white">Results</h1>
-              <p className="text-xs text-white/40">ROI attribution and GTM performance</p>
+              <p className="text-xs text-white/40">ROI attribution and growth performance</p>
             </div>
           </div>
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10">

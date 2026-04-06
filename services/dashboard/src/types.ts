@@ -1,5 +1,5 @@
 /**
- * GTM Advisor Dashboard Types
+ * Hi Meet.AI Dashboard Types
  *
  * Types aligned with backend Pydantic models for production use.
  */

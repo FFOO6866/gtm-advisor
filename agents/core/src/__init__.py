@@ -1,4 +1,4 @@
-"""GTM Advisor Agent Core - Base agent with PDCA pattern."""
+"""Kairos Agent Core - Base agent with PDCA pattern."""
 
 from .base_agent import AgentCapability, BaseGTMAgent
 from .mcp_integration import AgentMCPClient

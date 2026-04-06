@@ -147,3 +147,57 @@ class CampaignListResponse(BaseModel):
     by_status: dict[str, int]
     by_objective: dict[str, int]
     total_budget: float
+
+
+# ============================================================================
+# GTM Roadmap Schemas (Phase 4 — Strategic Campaign Planning)
+# ============================================================================
+
+
+class ProposedCampaignSchema(BaseModel):
+    """A campaign proposed by the AI strategist within a roadmap."""
+
+    name: str
+    phase: str  # immediate, short_term, mid_term, long_term
+    priority_rank: int = 1
+    objective: str
+    objective_type: str = "lead_gen"
+    channels: list[str] = []
+    content_types: list[str] = []
+    framework_rationale: str = ""
+    knowledge_source: str = ""
+    target_persona: str = ""
+    kpis: list[str] = []
+    estimated_duration_days: int = 30
+    estimated_budget_sgd: float = 0.0
+    depends_on: str | None = None
+    quick_win: bool = False
+
+
+class RoadmapResponse(BaseModel):
+    """Response schema for a GTM Roadmap."""
+
+    id: str
+    company_id: str
+    title: str
+    executive_summary: str
+    gtm_motion: str
+    status: str
+    planning_horizon_months: int
+    company_diagnosis: dict
+    frameworks_applied: list[dict]
+    knowledge_sources: list[str]
+    confidence: float
+    created_at: str
+    approved_at: str | None = None
+
+    # Campaigns grouped by phase
+    immediate_campaigns: list[dict] = []
+    short_term_campaigns: list[dict] = []
+    mid_term_campaigns: list[dict] = []
+    long_term_campaigns: list[dict] = []
+
+    # Summary stats
+    total_campaigns: int = 0
+    active_campaigns: int = 0
+    completed_campaigns: int = 0

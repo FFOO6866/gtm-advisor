@@ -1,4 +1,4 @@
-"""Trust Postures for GTM Advisor.
+"""Trust Postures for Kairos.
 
 Implements the agentic-os EATP-inspired trust posture system:
   - SUPERVISED: Pause at every agent handoff, require human approval

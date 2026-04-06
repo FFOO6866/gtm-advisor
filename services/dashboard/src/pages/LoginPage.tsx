@@ -52,27 +52,25 @@ export function LoginPage() {
         // Non-fatal — greeting falls back to company name
       }
 
-      // Auto-resolve user's primary company so AppShell can hydrate immediately.
-      // Only set if not already present (teaser-to-paid flow already sets it).
-      if (!localStorage.getItem('gtm_company_id')) {
-        try {
-          const companiesRes = await fetch(`${apiBase}/api/v1/companies?page_size=20`, {
-            headers: { Authorization: `Bearer ${token.access_token}` },
-          });
-          if (companiesRes.ok) {
-            const companiesData = await companiesRes.json();
-            // Prefer the first owned company (owner_id != null) over anonymous ones.
-            const ownedCompany = (companiesData.companies ?? []).find(
-              (c: { id: string; owner_id: string | null }) => c.owner_id !== null
-            );
-            const firstCompany = ownedCompany ?? companiesData.companies?.[0];
-            if (firstCompany?.id) {
-              localStorage.setItem('gtm_company_id', firstCompany.id);
-            }
+      // Always resolve the user's primary company on login so stale IDs
+      // from deleted/orphaned companies don't persist across sessions.
+      try {
+        const companiesRes = await fetch(`${apiBase}/api/v1/companies?page_size=20`, {
+          headers: { Authorization: `Bearer ${token.access_token}` },
+        });
+        if (companiesRes.ok) {
+          const companiesData = await companiesRes.json();
+          // Prefer the first owned company (owner_id != null) over anonymous ones.
+          const ownedCompany = (companiesData.companies ?? []).find(
+            (c: { id: string; owner_id: string | null }) => c.owner_id !== null
+          );
+          const firstCompany = ownedCompany ?? companiesData.companies?.[0];
+          if (firstCompany?.id) {
+            localStorage.setItem('gtm_company_id', firstCompany.id);
           }
-        } catch {
-          // Non-fatal — AppShell will show "run first analysis" state
         }
+      } catch {
+        // Non-fatal — AppShell will show "run first analysis" state
       }
 
       const params = new URLSearchParams(window.location.search);
@@ -101,12 +99,12 @@ export function LoginPage() {
               <Zap className="w-5 h-5 text-white" />
             </div>
             <span className="text-xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              GTM Advisor
+              Hi Meet.AI
             </span>
           </div>
 
           <h1 className="text-2xl font-semibold text-white text-center mb-2">Sign in to your account</h1>
-          <p className="text-white/50 text-sm text-center mb-8">AI-powered go-to-market advisory</p>
+          <p className="text-white/50 text-sm text-center mb-8">Intelligence to execution, without the lag</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

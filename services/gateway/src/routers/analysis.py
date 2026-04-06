@@ -251,9 +251,10 @@ async def start_analysis(
         )
         if _existing_co:
             company_id = _existing_co.id
-            # Update fields with latest input
+            # Update fields with latest input — preserve manually curated industry
             _existing_co.description = analysis_request.description or _existing_co.description
-            _existing_co.industry = analysis_request.industry.value
+            if analysis_request.industry != IndustryVertical.OTHER and not _existing_co.industry:
+                _existing_co.industry = analysis_request.industry.value
             _existing_co.website = analysis_request.website or _existing_co.website
             _existing_co.goals = analysis_request.goals or _existing_co.goals
             _existing_co.challenges = analysis_request.challenges or _existing_co.challenges
@@ -436,19 +437,31 @@ async def quick_analysis(
         result = await run_analysis_sync(analysis_request)
         processing_time = time.time() - start_time
 
-        # Save to database
-        company = Company(
-            name=analysis_request.company_name,
-            website=analysis_request.website,
-            description=analysis_request.description,
-            industry=analysis_request.industry.value,
-            owner_id=user_id,
-            context_sources=(
-                [_make_source_entry("document", "uploaded_document", analysis_request.additional_context)]
-                if analysis_request.additional_context else []
-            ),
+        # Save to database — reuse existing company if one matches
+        _dedup_filters = [Company.name == analysis_request.company_name]
+        if user_id:
+            _dedup_filters.append(Company.owner_id == user_id)
+        else:
+            _dedup_filters.append(Company.owner_id.is_(None))
+        company = await db.scalar(
+            select(Company).where(*_dedup_filters).order_by(Company.created_at.desc()).limit(1)
         )
-        db.add(company)
+        if company:
+            company.description = analysis_request.description or company.description
+            company.website = analysis_request.website or company.website
+        else:
+            company = Company(
+                name=analysis_request.company_name,
+                website=analysis_request.website,
+                description=analysis_request.description,
+                industry=analysis_request.industry.value,
+                owner_id=user_id,
+                context_sources=(
+                    [_make_source_entry("document", "uploaded_document", analysis_request.additional_context)]
+                    if analysis_request.additional_context else []
+                ),
+            )
+            db.add(company)
         await db.flush()
 
         analysis = Analysis(
@@ -652,6 +665,16 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                             original=request.industry.value,
                             detected=_vi_slug,
                         )
+                        # Persist the detected vertical back to the company so
+                        # TodayPage shows the correct vertical on subsequent visits.
+                        try:
+                            async with async_session_factory() as _up_db:
+                                _co = await _up_db.get(Company, analysis.company_id)
+                                if _co and _co.industry != _vi_slug:
+                                    _co.industry = _vi_slug
+                                    await _up_db.commit()
+                        except Exception:
+                            pass  # best-effort
             except Exception as _vi_err:
                 logger.debug("vi_preflight_failed", error=str(_vi_err))
 
@@ -677,6 +700,7 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     request.include_customer_profiling,
                     request.include_lead_generation,
                     request.include_campaign_planning,
+                    request.include_campaign_planning,  # Step 6: Campaign Strategist (runs alongside Step 5)
                 ]
             )
             step = 0
@@ -1067,6 +1091,27 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                 for persona in result.customer_personas[:2]:
                     if hasattr(persona, "pain_points"):
                         persona_pain_points.extend(persona.pain_points[:3])
+                # Fetch VI report for Lead Hunter strategic targeting
+                _vi_targeting: dict[str, Any] = {}
+                _lh_vi_slug = context.get("_detected_vertical")
+                if _lh_vi_slug:
+                    try:
+                        from packages.mcp.src.servers.market_intel import MarketIntelMCPServer
+                        async with async_session_factory() as _lh_vi_db:
+                            _lh_mcp = MarketIntelMCPServer(session=_lh_vi_db)
+                            _lh_vi = await _lh_mcp.get_vertical_intelligence(_lh_vi_slug)
+                            if _lh_vi and not _lh_vi.get("error"):
+                                _vi_targeting = {
+                                    "vi_key_trends": _lh_vi.get("key_trends", []),
+                                    "vi_competitive_dynamics": _lh_vi.get("competitive_dynamics", {}),
+                                    "vi_gtm_implications": _lh_vi.get("gtm_implications", []),
+                                    "vi_signal_digest": _lh_vi.get("signal_digest", []),
+                                    "vi_financial_pulse": _lh_vi.get("financial_pulse", {}),
+                                    "vi_market_overview": _lh_vi.get("market_overview", {}),
+                                }
+                    except Exception as _lh_vi_err:
+                        logger.debug("lead_hunter_vi_fetch_failed", error=str(_lh_vi_err))
+
                 lead_context = {
                     **context,
                     "target_industries": [request.industry.value],
@@ -1076,6 +1121,7 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     "personas": [p.model_dump(mode="json") for p in result.customer_personas[:2]]
                     if result.customer_personas
                     else [],
+                    **_vi_targeting,
                 }
                 try:
                     # 3 min: 5 parallel Perplexity calls + enrichment of 25 companies
@@ -1197,6 +1243,111 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                     progress=step / total_steps,
                     message="Created campaign templates and messaging",
                     result={"campaign_ready": result.campaign_brief is not None},
+                )
+
+                decision_attribution["llm_decisions"] += 1
+
+            # =====================================================================
+            # STEP 6: Strategic GTM Roadmap
+            # =====================================================================
+            if request.include_campaign_planning:
+                agent_id = "campaign-strategist"
+                await send_agent_update(
+                    analysis_id=analysis_id,
+                    update_type="agent_started",
+                    agent_id=agent_id,
+                    agent_name="Campaign Strategist",
+                    status="thinking",
+                    message="Building your GTM roadmap from analysis insights...",
+                )
+
+                from agents.campaign_strategist.src import CampaignStrategistAgent
+                from packages.database.src.models import GTMRoadmap, RoadmapPhase, RoadmapStatus
+
+                strategist = CampaignStrategistAgent(bus=agent_bus)
+                strategist_context = {
+                    **context,
+                    "analysis_id": str(analysis_id),
+                    "company_id": str(analysis.company_id),
+                }
+                roadmap_result = None
+                try:
+                    async with asyncio.timeout(120):
+                        roadmap_result = await strategist.run(
+                            f"Create GTM roadmap for {request.company_name}",
+                            context=strategist_context,
+                        )
+                except (TimeoutError, MaxIterationsExceededError, AgentError) as e:
+                    logger.warning("agent_failed", agent=agent_id, error=str(e), analysis_id=str(analysis_id))
+                    roadmap_result = None
+
+                # Persist roadmap + campaigns if successful
+                if roadmap_result:
+                    phase_map = {
+                        "immediate": RoadmapPhase.IMMEDIATE,
+                        "short_term": RoadmapPhase.SHORT_TERM,
+                        "mid_term": RoadmapPhase.MID_TERM,
+                        "long_term": RoadmapPhase.LONG_TERM,
+                    }
+
+                    roadmap_row = GTMRoadmap(
+                        company_id=analysis.company_id,
+                        analysis_id=analysis_id,
+                        title=roadmap_result.title,
+                        executive_summary=roadmap_result.executive_summary,
+                        gtm_motion=roadmap_result.gtm_motion,
+                        status=RoadmapStatus.PROPOSED,
+                        planning_horizon_months=roadmap_result.planning_horizon_months,
+                        company_diagnosis=roadmap_result.company_diagnosis,
+                        frameworks_applied=roadmap_result.frameworks_applied,
+                        knowledge_sources=roadmap_result.knowledge_sources_cited,
+                        confidence=roadmap_result.confidence,
+                    )
+                    db.add(roadmap_row)
+                    await db.flush()
+
+                    all_proposed = (
+                        roadmap_result.immediate_campaigns
+                        + roadmap_result.short_term_campaigns
+                        + roadmap_result.mid_term_campaigns
+                        + roadmap_result.long_term_campaigns
+                    )
+                    for camp in all_proposed:
+                        db.add(DBCampaign(
+                            company_id=analysis.company_id,
+                            roadmap_id=roadmap_row.id,
+                            name=camp.name,
+                            description=camp.objective,
+                            objective=camp.objective_type,
+                            status=CampaignStatus.DRAFT,
+                            phase=phase_map.get(camp.phase),
+                            priority_rank=camp.priority_rank,
+                            framework_rationale=camp.framework_rationale,
+                            knowledge_source=camp.knowledge_source,
+                            channels=camp.channels,
+                            content_types_needed=camp.content_types,
+                            strategy_track=getattr(camp, "strategy_track", None) or None,
+                            target_personas=[camp.target_persona] if camp.target_persona else [],
+                            budget=camp.estimated_budget_sgd if camp.estimated_budget_sgd > 0 else None,
+                            recommended_by_ai=True,
+                            estimated_impact="high" if camp.quick_win else "medium",
+                            key_messages=[],
+                            value_propositions=[],
+                            metrics={"kpis": camp.kpis},
+                        ))
+
+                completed_agents.append(agent_id)
+                step += 1
+
+                await send_agent_update(
+                    analysis_id=analysis_id,
+                    update_type="agent_completed",
+                    agent_id=agent_id,
+                    agent_name="Campaign Strategist",
+                    status="complete",
+                    progress=step / total_steps,
+                    message="GTM roadmap created with strategy tracks",
+                    result={"roadmap_ready": roadmap_result is not None},
                 )
 
                 decision_attribution["llm_decisions"] += 1

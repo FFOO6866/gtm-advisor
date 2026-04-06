@@ -1,4 +1,4 @@
-"""Middleware components for GTM Advisor API."""
+"""Middleware components for Kairos API."""
 
 from .auth import AuthMiddleware
 from .rate_limit import (

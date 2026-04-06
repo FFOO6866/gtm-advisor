@@ -350,9 +350,9 @@ class CheckpointManager:
         )[:limit]
 
 
-# Pre-defined checkpoints for GTM Advisor
+# Pre-defined checkpoints for Kairos
 def create_gtm_checkpoints() -> list[Checkpoint]:
-    """Create default checkpoints for GTM Advisor."""
+    """Create default checkpoints for Kairos."""
     return [
         Checkpoint(
             id="high_value_outreach",

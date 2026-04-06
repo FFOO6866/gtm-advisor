@@ -1,4 +1,4 @@
-"""Database session management for GTM Advisor.
+"""Database session management for Kairos.
 
 Provides async database connections using SQLAlchemy 2.0 async API.
 """
@@ -24,8 +24,7 @@ AsyncSessionLocal: async_sessionmaker[AsyncSession] | None = None
 def get_engine():
     """Get or create the async database engine.
 
-    In development, falls back to a local SQLite file (gtm_dev.db) when
-    GTM_POSTGRES_URL is not configured.
+    Requires GTM_POSTGRES_URL to be set in the environment.
     """
     global _engine
     if _engine is None:
@@ -33,25 +32,20 @@ def get_engine():
         database_url = config.postgres_url
 
         if not database_url:
-            if config.is_production:
-                raise RuntimeError(
-                    "Database URL not configured. Set GTM_POSTGRES_URL environment variable."
-                )
-            # Development fallback: local SQLite file
-            database_url = "sqlite+aiosqlite:///./gtm_dev.db"
+            raise RuntimeError(
+                "Database URL not configured. Set GTM_POSTGRES_URL environment variable."
+            )
 
         # Convert postgresql:// to postgresql+asyncpg://
         if database_url.startswith("postgresql://"):
             database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-        is_sqlite = database_url.startswith("sqlite")
-        engine_kwargs: dict = {"echo": config.is_development}
-        if is_sqlite:
-            # SQLite: set busy_timeout so concurrent writers wait instead of failing immediately
-            engine_kwargs["connect_args"] = {"timeout": 30}
-        else:
-            # Connection pool settings not supported by SQLite
-            engine_kwargs.update({"pool_size": 5, "max_overflow": 10, "pool_pre_ping": True})
+        engine_kwargs: dict = {
+            "echo": config.is_development,
+            "pool_size": 5,
+            "max_overflow": 10,
+            "pool_pre_ping": True,
+        }
 
         _engine = create_async_engine(database_url, **engine_kwargs)
     return _engine

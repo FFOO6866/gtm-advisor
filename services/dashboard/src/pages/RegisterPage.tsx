@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Zap } from 'lucide-react';
 import { AuroraBackground } from '../components/AuroraBackground';
+import { storeAuthTokens } from '../api/client';
 
 export function RegisterPage() {
   const navigate = useNavigate();
@@ -29,7 +30,10 @@ export function RegisterPage() {
         setError(data.detail || 'Registration failed. Please try again.');
         return;
       }
-      navigate('/login', { state: { message: 'Account created! Please sign in.' } });
+      const token = await response.json();
+      storeAuthTokens(token.access_token, token.refresh_token);
+      if (fullName) localStorage.setItem('gtm_user_name', fullName);
+      navigate('/analyze');
     } catch {
       setError('Registration failed. Please try again.');
     } finally {
@@ -53,12 +57,12 @@ export function RegisterPage() {
               <Zap className="w-5 h-5 text-white" />
             </div>
             <span className="text-xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              GTM Advisor
+              Hi Meet.AI
             </span>
           </div>
 
-          <h1 className="text-2xl font-semibold text-white text-center mb-2">Create your account</h1>
-          <p className="text-white/50 text-sm text-center mb-8">Start your GTM journey today</p>
+          <h1 className="text-2xl font-semibold text-white text-center mb-2">Get Started</h1>
+          <p className="text-white/50 text-sm text-center mb-8">Create your account to run your first analysis</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

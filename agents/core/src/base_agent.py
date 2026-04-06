@@ -1,6 +1,6 @@
 """Base GTM Agent with PDCA (Plan-Do-Check-Act) pattern.
 
-All GTM Advisor agents inherit from this base class to ensure:
+All Kairos agents inherit from this base class to ensure:
 - Self-correcting execution with confidence thresholds
 - Structured outputs via Instructor
 - Observability hooks
@@ -54,7 +54,7 @@ class AgentCapability:
 
 
 class BaseGTMAgent(ABC, Generic[T]):
-    """Base class for all GTM Advisor agents.
+    """Base class for all Kairos agents.
 
     Implements the PDCA (Plan-Do-Check-Act) cycle for self-correcting execution.
 

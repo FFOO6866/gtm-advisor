@@ -1,4 +1,4 @@
-"""GTM Advisor Core Package - Types, Config, Errors, and Protocols."""
+"""Kairos Core Package - Types, Config, Errors, and Protocols."""
 
 # SubscriptionTier - single source of truth from database models
 from packages.database.src.models import SubscriptionTier

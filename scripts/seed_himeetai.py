@@ -157,7 +157,7 @@ async def main() -> None:
             user = User(
                 email="demo@himeetai.com",
                 hashed_password=get_password_hash("himeetai2024"),
-                full_name="Hi Meet.AI Demo",
+                full_name="Euan",
                 company_name="Hi Meet.AI",
                 tier=SubscriptionTier.TIER1,
                 is_active=True,

@@ -53,8 +53,9 @@ export function AppShell() {
       .then(setCompany)
       .catch((err) => {
         console.error('[AppShell] Failed to hydrate company context:', err);
-        // Stale / inaccessible company_id — remove so we don't retry
+        // Stale / inaccessible company_id — remove from both stores so we don't retry
         localStorage.removeItem('gtm_company_id');
+        sessionStorage.removeItem('gtm_company_id');
       })
       .finally(() => setIsHydrating(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

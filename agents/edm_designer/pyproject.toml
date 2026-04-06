@@ -1,0 +1,8 @@
+[project]
+name = "gtm-edm-designer"
+version = "0.1.0"
+description = "EDM Designer Agent — generates responsive email HTML from campaign briefs"
+requires-python = ">=3.12"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

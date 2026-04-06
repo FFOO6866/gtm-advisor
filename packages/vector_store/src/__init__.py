@@ -1,4 +1,4 @@
-"""GTM Advisor Vector Store — Qdrant ANN search with Python cosine fallback."""
+"""Kairos Vector Store — Qdrant ANN search with Python cosine fallback."""
 
 from .store import (
     ARTICLES_COLLECTION,

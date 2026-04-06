@@ -38,6 +38,18 @@ _GUIDES_DIR = Path(__file__).resolve().parents[3] / "data" / "knowledge" / "guid
 # Maps agent names (kebab-case) to guide slugs in priority order.
 # Slugs without a corresponding .json file are silently skipped at runtime.
 _AGENT_GUIDE_MAP: dict[str, list[str]] = {
+    "campaign-strategist": [
+        "gtm_motion_selection",
+        "digital_awareness_campaign",
+        "cold_email_sequence",
+        "content_marketing_b2b",
+        "campaign_measurement",
+        "linkedin_b2b_campaign",
+        "singapore_market_entry",
+        "singapore_psg_grants",
+        "singapore_pdpa_gtm",
+        "singapore_asean_expansion",
+    ],
     "campaign-architect": [
         "digital_awareness_campaign",
         "cold_email_sequence",
@@ -89,6 +101,38 @@ _AGENT_GUIDE_MAP: dict[str, list[str]] = {
         "campaign_measurement",
         "gtm_motion_selection",
         "content_marketing_b2b",
+    ],
+    "social-publisher": [
+        "digital_awareness_campaign",
+        "content_marketing_b2b",
+        "linkedin_b2b_campaign",
+        "campaign_measurement",
+    ],
+    "campaign-monitor": [
+        "campaign_measurement",
+        "digital_awareness_campaign",
+        "linkedin_b2b_campaign",
+        "content_marketing_b2b",
+    ],
+    "edm-designer": [
+        "cold_email_sequence",
+        "digital_awareness_campaign",
+        "content_marketing_b2b",
+        "singapore_pdpa_gtm",
+    ],
+    "graphic-designer": [
+        "digital_awareness_campaign",
+        "linkedin_b2b_campaign",
+        "content_marketing_b2b",
+    ],
+    "strategy-proposer": [
+        "gtm_motion_selection",
+        "competitive_intelligence",
+        "positioning_differentiation",
+        "market_sizing",
+        "singapore_market_entry",
+        "singapore_psg_grants",
+        "industry_trend_analysis",
     ],
 }
 

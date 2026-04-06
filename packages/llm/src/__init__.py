@@ -1,4 +1,4 @@
-"""GTM Advisor LLM Package - LLM provider abstraction."""
+"""Kairos LLM Package - LLM provider abstraction."""
 
 from .base import LLMProvider, ProviderType
 from .manager import LLMManager, get_llm_manager

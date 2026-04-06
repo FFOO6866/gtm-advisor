@@ -584,7 +584,7 @@ export function ContentPage() {
               Content Studio
             </h1>
             <p className="text-xs text-white/40">
-              AI-generated content for your GTM campaigns
+              Content for your growth campaigns
             </p>
           </div>
 

@@ -307,7 +307,7 @@ export function OnboardingModal({ onSubmit, isBackendAvailable = true }: Onboard
             >
               <Sparkles className="w-8 h-8 text-white" />
             </motion.div>
-            <h1 className="text-xl font-bold text-white mb-1">Welcome to GTM Advisor</h1>
+            <h1 className="text-xl font-bold text-white mb-1">Welcome to Hi Meet.AI</h1>
             <p className="text-white/50 text-sm">Tell us about your company to get started</p>
           </div>
 

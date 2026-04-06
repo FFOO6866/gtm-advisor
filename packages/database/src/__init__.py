@@ -1,4 +1,4 @@
-"""Database package for GTM Advisor."""
+"""Database package for Kairos."""
 
 from .knowledge_web import (
     CompetitorSignalRepository,
@@ -38,6 +38,7 @@ from .models import (
     FactRelationLink,
     FactType,
     FinancialPeriodType,
+    GTMRoadmap,
     Lead,
     LeadJustification,
     LeadStatus,
@@ -48,6 +49,8 @@ from .models import (
     MCPDataSource,
     Persona,
     RelationType,
+    RoadmapPhase,
+    RoadmapStatus,
     SourceType,
     # Enums
     SubscriptionTier,
@@ -96,6 +99,8 @@ __all__ = [
     "CompanyDocument",
     "DocumentChunk",
     "CompanyExecutive",
+    # GTM Roadmap Models
+    "GTMRoadmap",
     # Enums
     "AnalysisStatus",
     "CampaignStatus",
@@ -107,6 +112,8 @@ __all__ = [
     "FinancialPeriodType",
     "LeadStatus",
     "RelationType",
+    "RoadmapPhase",
+    "RoadmapStatus",
     "SourceType",
     "SubscriptionTier",
     "ThreatLevel",

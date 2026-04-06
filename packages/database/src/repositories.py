@@ -1,4 +1,4 @@
-"""Repository layer for GTM Advisor database operations.
+"""Repository layer for Kairos database operations.
 
 Repositories provide a clean abstraction over raw SQLAlchemy queries.
 Routers and services use repositories; they never write SQL directly.

@@ -34,6 +34,7 @@
 
   html {
     @apply antialiased;
+    scroll-behavior: smooth;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -524,5 +525,32 @@
   .mask-fade-y {
     mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
     -webkit-mask-image: linear-gradient(to bottom, transparent, black 10%, black 90%, transparent);
+  }
+
+  /* Dot grid texture overlay — add depth without images */
+  .dot-grid {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  /* Glow shadow behind images */
+  .img-glow {
+    box-shadow:
+      0 0 60px -10px rgba(139, 92, 246, 0.3),
+      0 0 120px -20px rgba(59, 130, 246, 0.15),
+      0 20px 60px -20px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Image fallback gradient — used when custom images aren't yet generated */
+  .img-fallback-hero {
+    background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 30%, #0a1a3a 60%, #0a0a1a 100%);
+  }
+
+  .img-fallback-shift {
+    background: linear-gradient(90deg, #1a1a24 0%, #1a0a2e 50%, #0a1a3a 100%);
+  }
+
+  .img-fallback-cta {
+    background: linear-gradient(135deg, #0a0a1a 0%, #0a1a2e 50%, #0a0a1a 100%);
   }
 }

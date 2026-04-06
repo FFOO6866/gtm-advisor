@@ -1,5 +1,5 @@
 /**
- * GTM Advisor API Module
+ * Hi Meet.AI API Module
  *
  * Re-exports all API functions and types for cleaner imports.
  */

@@ -1,4 +1,4 @@
-"""GTM Advisor Governance Package.
+"""Kairos Governance Package.
 
 Enterprise governance layer providing:
 - Access Control: RBAC for agents and tools

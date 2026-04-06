@@ -1,7 +1,7 @@
 """APScheduler integration — always-on scheduled jobs.
 
-Registers cron/interval jobs that run GTM Advisor agents on a schedule.
-This is what makes GTM Advisor an "always-on workforce" vs a one-shot tool.
+Registers cron/interval jobs that run Kairos agents on a schedule.
+This is what makes Kairos an "always-on workforce" vs a one-shot tool.
 
 Schedule:
     Every 1 hour:         SignalMonitorAgent — scans for market signals
@@ -276,6 +276,32 @@ async def start_scheduler() -> None:
         replace_existing=True,
         max_instances=1,
         misfire_grace_time=7200,
+    )
+
+    # --- Job 19: Social Engagement Poller (every 4 hours SGT) ---
+    # For all PUBLISHED social CreativeAssets, poll Post Bridge analytics
+    # and update impressions/clicks/engagements counters + EngagementEvent rows.
+    scheduler.add_job(
+        _poll_social_engagement,
+        trigger=IntervalTrigger(hours=4),
+        id="social_engagement_poller",
+        name="Social Engagement Poller — update published asset metrics",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=1800,
+    )
+
+    # --- Job 20: Campaign Monitor Daily (09:00 SGT) ---
+    # Run Campaign Monitor agent for every ACTIVE campaign to aggregate
+    # metrics and generate optimisation recommendations.
+    scheduler.add_job(
+        _run_campaign_monitor_all,
+        trigger=CronTrigger(hour=9, minute=0, timezone="Asia/Singapore"),
+        id="campaign_monitor_daily",
+        name="Campaign Monitor — daily performance analysis",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=3600,
     )
 
     scheduler.start()
@@ -956,3 +982,216 @@ async def _run_vertical_intelligence_synthesis() -> None:
             logger.info("vertical_intelligence_synthesis_complete", reports_created=count)
     except Exception:
         logger.exception("Vertical intelligence synthesis job failed")
+
+
+async def _poll_social_engagement() -> None:
+    """Poll Post Bridge analytics for all PUBLISHED social CreativeAssets.
+
+    Updates impressions/clicks/engagements counters on CreativeAsset rows
+    and creates EngagementEvent rows for significant changes.
+    """
+    logger.info("scheduled_job_start", job="social_engagement_poller")
+    try:
+        from sqlalchemy import select
+
+        from packages.database.src.models import (
+            CreativeAsset,
+            CreativeAssetStatus,
+            CreativeAssetType,
+            EngagementEvent,
+        )
+        from packages.database.src.session import async_session_factory
+        from packages.mcp.src.servers.post_bridge import PostBridgeMCPServer
+
+        post_bridge = PostBridgeMCPServer.from_env()
+        if not post_bridge.is_configured:
+            logger.info("social_engagement_poller_skipped_no_api_key")
+            return
+
+        async with async_session_factory() as db:
+            stmt = (
+                select(CreativeAsset)
+                .where(
+                    CreativeAsset.status == CreativeAssetStatus.PUBLISHED,
+                    CreativeAsset.external_post_id.isnot(None),
+                    CreativeAsset.asset_type.in_([
+                        CreativeAssetType.SOCIAL_IMAGE,
+                        CreativeAssetType.AD_BANNER,
+                    ]),
+                )
+                .limit(100)
+            )
+            assets = (await db.execute(stmt)).scalars().all()
+
+            if not assets:
+                logger.info("social_engagement_poller_no_published_assets")
+                return
+
+            updated = 0
+            for asset in assets:
+                try:
+                    analytics = await post_bridge.get_post_analytics(asset.external_post_id)
+                    if "error" in analytics:
+                        continue
+
+                    new_impressions = analytics.get("impressions", 0)
+                    new_clicks = analytics.get("clicks", 0)
+                    new_engagements = (
+                        analytics.get("likes", 0)
+                        + analytics.get("shares", 0)
+                        + analytics.get("comments", 0)
+                    )
+
+                    # Only write events for deltas
+                    imp_delta = max(0, new_impressions - asset.impressions)
+                    click_delta = max(0, new_clicks - asset.clicks)
+                    eng_delta = max(0, new_engagements - asset.engagements)
+
+                    if imp_delta > 0 or click_delta > 0 or eng_delta > 0:
+                        asset.impressions = new_impressions
+                        asset.clicks = new_clicks
+                        asset.engagements = new_engagements
+
+                        if click_delta > 0:
+                            db.add(EngagementEvent(
+                                company_id=asset.company_id,
+                                campaign_id=asset.campaign_id,
+                                asset_id=asset.id,
+                                event_type="social_click",
+                                channel=asset.target_platform or "social",
+                                source_message_id=asset.external_post_id,
+                                metadata_json={"delta_clicks": click_delta},
+                            ))
+
+                        if eng_delta > 0:
+                            db.add(EngagementEvent(
+                                company_id=asset.company_id,
+                                campaign_id=asset.campaign_id,
+                                asset_id=asset.id,
+                                event_type="social_engagement",
+                                channel=asset.target_platform or "social",
+                                source_message_id=asset.external_post_id,
+                                metadata_json={
+                                    "delta_engagements": eng_delta,
+                                    "likes": analytics.get("likes", 0),
+                                    "shares": analytics.get("shares", 0),
+                                    "comments": analytics.get("comments", 0),
+                                },
+                            ))
+
+                        updated += 1
+
+                except Exception as e:
+                    logger.warning(
+                        "social_poll_asset_failed",
+                        asset_id=str(asset.id),
+                        error=str(e),
+                    )
+
+            if updated > 0:
+                await db.commit()
+
+            logger.info(
+                "social_engagement_poller_complete",
+                total_assets=len(assets),
+                updated=updated,
+            )
+
+        await post_bridge.close()
+
+    except Exception as e:
+        logger.error("scheduled_job_failed", job="social_engagement_poller", error=str(e))
+
+
+async def _run_campaign_monitor_all() -> None:
+    """Run CampaignMonitorAgent for every ACTIVE campaign."""
+    logger.info("scheduled_job_start", job="campaign_monitor")
+    try:
+        from datetime import timedelta
+
+        from sqlalchemy import select
+
+        from agents.campaign_monitor.src import CampaignMonitorAgent
+        from packages.database.src.models import (
+            Campaign,
+            CampaignStatus,
+            EngagementEvent,
+        )
+        from packages.database.src.session import async_session_factory
+
+        async with async_session_factory() as db:
+            stmt = select(Campaign).where(Campaign.status == CampaignStatus.ACTIVE).limit(50)
+            campaigns = (await db.execute(stmt)).scalars().all()
+
+            if not campaigns:
+                logger.info("campaign_monitor_no_active_campaigns")
+                return
+
+            for campaign in campaigns:
+                try:
+                    # Fetch recent engagement events for this campaign
+                    since = datetime.now(UTC) - timedelta(days=7)
+                    events_stmt = (
+                        select(EngagementEvent)
+                        .where(
+                            EngagementEvent.campaign_id == campaign.id,
+                            EngagementEvent.occurred_at >= since,
+                        )
+                        .limit(1000)
+                    )
+                    events = (await db.execute(events_stmt)).scalars().all()
+
+                    # Serialize events for the agent context
+                    event_dicts = [
+                        {
+                            "event_type": e.event_type,
+                            "channel": e.channel,
+                            "asset_id": str(e.asset_id) if e.asset_id else None,
+                            "lead_id": str(e.lead_id) if e.lead_id else None,
+                            "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
+                            "url_clicked": e.url_clicked,
+                        }
+                        for e in events
+                    ]
+
+                    agent = CampaignMonitorAgent()
+                    result = await agent.run(
+                        task=f"Analyze performance for campaign: {campaign.name}",
+                        context={
+                            "campaign_id": str(campaign.id),
+                            "campaign_name": campaign.name,
+                            "engagement_events": event_dicts,
+                            "period_days": 7,
+                        },
+                    )
+
+                    # Update campaign metrics JSON
+                    if result:
+                        campaign.metrics = {
+                            "total_impressions": result.total_impressions,
+                            "total_clicks": result.total_clicks,
+                            "total_engagements": result.total_engagements,
+                            "total_conversions": result.total_conversions,
+                            "overall_ctr": result.overall_ctr,
+                            "top_performing_asset": result.top_performing_asset,
+                            "recommendations_count": len(result.recommendations),
+                            "last_monitored": datetime.now(UTC).isoformat(),
+                        }
+
+                    logger.info(
+                        "campaign_monitor_complete",
+                        campaign_id=str(campaign.id),
+                        events_analyzed=len(event_dicts),
+                    )
+
+                except Exception as e:
+                    logger.error(
+                        "campaign_monitor_failed",
+                        campaign_id=str(campaign.id),
+                        error=str(e),
+                    )
+
+            await db.commit()
+
+    except Exception as e:
+        logger.error("scheduled_job_failed", job="campaign_monitor", error=str(e))

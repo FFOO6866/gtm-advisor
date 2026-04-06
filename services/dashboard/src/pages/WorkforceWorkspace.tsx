@@ -142,7 +142,7 @@ export function WorkforceWorkspace({ companyId, analysisId }: WorkforceWorkspace
             </div>
             <div>
               <h2 className="text-lg font-semibold text-white">Digital Workforce</h2>
-              <p className="text-xs text-white/40">AI agents executing your GTM strategy</p>
+              <p className="text-xs text-white/40">AI agents executing your growth strategy</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -204,7 +204,7 @@ export function WorkforceWorkspace({ companyId, analysisId }: WorkforceWorkspace
                 <div className="text-center py-12">
                   <Bot className="w-12 h-12 text-white/20 mx-auto mb-4" />
                   <p className="text-white/50 mb-2">No workforce designed yet</p>
-                  <p className="text-white/30 text-sm mb-6">Design an AI workforce based on your completed GTM analysis</p>
+                  <p className="text-white/30 text-sm mb-6">Design an AI workforce based on your completed growth analysis</p>
                   {analysisId && (
                     <motion.button
                       onClick={handleDesign}

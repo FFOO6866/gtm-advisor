@@ -1,4 +1,4 @@
-"""Authentication models for GTM Advisor Gateway."""
+"""Authentication models for Kairos Gateway."""
 
 from datetime import UTC, datetime
 from uuid import UUID, uuid4

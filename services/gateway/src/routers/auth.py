@@ -1,4 +1,4 @@
-"""Authentication router for GTM Advisor Gateway.
+"""Authentication router for Kairos Gateway.
 
 Provides endpoints for:
 - User registration

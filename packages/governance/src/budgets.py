@@ -389,7 +389,7 @@ class BudgetManager:
         return token_cost + api_cost
 
 
-# Pre-configured limits for GTM Advisor
+# Pre-configured limits for Kairos
 def create_gtm_budget_limits() -> list[BudgetLimit]:
     """Create default budget limits."""
     return [

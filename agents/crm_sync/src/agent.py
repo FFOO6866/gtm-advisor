@@ -33,7 +33,7 @@ class CRMSyncAgent(BaseGTMAgent[CRMSyncResult]):
             name="crm-sync",
             description=(
                 "Creates or updates HubSpot CRM contacts and deals for qualified leads. "
-                "Keeps the CRM in sync with GTM Advisor's lead pipeline."
+                "Keeps the CRM in sync with Kairos's lead pipeline."
             ),
             result_type=CRMSyncResult,
             min_confidence=0.70,
@@ -256,7 +256,7 @@ class CRMSyncAgent(BaseGTMAgent[CRMSyncResult]):
                 last_name=plan.get("last_name", ""),
                 company=plan.get("company", ""),
                 job_title=plan.get("job_title", ""),
-                lead_source="GTM Advisor",
+                lead_source="Kairos",
             )
 
             # Log enrichment metadata for observability (HubSpot MCP has no

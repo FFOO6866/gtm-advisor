@@ -1,0 +1,8 @@
+[project]
+name = "gtm-graphic-designer"
+version = "0.1.0"
+description = "Graphic Designer Agent — generates social media graphics and ad banners"
+requires-python = ">=3.12"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

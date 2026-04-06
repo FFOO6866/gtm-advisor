@@ -1,4 +1,4 @@
-"""Authentication middleware for GTM Advisor API.
+"""Authentication middleware for Kairos API.
 
 Sets user information on request.state for use by other middleware and endpoints.
 Uses Redis-backed caching for user lookups with proper error logging.

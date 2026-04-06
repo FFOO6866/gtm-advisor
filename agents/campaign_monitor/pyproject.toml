@@ -1,0 +1,8 @@
+[project]
+name = "gtm-campaign-monitor"
+version = "0.1.0"
+description = "Campaign Monitor Agent — tracks performance and recommends optimizations"
+requires-python = ">=3.12"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

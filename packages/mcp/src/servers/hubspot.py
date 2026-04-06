@@ -747,7 +747,7 @@ class HubSpotMCPServer(APIBasedMCPServer):
         job_title: str = "",
         phone: str = "",
         lifecycle_stage: str = "lead",
-        lead_source: str = "GTM Advisor",
+        lead_source: str = "Kairos",
     ) -> str | None:
         """Create or update a HubSpot contact. Returns HubSpot contact ID or None on failure.
 
@@ -829,7 +829,7 @@ class HubSpotMCPServer(APIBasedMCPServer):
                 "dealstage": deal_stage,
                 "amount": str(amount),
                 "closedate": close_date,
-                "deal_source": "GTM Advisor",
+                "deal_source": "Kairos",
             }
         }
 

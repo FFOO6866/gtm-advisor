@@ -1,4 +1,4 @@
-"""Gateway service layer for GTM Advisor.
+"""Gateway service layer for Kairos.
 
 Services encapsulate complex business logic that spans multiple agents or
 database operations. Routers should delegate to services, not contain logic.

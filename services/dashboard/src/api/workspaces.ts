@@ -1,5 +1,5 @@
 /**
- * GTM Advisor Workspace API Client
+ * Hi Meet.AI Workspace API Client
  *
  * API client for workspace-specific data: competitors, ICPs, leads, campaigns, insights.
  */

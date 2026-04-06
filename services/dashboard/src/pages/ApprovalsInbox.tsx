@@ -4,7 +4,7 @@
  * EVERY outreach email goes through this page before sending.
  * Users can: preview, edit, approve, reject, or bulk approve.
  *
- * This is the "human in the loop" that makes GTM Advisor trustworthy.
+ * This is the "human in the loop" that makes Hi Meet.AI trustworthy.
  */
 
 import { useState, useEffect } from 'react';

@@ -1,4 +1,4 @@
-"""Observability package for GTM Advisor.
+"""Observability package for Kairos.
 
 Provides real-time monitoring of agent execution via AgentBus subscription.
 Implements continuous insight posture from the agentic-os pattern.

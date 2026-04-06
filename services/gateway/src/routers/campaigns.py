@@ -4,14 +4,21 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.database.src.models import Campaign, CampaignStatus, Company
+from packages.database.src.models import (
+    Campaign,
+    CampaignStatus,
+    Company,
+    CreativeAsset,
+    CreativeAssetStatus,
+    CreativeAssetType,
+)
 from packages.database.src.models import GeneratedContent as GeneratedContentModel
-from packages.database.src.session import get_db_session
+from packages.database.src.session import async_session_factory, get_db_session
 
 from ..agents_registry import get_agent_class
 from ..auth.dependencies import get_optional_user, validate_company_access
@@ -605,3 +612,557 @@ async def generate_content(
     logger.info("content_persisted", company_id=str(company_id), count=len(results))
 
     return results
+
+
+# ============================================================================
+# Creative Assets (Phase 4 — Campaign Execution Pipeline)
+# ============================================================================
+
+
+class CreativeAssetResponse(BaseModel):
+    """Response schema for a creative asset."""
+
+    id: str
+    campaign_id: str
+    asset_type: str
+    status: str
+    name: str
+    content_html: str | None = None
+    image_url: str | None = None
+    image_prompt: str | None = None
+    copy_text: str | None = None
+    call_to_action: str | None = None
+    target_platform: str | None = None
+    target_persona: str | None = None
+    variant_label: str | None = None
+    parent_asset_id: str | None = None
+    approved_by: str | None = None
+    reviewed_at: str | None = None
+    published_at: str | None = None
+    external_post_id: str | None = None
+    impressions: int = 0
+    clicks: int = 0
+    engagements: int = 0
+    conversions: int = 0
+    created_at: str
+    updated_at: str | None = None
+
+
+class CreativeAssetUpdate(BaseModel):
+    """Request schema for updating a creative asset."""
+
+    name: str | None = None
+    copy_text: str | None = None
+    call_to_action: str | None = None
+    content_html: str | None = None
+    target_platform: str | None = None
+    target_persona: str | None = None
+
+
+class AssetApproveRequest(BaseModel):
+    """Request to approve a creative asset."""
+
+    approved_by: str = "user"
+
+
+class GenerateCreativeRequest(BaseModel):
+    """Request to generate creative assets for a campaign."""
+
+    asset_types: list[str] = Field(
+        default=["edm_html", "social_image"],
+        description="Types of assets to generate: edm_html, social_image, ad_banner",
+    )
+    platforms: list[str] = Field(
+        default=["linkedin", "email"],
+        description="Target platforms for social graphics",
+    )
+    tone: str = Field(default="professional", pattern="^(professional|conversational|bold)$")
+    generate_images: bool = Field(default=True, description="Generate DALL-E images for social/EDM")
+
+
+class CampaignLaunchRequest(BaseModel):
+    """Request to launch a campaign (activate + distribute)."""
+
+    schedule_social: bool = Field(default=True, description="Schedule social posts via Post Bridge")
+    enroll_leads: bool = Field(default=True, description="Enroll qualified leads in sequences")
+
+
+def _asset_to_response(asset: CreativeAsset) -> CreativeAssetResponse:
+    """Convert DB model to response."""
+    return CreativeAssetResponse(
+        id=str(asset.id),
+        campaign_id=str(asset.campaign_id),
+        asset_type=asset.asset_type.value if asset.asset_type else "",
+        status=asset.status.value if asset.status else "draft",
+        name=asset.name,
+        content_html=asset.content_html,
+        image_url=asset.image_url,
+        image_prompt=asset.image_prompt,
+        copy_text=asset.copy_text,
+        call_to_action=asset.call_to_action,
+        target_platform=asset.target_platform,
+        target_persona=asset.target_persona,
+        variant_label=asset.variant_label,
+        parent_asset_id=str(asset.parent_asset_id) if asset.parent_asset_id else None,
+        approved_by=asset.approved_by,
+        reviewed_at=asset.reviewed_at.isoformat() if asset.reviewed_at else None,
+        published_at=asset.published_at.isoformat() if asset.published_at else None,
+        external_post_id=asset.external_post_id,
+        impressions=asset.impressions,
+        clicks=asset.clicks,
+        engagements=asset.engagements,
+        conversions=asset.conversions,
+        created_at=asset.created_at.isoformat() if asset.created_at else "",
+        updated_at=asset.updated_at.isoformat() if asset.updated_at else None,
+    )
+
+
+@router.get(
+    "/{company_id}/campaigns/{campaign_id}/assets",
+    response_model=list[CreativeAssetResponse],
+)
+async def list_campaign_assets(
+    company_id: UUID,
+    campaign_id: UUID,
+    status: str | None = Query(default=None),
+    asset_type: str | None = Query(default=None),
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> list[CreativeAssetResponse]:
+    """List all creative assets for a campaign."""
+    await validate_company_access(company_id, current_user, db)
+
+    query = select(CreativeAsset).where(
+        CreativeAsset.campaign_id == campaign_id,
+        CreativeAsset.company_id == company_id,
+    )
+    if status:
+        query = query.where(CreativeAsset.status == CreativeAssetStatus(status))
+    if asset_type:
+        query = query.where(CreativeAsset.asset_type == CreativeAssetType(asset_type))
+
+    query = query.order_by(CreativeAsset.created_at.desc())
+    result = await db.execute(query)
+    assets = result.scalars().all()
+    return [_asset_to_response(a) for a in assets]
+
+
+@router.get(
+    "/{company_id}/campaigns/{campaign_id}/assets/{asset_id}",
+    response_model=CreativeAssetResponse,
+)
+async def get_campaign_asset(
+    company_id: UUID,
+    campaign_id: UUID,
+    asset_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> CreativeAssetResponse:
+    """Get a specific creative asset."""
+    await validate_company_access(company_id, current_user, db)
+    asset = await db.get(CreativeAsset, asset_id)
+    if not asset or asset.campaign_id != campaign_id or asset.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return _asset_to_response(asset)
+
+
+@router.patch(
+    "/{company_id}/campaigns/{campaign_id}/assets/{asset_id}",
+    response_model=CreativeAssetResponse,
+)
+async def update_campaign_asset(
+    company_id: UUID,
+    campaign_id: UUID,
+    asset_id: UUID,
+    data: CreativeAssetUpdate,
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> CreativeAssetResponse:
+    """Update a creative asset (edit copy, CTA, etc.)."""
+    await validate_company_access(company_id, current_user, db)
+    asset = await db.get(CreativeAsset, asset_id)
+    if not asset or asset.campaign_id != campaign_id or asset.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    update_data = data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(asset, field, value)
+
+    # Editing resets approval
+    if update_data and asset.status == CreativeAssetStatus.APPROVED:
+        asset.status = CreativeAssetStatus.PENDING_REVIEW
+        asset.approved_by = None
+        asset.reviewed_at = None
+
+    await db.flush()
+    logger.info("creative_asset_updated", asset_id=str(asset_id))
+    return _asset_to_response(asset)
+
+
+@router.post(
+    "/{company_id}/campaigns/{campaign_id}/assets/{asset_id}/approve",
+    response_model=CreativeAssetResponse,
+)
+async def approve_campaign_asset(
+    company_id: UUID,
+    campaign_id: UUID,
+    asset_id: UUID,
+    body: AssetApproveRequest,
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> CreativeAssetResponse:
+    """Approve a creative asset for publishing."""
+    await validate_company_access(company_id, current_user, db)
+    asset = await db.get(CreativeAsset, asset_id)
+    if not asset or asset.campaign_id != campaign_id or asset.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    if asset.status not in (CreativeAssetStatus.DRAFT, CreativeAssetStatus.PENDING_REVIEW):
+        raise HTTPException(status_code=400, detail=f"Asset cannot be approved (status: {asset.status.value})")
+
+    asset.status = CreativeAssetStatus.APPROVED
+    asset.approved_by = body.approved_by
+    asset.reviewed_at = datetime.now(UTC)
+    await db.commit()
+
+    logger.info("creative_asset_approved", asset_id=str(asset_id), approved_by=body.approved_by)
+    return _asset_to_response(asset)
+
+
+@router.post(
+    "/{company_id}/campaigns/{campaign_id}/assets/{asset_id}/reject",
+)
+async def reject_campaign_asset(
+    company_id: UUID,
+    campaign_id: UUID,
+    asset_id: UUID,
+    reason: str = "",
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Reject a creative asset."""
+    await validate_company_access(company_id, current_user, db)
+    asset = await db.get(CreativeAsset, asset_id)
+    if not asset or asset.campaign_id != campaign_id or asset.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    asset.status = CreativeAssetStatus.REJECTED
+    asset.reviewed_at = datetime.now(UTC)
+    await db.commit()
+
+    logger.info("creative_asset_rejected", asset_id=str(asset_id), reason=reason)
+    return {"status": "rejected", "id": str(asset_id)}
+
+
+@router.delete("/{company_id}/campaigns/{campaign_id}/assets/{asset_id}", status_code=204)
+async def delete_campaign_asset(
+    company_id: UUID,
+    campaign_id: UUID,
+    asset_id: UUID,
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> None:
+    """Delete a creative asset."""
+    await validate_company_access(company_id, current_user, db)
+    asset = await db.get(CreativeAsset, asset_id)
+    if not asset or asset.campaign_id != campaign_id or asset.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    await db.delete(asset)
+    await db.flush()
+    logger.info("creative_asset_deleted", asset_id=str(asset_id))
+
+
+@router.post("/{company_id}/campaigns/{campaign_id}/generate-creative")
+async def generate_creative(
+    company_id: UUID,
+    campaign_id: UUID,
+    request: GenerateCreativeRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Generate creative assets (EDM HTML + social graphics) for a campaign.
+
+    Triggers EDM Designer and/or Graphic Designer agents in the background.
+    Assets are persisted as CreativeAsset rows with status=PENDING_REVIEW.
+    """
+    await validate_company_access(company_id, current_user, db)
+    campaign = await db.get(Campaign, campaign_id)
+    if not campaign or campaign.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    company = await db.get(Company, company_id)
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    logger.info(
+        "creative_generation_requested",
+        campaign_id=str(campaign_id),
+        asset_types=request.asset_types,
+        platforms=request.platforms,
+    )
+
+    # Build context for agents
+    agent_context = {
+        "company_id": str(company_id),
+        "campaign_id": str(campaign_id),
+        "company_name": company.name,
+        "industry": company.industry or "Technology",
+        "description": company.description or "",
+        "value_proposition": (campaign.value_propositions or [""])[0] if campaign.value_propositions else "",
+        "campaign_name": campaign.name,
+        "campaign_goal": campaign.objective or "lead_gen",
+        "personas": campaign.target_personas or [],
+        "channels": campaign.channels or [],
+        "key_messages": campaign.key_messages or [],
+        "call_to_action": campaign.call_to_action or "",
+        "tone": request.tone,
+        "platforms": request.platforms,
+        "generate_images": request.generate_images,
+    }
+
+    # Launch agents in background
+    if "edm_html" in request.asset_types:
+        background_tasks.add_task(
+            _run_creative_agent,
+            agent_name="edm-designer",
+            company_id=company_id,
+            campaign_id=campaign_id,
+            context=agent_context,
+        )
+
+    if any(t in request.asset_types for t in ("social_image", "ad_banner")):
+        background_tasks.add_task(
+            _run_creative_agent,
+            agent_name="graphic-designer",
+            company_id=company_id,
+            campaign_id=campaign_id,
+            context=agent_context,
+        )
+
+    return {
+        "status": "generating",
+        "campaign_id": str(campaign_id),
+        "asset_types": request.asset_types,
+        "message": "Creative agents running in background. Poll GET /assets for results.",
+    }
+
+
+async def _run_creative_agent(
+    agent_name: str,
+    company_id: UUID,
+    campaign_id: UUID,
+    context: dict,
+) -> None:
+    """Background task: run a creative agent and persist its output as CreativeAssets."""
+    try:
+        agent_class = get_agent_class(agent_name)
+        if not agent_class:
+            logger.warning("creative_agent_not_found", agent_name=agent_name)
+            return
+
+        agent = agent_class()
+        result = await agent.run(
+            task=f"Generate creative for campaign: {context.get('campaign_name', '')}",
+            context=context,
+        )
+
+        # Persist results as CreativeAsset rows
+        async with async_session_factory() as db:
+            if agent_name == "edm-designer" and hasattr(result, "html_output"):
+                asset = CreativeAsset(
+                    campaign_id=campaign_id,
+                    company_id=company_id,
+                    asset_type=CreativeAssetType.EDM_HTML,
+                    status=CreativeAssetStatus.PENDING_REVIEW,
+                    name=f"EDM: {result.subject_line}" if hasattr(result, "subject_line") else "EDM Design",
+                    content_html=result.html_output,
+                    image_url=getattr(result, "hero_image_url", None),
+                    image_prompt=None,
+                    copy_text=result.subject_line if hasattr(result, "subject_line") else None,
+                    call_to_action=None,
+                    target_platform="email",
+                    target_persona=getattr(result, "target_persona", None),
+                    variant_label=getattr(result, "variant_label", "A"),
+                )
+                db.add(asset)
+
+            elif agent_name == "graphic-designer" and hasattr(result, "creatives"):
+                for creative in result.creatives:
+                    platform = getattr(creative, "platform", "unknown")
+                    asset = CreativeAsset(
+                        campaign_id=campaign_id,
+                        company_id=company_id,
+                        asset_type=CreativeAssetType.SOCIAL_IMAGE,
+                        status=CreativeAssetStatus.PENDING_REVIEW,
+                        name=f"Social: {platform}",
+                        content_html=None,
+                        image_url=getattr(creative, "image_url", None) or getattr(creative, "image_local_path", None),
+                        image_prompt=getattr(creative, "image_prompt", None),
+                        copy_text=getattr(creative, "copy_text", None),
+                        call_to_action=getattr(creative, "call_to_action", None),
+                        target_platform=platform,
+                        target_persona=None,
+                        variant_label="A",
+                    )
+                    db.add(asset)
+
+            await db.commit()
+            logger.info(
+                "creative_assets_persisted",
+                agent=agent_name,
+                campaign_id=str(campaign_id),
+            )
+
+    except Exception as e:
+        logger.error(
+            "creative_agent_failed",
+            agent_name=agent_name,
+            campaign_id=str(campaign_id),
+            error=str(e),
+        )
+
+
+@router.post("/{company_id}/campaigns/{campaign_id}/launch")
+async def launch_campaign(
+    company_id: UUID,
+    campaign_id: UUID,
+    request: CampaignLaunchRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Launch a campaign: activate it and distribute approved assets.
+
+    Validates all assets are approved, sets campaign to ACTIVE,
+    and triggers Social Publisher for social assets.
+    """
+    await validate_company_access(company_id, current_user, db)
+    campaign = await db.get(Campaign, campaign_id)
+    if not campaign or campaign.company_id != company_id:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    # Check for approved assets
+    result = await db.execute(
+        select(CreativeAsset).where(
+            CreativeAsset.campaign_id == campaign_id,
+            CreativeAsset.company_id == company_id,
+        )
+    )
+    all_assets = result.scalars().all()
+
+    approved = [a for a in all_assets if a.status == CreativeAssetStatus.APPROVED]
+    pending = [a for a in all_assets if a.status in (CreativeAssetStatus.DRAFT, CreativeAssetStatus.PENDING_REVIEW)]
+
+    if not approved and not pending:
+        raise HTTPException(
+            status_code=400,
+            detail="No assets found. Generate creative first with POST /generate-creative",
+        )
+
+    if pending:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{len(pending)} asset(s) still pending review. Approve all assets before launch.",
+        )
+
+    # Activate campaign
+    campaign.status = CampaignStatus.ACTIVE
+    if not campaign.start_date:
+        campaign.start_date = datetime.now(UTC)
+    await db.commit()
+
+    # Distribute social assets via Social Publisher
+    if request.schedule_social:
+        social_assets = [
+            a for a in approved
+            if a.asset_type in (CreativeAssetType.SOCIAL_IMAGE, CreativeAssetType.AD_BANNER)
+        ]
+        if social_assets:
+            background_tasks.add_task(
+                _run_social_publisher,
+                company_id=company_id,
+                campaign_id=campaign_id,
+                campaign_name=campaign.name,
+                assets=social_assets,
+            )
+
+    logger.info(
+        "campaign_launched",
+        campaign_id=str(campaign_id),
+        approved_assets=len(approved),
+        social_scheduled=request.schedule_social,
+    )
+
+    return {
+        "status": "launched",
+        "campaign_id": str(campaign_id),
+        "approved_assets": len(approved),
+        "social_posts_queued": len([a for a in approved if a.asset_type != CreativeAssetType.EDM_HTML]),
+    }
+
+
+async def _run_social_publisher(
+    company_id: UUID,
+    campaign_id: UUID,
+    campaign_name: str,
+    assets: list[CreativeAsset],
+) -> None:
+    """Background: publish approved social assets via Social Publisher agent."""
+    try:
+        agent_class = get_agent_class("social-publisher")
+        if not agent_class:
+            logger.warning("social_publisher_not_found")
+            return
+
+        approved_assets = [
+            {
+                "asset_id": str(a.id),
+                "platform": a.target_platform or "linkedin",
+                "copy_text": a.copy_text or "",
+                "image_url": a.image_url or "",
+                "call_to_action": a.call_to_action or "",
+            }
+            for a in assets
+        ]
+
+        agent = agent_class()
+        result = await agent.run(
+            task=f"Publish social assets for campaign: {campaign_name}",
+            context={
+                "company_id": str(company_id),
+                "campaign_id": str(campaign_id),
+                "campaign_name": campaign_name,
+                "approved_assets": approved_assets,
+            },
+        )
+
+        # Update asset records with external post IDs
+        if result and hasattr(result, "posts"):
+            async with async_session_factory() as db:
+                for post in result.posts:
+                    if post.post_id and post.status == "published":
+                        # Find matching asset by platform
+                        for a in assets:
+                            if (a.target_platform or "").lower() == post.platform.lower():
+                                asset = await db.get(CreativeAsset, a.id)
+                                if asset:
+                                    asset.status = CreativeAssetStatus.PUBLISHED
+                                    asset.external_post_id = post.post_id
+                                    asset.published_at = datetime.now(UTC)
+                                break
+                await db.commit()
+
+        logger.info(
+            "social_publish_complete",
+            campaign_id=str(campaign_id),
+            total_published=getattr(result, "total_published", 0),
+        )
+
+    except Exception as e:
+        logger.error(
+            "social_publisher_failed",
+            campaign_id=str(campaign_id),
+            error=str(e),
+        )

@@ -37,6 +37,28 @@ from packages.database.src.models import (
 
 logger = logging.getLogger(__name__)
 
+# Stop words for bigram extraction in _build_key_trends
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "from", "as", "is", "was", "are", "were", "be",
+    "been", "being", "have", "has", "had", "do", "does", "did", "will",
+    "would", "could", "should", "may", "might", "shall", "can", "need",
+    "it", "its", "this", "that", "these", "those", "not", "no", "nor",
+    "so", "if", "then", "than", "too", "very", "just", "about", "above",
+    "after", "before", "between", "into", "through", "during", "over",
+    "under", "again", "further", "once", "here", "there", "when", "where",
+    "how", "all", "each", "every", "both", "few", "more", "most", "other",
+    "some", "such", "only", "own", "same", "also", "new", "says", "said",
+    "one", "two", "first", "last", "up", "out", "now", "s", "t", "ve",
+})
+
+
+def _tokenize_title(title: str) -> list[str]:
+    """Lowercase, strip non-alpha, remove stop words."""
+    tokens = re.findall(r"[a-z]+", title.lower())
+    return [t for t in tokens if t not in _STOP_WORDS and len(t) > 1]
+
+
 # Regex strips suffixes like "Inc.", "Ltd", "Pte", "Class A/C", etc.
 _NAME_STRIP_RE = re.compile(
     r"\s*(Inc\.?|Ltd\.?|Pte\.?|Corp\.?|Group|Holdings?|Class\s+[A-Z])\s*",
@@ -450,7 +472,12 @@ class VerticalIntelligenceSynthesizer:
         }
 
     async def _build_key_trends(self, vertical: MarketVertical) -> list[dict[str, Any]]:
-        """Extract key trends from recent articles classified to this vertical."""
+        """Extract key trends from recent articles using bigram-frequency clustering.
+
+        Instead of grouping by signal_type (which produces generic names like
+        "general"), this extracts bigrams from article titles, ranks by frequency,
+        and uses the top bigram as the trend name.
+        """
         cutoff = datetime.now(UTC) - timedelta(days=30)
         articles_stmt = (
             select(MarketArticle)
@@ -467,22 +494,50 @@ class VerticalIntelligenceSynthesizer:
         if not articles:
             return []
 
-        # Group by signal_type and count
-        type_counts: dict[str, list[str]] = {}
-        for article in articles:
-            signal_type = article.signal_type or "general"
-            type_counts.setdefault(signal_type, []).append(article.title)
+        # Build bigram → article index sets
+        bigram_articles: dict[str, set[int]] = {}
+        article_titles: list[str] = []
+        for idx, article in enumerate(articles):
+            article_titles.append(article.title)
+            tokens = _tokenize_title(article.title)
+            for i in range(len(tokens) - 1):
+                bg = f"{tokens[i]} {tokens[i + 1]}"
+                bigram_articles.setdefault(bg, set()).add(idx)
 
+        # Rank bigrams by article count (descending)
+        ranked = sorted(bigram_articles.items(), key=lambda x: -len(x[1]))
+
+        # Greedily pick top bigrams, skipping those with >50% overlap
         trends: list[dict[str, Any]] = []
-        for signal_type, titles in sorted(type_counts.items(), key=lambda x: -len(x[1])):
+        claimed: set[int] = set()
+        for bigram, article_idxs in ranked:
+            unclaimed = article_idxs - claimed
+            if len(unclaimed) < 2:
+                continue
+            claimed |= article_idxs
+            evidence = [article_titles[i] for i in sorted(article_idxs)[:3]]
+            count = len(article_idxs)
             trends.append({
-                "trend": signal_type,
-                "evidence": titles[:3],  # Top 3 article titles as evidence
-                "source_count": len(titles),
-                "impact": "high" if len(titles) >= 5 else "medium" if len(titles) >= 2 else "low",
+                "trend": f"{bigram.title()} activity",
+                "evidence": evidence,
+                "source_count": count,
+                "impact": "high" if count >= 5 else "medium" if count >= 2 else "low",
+            })
+            if len(trends) >= 9:
+                break
+
+        # Fallback bucket for unclustered articles
+        unclustered = set(range(len(articles))) - claimed
+        if unclustered:
+            evidence = [article_titles[i] for i in sorted(unclustered)[:3]]
+            trends.append({
+                "trend": "Other notable developments",
+                "evidence": evidence,
+                "source_count": len(unclustered),
+                "impact": "medium" if len(unclustered) >= 2 else "low",
             })
 
-        return trends[:10]  # Top 10 trends
+        return trends[:10]
 
     async def _build_competitive_dynamics(self, vertical: MarketVertical) -> dict[str, Any]:
         """Identify leaders, challengers, and movers in the vertical."""

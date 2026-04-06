@@ -1,45 +1,39 @@
 /**
- * TodayPage — Daily Strategic Briefing
+ * TodayPage — Executive Intelligence Brief
  *
- * The digital equivalent of a chief of staff presenting the morning intelligence
- * report. Every element follows the three-layer Intelligence Framework:
- *   1. Intelligence — the observed signal or data point
- *   2. Strategic Implication — what it means for the client's business
- *   3. Recommended Action — what the bench is doing or what needs approval
+ * One-screen layout a CEO reads in 30 seconds:
+ *   1. Action bar — what needs deciding right now (top, prominent)
+ *   2. Market pulse — one visual card, one insight
+ *   3. Top opportunities — 3 insight rows, each one line + action
+ *   4. Pipeline + performance — funnel bar + conversion chain
  *
- * All data is fetched in parallel. Each section handles its own empty state.
- * Failures are caught individually so a single failing endpoint never breaks
- * the whole page.
+ * Design: visual indicators first (bars, dots, arrows, numbers),
+ * text only as annotation. No scrolling needed on desktop.
  */
 
 import { useState, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowRight,
-  BarChart3,
   Bell,
-  Crosshair,
-  DollarSign,
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
-  Globe,
-  Mail,
-  MessageSquare,
-  Radio,
-  Rocket,
-  Shield,
-  Target,
+  TrendingDown,
   TrendingUp,
-  Users,
   Zap,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useCompany, useCompanyId } from '../context/CompanyContext';
+import { useCompanyId } from '../context/CompanyContext';
 import { apiClient } from '../api/client';
-import { fetchVerticalIntelligence, type VerticalIntelligenceData } from '../api/verticalIntelligence';
-import { AgentTeamRoster } from '../components/AgentTeamRoster';
+import {
+  fetchVerticalIntelligence,
+  type VerticalIntelligenceData,
+} from '../api/verticalIntelligence';
+import { SegmentedBar } from '../components/common/MiniCharts';
 
 // ============================================================================
-// Types — aligned with backend response schemas
+// Types
 // ============================================================================
 
 interface PercentileData {
@@ -73,6 +67,7 @@ interface LeaderLaggard {
 interface VerticalSummary {
   vertical_slug: string | null;
   vertical_name: string | null;
+  industry_category: string | null;
   listed_companies_count: number;
   market_cap_total_sgd: number | null;
   benchmarks: BenchmarkPeriod[];
@@ -155,250 +150,287 @@ interface BriefingStatus {
 // Helpers
 // ============================================================================
 
-function getGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
-}
-
-function getUserFirstName(): string | null {
-  const fullName = localStorage.getItem('gtm_user_name');
-  if (!fullName) return null;
-  const first = fullName.trim().split(' ')[0];
-  return first || null;
-}
-
-const ACRONYMS = new Set(['AI', 'SaaS', 'CRM', 'API', 'GTM', 'SME', 'CEO', 'CFO', 'CTO', 'CMO', 'PSG', 'PDPA', 'SG', 'SEA', 'APAC', 'HQ', 'ROI', 'KPI']);
-
-function titleCase(name: string): string {
-  return name
-    .split(' ')
-    .map((word) => {
-      // Preserve words already in ALL-CAPS (e.g. "AI" passed as-is)
-      if (word.length <= 4 && word === word.toUpperCase() && word.length > 1) return word;
-      // Check if this word is a known acronym (case-insensitive)
-      const upper = word.toUpperCase();
-      for (const acr of ACRONYMS) {
-        if (upper === acr) return acr;
-      }
-      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    })
-    .join(' ');
-}
-
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return '';
   const diff = Date.now() - new Date(dateStr).getTime();
+  if (diff < 0) return 'just now';
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
-function formatPct(value: number | null | undefined): string {
-  if (value == null) return '--';
-  return `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`;
-}
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const SIGNAL_TYPE_LABELS: Record<string, string> = {
-  competitor_news: 'Competitor',
-  acquisition: 'Acquisition',
-  product_launch: 'Product Launch',
-  partnership: 'Partnership',
-  funding: 'Funding',
-  market_trend: 'Market Trend',
-  regulation: 'Regulatory',
-  expansion: 'Expansion',
-  general_news: 'Industry',
-  hiring: 'Hiring',
-  layoff: 'Restructuring',
+const URGENCY_COLORS: Record<string, { dot: string; bg: string; text: string }> = {
+  immediate: { dot: 'bg-red-400', bg: 'bg-red-500/10', text: 'text-red-400' },
+  this_week: { dot: 'bg-amber-400', bg: 'bg-amber-500/10', text: 'text-amber-400' },
+  this_month: { dot: 'bg-blue-400', bg: 'bg-blue-500/10', text: 'text-blue-400' },
+  monitor: { dot: 'bg-white/30', bg: 'bg-white/5', text: 'text-white/50' },
 };
 
-const URGENCY_BADGE: Record<string, string> = {
-  immediate: 'text-red-400 bg-red-500/10 border-red-500/20',
-  this_week: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-  this_month: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-  monitor: 'text-white/40 bg-white/5 border-white/10',
-};
-
-const PIPELINE_STATUSES = ['new', 'qualified', 'contacted', 'converted', 'lost'] as const;
-
-const STATUS_COLORS: Record<string, string> = {
-  new: 'bg-blue-500',
-  qualified: 'bg-emerald-500',
-  contacted: 'bg-amber-500',
-  converted: 'bg-purple-500',
-  lost: 'bg-white/20',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  new: 'New',
-  qualified: 'Qualified',
-  contacted: 'Contacted',
-  converted: 'Converted',
-  lost: 'Lost',
+const PRIORITY_DOT: Record<string, string> = {
+  high: 'bg-red-400',
+  medium: 'bg-amber-400',
+  low: 'bg-blue-400',
 };
 
 // ============================================================================
-// Section Header
+// 1. ACTION BAR — Decisions needed, always on top
 // ============================================================================
 
-function SectionHeader({
-  title,
-  action,
-  onAction,
+function ActionBar({
+  pendingApprovals,
+  urgentSignalCount,
+  topSignal,
 }: {
-  title: string;
-  action?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/5">
-      <p className="text-[10px] font-semibold uppercase tracking-widest text-white/30">
-        {title}
-      </p>
-      {action && onAction && (
-        <button
-          onClick={onAction}
-          className="text-xs text-white/30 hover:text-white/60 transition-colors flex items-center gap-1"
-        >
-          {action}
-          <ArrowRight className="w-3 h-3" />
-        </button>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
-// Signal Row — three-layer intelligence pattern
-// ============================================================================
-
-function signalIcon(type: string) {
-  const cls = 'w-4 h-4';
-  switch (type) {
-    case 'competitor_news':
-    case 'acquisition':
-      return <Crosshair className={cls} />;
-    case 'regulation':
-      return <Shield className={cls} />;
-    case 'funding':
-      return <DollarSign className={cls} />;
-    case 'product_launch':
-      return <Rocket className={cls} />;
-    case 'market_trend':
-    case 'expansion':
-      return <TrendingUp className={cls} />;
-    case 'partnership':
-      return <Globe className={cls} />;
-    default:
-      return <Radio className={cls} />;
-  }
-}
-
-function SignalRow({ signal }: { signal: MarketSignal }) {
-  const badgeColor =
-    URGENCY_BADGE[signal.urgency] ?? URGENCY_BADGE.monitor;
-  const typeLabel =
-    SIGNAL_TYPE_LABELS[signal.signal_type] ??
-    signal.signal_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-
-  return (
-    <div className="flex gap-3 py-3.5 border-b border-white/5 last:border-0">
-      {/* Icon */}
-      <div
-        className={`mt-0.5 p-2 rounded-lg flex-shrink-0 ${badgeColor
-          .split(' ')
-          .slice(1)
-          .join(' ')}`}
-      >
-        <span className={badgeColor.split(' ')[0]}>
-          {signalIcon(signal.signal_type)}
-        </span>
-      </div>
-
-      {/* Body — three layers */}
-      <div className="flex-1 min-w-0">
-        {/* Layer 1: Intelligence */}
-        <div className="flex items-center gap-2 flex-wrap mb-0.5">
-          <span
-            className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${badgeColor}`}
-          >
-            {typeLabel}
-          </span>
-          {signal.source && (
-            <span className="text-[10px] text-white/30">{signal.source}</span>
-          )}
-        </div>
-        <p className="text-sm font-medium text-white leading-snug line-clamp-2">
-          {signal.headline}
-        </p>
-
-        {/* Layer 2: Strategic Implication */}
-        {signal.summary && (
-          <p className="text-xs text-white/50 mt-0.5 leading-relaxed line-clamp-2">
-            {signal.summary}
-          </p>
-        )}
-
-        {/* Layer 3: Recommended Action */}
-        {signal.recommended_action && (
-          <p className="text-xs text-purple-400 mt-1 leading-snug">
-            &rarr; {signal.recommended_action}
-          </p>
-        )}
-      </div>
-
-      {/* Right: time + external link */}
-      <div className="flex flex-col items-end gap-1 flex-shrink-0">
-        <span className="text-[10px] text-white/30">
-          {timeAgo(signal.created_at)}
-        </span>
-        {signal.source_url && (
-          <a
-            href={signal.source_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="text-white/20 hover:text-white/50 transition-colors"
-          >
-            <ExternalLink className="w-3 h-3" />
-          </a>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// Section: Industry & Market Intelligence
-// ============================================================================
-
-function IndustrySection({
-  industryData,
-  verticalData,
-}: {
-  industryData: IndustrySignalsData | null;
-  verticalData: VerticalSummary | null;
+  pendingApprovals: number;
+  urgentSignalCount: number;
+  topSignal: MarketSignal | null;
 }) {
   const navigate = useNavigate();
-  const signals = industryData?.signals ?? [];
-  const articles = industryData?.articles ?? [];
 
-  // Find latest annual benchmark for vertical stats
-  const annualBenchmark = verticalData?.benchmarks.find(
-    (b) => b.period_type === 'annual'
+  if (pendingApprovals === 0 && urgentSignalCount === 0) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex flex-wrap gap-2"
+    >
+      {pendingApprovals > 0 && (
+        <button
+          onClick={() => navigate('/approvals')}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition-all group"
+        >
+          <Bell className="w-4 h-4 text-amber-400" />
+          <span className="text-sm font-medium text-amber-400">
+            {pendingApprovals} email{pendingApprovals !== 1 ? 's' : ''} to approve
+          </span>
+          <ArrowRight className="w-3.5 h-3.5 text-amber-400/50 group-hover:translate-x-0.5 transition-transform" />
+        </button>
+      )}
+      {topSignal && (
+        <button
+          onClick={() =>
+            navigate(`/campaigns?signal=${topSignal.id}&playbook=signal_triggered&headline=${encodeURIComponent(topSignal.headline)}`)
+          }
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 transition-all group"
+        >
+          <Zap className="w-4 h-4 text-red-400" />
+          <span className="text-sm font-medium text-red-400 truncate max-w-[260px]">
+            {topSignal.headline}
+          </span>
+          <ArrowRight className="w-3.5 h-3.5 text-red-400/50 group-hover:translate-x-0.5 transition-transform" />
+        </button>
+      )}
+    </motion.div>
   );
+}
 
-  const isEmpty = signals.length === 0 && articles.length === 0 && !annualBenchmark;
+// ============================================================================
+// 2. MARKET PULSE — One card, visual bar + insight sentence
+// ============================================================================
+
+function MarketPulseCard({
+  verticalData,
+  intelligence,
+}: {
+  verticalData: VerticalSummary | null;
+  intelligence: VerticalIntelligenceData | null;
+}) {
+  const navigate = useNavigate();
+  const fp = intelligence?.financial_pulse;
+  const annualBenchmark = verticalData?.benchmarks.find((b) => b.period_type === 'annual');
+  const verticalName = verticalData?.vertical_name ?? intelligence?.vertical_name;
+
+  if (!fp && !annualBenchmark && !verticalName) return null;
+
+  const sgaPct = fp?.sga_median != null ? fp.sga_median * 100 : null;
+  const growth = annualBenchmark?.revenue_growth_yoy?.p50;
+  const marginDir = fp?.margin_compression_or_expansion;
+
+  // One-sentence headline
+  let headline = '';
+  if (sgaPct != null) {
+    const trend = fp?.sga_trend === 'increasing' ? 'rising' : fp?.sga_trend === 'decreasing' ? 'falling' : 'steady';
+    headline = `Clients spend ${sgaPct.toFixed(0)}% on GTM — ${trend}`;
+  } else if (growth != null) {
+    headline = `Sector growing at ${growth.toFixed(1)}% YoY`;
+  }
+
+  // Sub-indicators
+  const indicators: { label: string; value: string; trend?: 'up' | 'down' | 'neutral' }[] = [];
+
+  if (growth != null) {
+    indicators.push({
+      label: 'Growth',
+      value: `${growth >= 0 ? '+' : ''}${growth.toFixed(1)}%`,
+      trend: growth > 0 ? 'up' : growth < 0 ? 'down' : 'neutral',
+    });
+  }
+  if (sgaPct != null) {
+    indicators.push({
+      label: 'GTM spend',
+      value: `${sgaPct.toFixed(0)}%`,
+      trend: fp?.sga_trend === 'increasing' ? 'up' : fp?.sga_trend === 'decreasing' ? 'down' : 'neutral',
+    });
+  }
+  if (marginDir) {
+    indicators.push({
+      label: 'Margins',
+      value: marginDir === 'compressing' ? 'Compressing' : 'Expanding',
+      trend: marginDir === 'expanding' ? 'up' : 'down',
+    });
+  }
+
+  const companyCount = verticalData?.listed_companies_count ?? 0;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.05 }}
+      className="glass-card rounded-xl border border-white/10 p-5 cursor-pointer hover:border-white/15 transition-colors"
+      onClick={() => navigate('/insights?tab=industry')}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/30">
+          {verticalName ?? 'Market Pulse'}
+          {companyCount > 0 && <span className="text-white/15 ml-2">{companyCount} companies</span>}
+        </p>
+        <ArrowRight className="w-3 h-3 text-white/20" />
+      </div>
+
+      {/* Headline */}
+      {headline && (
+        <p className="text-base font-medium text-white mb-3">{headline}</p>
+      )}
+
+      {/* Visual indicator bars */}
+      {indicators.length > 0 && (
+        <div className="grid grid-cols-3 gap-4">
+          {indicators.map((ind) => (
+            <div key={ind.label}>
+              <div className="flex items-center gap-1.5 mb-1">
+                {ind.trend === 'up' && <TrendingUp className="w-3 h-3 text-emerald-400" />}
+                {ind.trend === 'down' && <TrendingDown className="w-3 h-3 text-red-400" />}
+                <span className={`text-sm font-semibold tabular-nums ${
+                  ind.trend === 'up' ? 'text-emerald-400' : ind.trend === 'down' ? 'text-red-400' : 'text-white'
+                }`}>
+                  {ind.value}
+                </span>
+              </div>
+              <p className="text-[10px] text-white/30">{ind.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* SGA visual bar — how much clients spend on GTM */}
+      {sgaPct != null && (
+        <div className="mt-3 pt-3 border-t border-white/5">
+          <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-purple-500/60 to-purple-400/80 transition-all duration-700"
+              style={{ width: `${Math.min(sgaPct * 2.5, 100)}%` }}
+            />
+          </div>
+          <div className="flex justify-between mt-1">
+            <span className="text-[10px] text-white/20">0%</span>
+            <span className="text-[10px] text-white/20">40% of revenue</span>
+          </div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+// ============================================================================
+// 3. TOP OPPORTUNITIES — Max 4 rows, visual priority, one line each
+// ============================================================================
+
+function OpportunitiesCard({
+  intelligence,
+  industrySignals,
+  competitorSignals,
+}: {
+  intelligence: VerticalIntelligenceData | null;
+  industrySignals: MarketSignal[];
+  competitorSignals: MarketSignal[];
+}) {
+  const navigate = useNavigate();
+  const implications = intelligence?.gtm_implications ?? [];
+  const regulations = intelligence?.regulatory_environment ?? [];
+
+  // Merge all opportunities into a single ranked list
+  type OpportunityRow = {
+    id: string;
+    dot: string;
+    text: string;
+    action?: string;
+    actionUrl?: string;
+    time?: string;
+    sourceUrl?: string;
+  };
+
+  const rows: OpportunityRow[] = [];
+
+  // GTM implications (high priority first)
+  const sorted = implications.slice().sort((a, b) => {
+    const order: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    return (order[a.priority ?? 'medium'] ?? 1) - (order[b.priority ?? 'medium'] ?? 1);
+  });
+  sorted.slice(0, 2).forEach((impl, i) => {
+    rows.push({
+      id: `impl-${i}`,
+      dot: PRIORITY_DOT[impl.priority ?? 'medium'] ?? PRIORITY_DOT.medium,
+      text: impl.insight,
+      action: impl.recommended_action ?? undefined,
+    });
+  });
+
+  // Top competitor signal
+  if (competitorSignals.length > 0) {
+    const s = competitorSignals[0];
+    rows.push({
+      id: `comp-${s.id}`,
+      dot: URGENCY_COLORS[s.urgency]?.dot ?? 'bg-white/30',
+      text: s.headline,
+      action: s.recommended_action ?? undefined,
+      time: timeAgo(s.created_at),
+      sourceUrl: s.source_url ?? undefined,
+    });
+  }
+
+  // Top industry signal (if different from implications)
+  if (industrySignals.length > 0 && rows.length < 4) {
+    const s = industrySignals[0];
+    rows.push({
+      id: `ind-${s.id}`,
+      dot: URGENCY_COLORS[s.urgency]?.dot ?? 'bg-white/30',
+      text: s.headline,
+      action: s.recommended_action ?? undefined,
+      time: timeAgo(s.created_at),
+      sourceUrl: s.source_url ?? undefined,
+    });
+  }
+
+  // PSG grant / regulation (if any)
+  const grant = regulations.find(
+    (r) => r.source?.toLowerCase().includes('psg') || r.title.toLowerCase().includes('grant'),
+  );
+  if (grant && rows.length < 5) {
+    rows.push({
+      id: 'grant',
+      dot: 'bg-emerald-400',
+      text: grant.title,
+      action: grant.impact ?? undefined,
+    });
+  }
+
+  if (rows.length === 0) return null;
 
   return (
     <motion.div
@@ -407,116 +439,115 @@ function IndustrySection({
       transition={{ delay: 0.1 }}
       className="glass-card rounded-xl border border-white/10"
     >
-      <SectionHeader
-        title="Industry & Market"
-        action="View all"
-        onAction={() => navigate('/insights')}
-      />
+      <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/5">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/30">
+          Opportunities
+        </p>
+        <button
+          onClick={() => navigate('/insights')}
+          className="text-xs text-white/30 hover:text-white/60 transition-colors flex items-center gap-1"
+        >
+          All signals <ArrowRight className="w-3 h-3" />
+        </button>
+      </div>
       <div className="px-5 pb-4">
-        {isEmpty ? (
-          <div className="py-6 text-center">
-            <Radio className="w-5 h-5 text-white/20 mx-auto mb-2" />
-            <p className="text-sm text-white/40">
-              Market Intelligence scans 142 sources daily.
-            </p>
-            <p className="text-xs text-white/25 mt-1">
-              Your first briefing arrives with your initial analysis.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Signals */}
-            {signals.slice(0, 4).map((s) => (
-              <SignalRow key={s.id} signal={s} />
-            ))}
-
-            {/* Market articles */}
-            {articles.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-white/5">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-white/20 mb-2">
-                  Recent coverage
-                </p>
-                <div className="space-y-2">
-                  {articles.slice(0, 3).map((a) => (
-                    <div key={a.id} className="flex items-start gap-2">
-                      <span className="w-1 h-1 rounded-full bg-white/20 mt-2 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        {a.source_url ? (
-                          <a
-                            href={a.source_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-white/60 hover:text-white/80 transition-colors line-clamp-1"
-                          >
-                            {a.title}
-                          </a>
-                        ) : (
-                          <p className="text-xs text-white/60 line-clamp-1">{a.title}</p>
-                        )}
-                        <span className="text-[10px] text-white/25">
-                          {a.source_name ?? 'Market article'}
-                          {a.published_at ? ` \u00b7 ${timeAgo(a.published_at)}` : ''}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Vertical benchmark */}
-            {annualBenchmark && verticalData?.vertical_name && (
-              <div className="mt-3 pt-3 border-t border-white/5">
-                <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-                  <span className="text-xs text-white/40">
-                    Your vertical ({verticalData.vertical_name}):
-                  </span>
-                  {annualBenchmark.revenue_growth_yoy?.p50 != null && (
-                    <span className="text-xs">
-                      <span className="text-white/50">Median revenue growth</span>{' '}
-                      <span className="text-emerald-400 font-medium">
-                        {formatPct(annualBenchmark.revenue_growth_yoy.p50)}
-                      </span>
-                    </span>
-                  )}
-                  {annualBenchmark.sga_to_revenue?.p50 != null && (
-                    <span className="text-xs">
-                      <span className="text-white/50">SG&A ratio</span>{' '}
-                      <span className="text-white/70 font-medium">
-                        {annualBenchmark.sga_to_revenue.p50.toFixed(1)}%
-                      </span>
-                    </span>
-                  )}
-                  {annualBenchmark.revenue_growth_yoy?.p75 != null && (
-                    <span className="text-xs text-white/30">
-                      Top quartile: {formatPct(annualBenchmark.revenue_growth_yoy.p75)}
-                    </span>
-                  )}
-                </div>
-                {verticalData.listed_companies_count > 0 && (
-                  <span className="text-[10px] text-white/20 mt-1 inline-block">
-                    Based on {verticalData.listed_companies_count} listed companies
-                  </span>
-                )}
-              </div>
-            )}
-          </>
-        )}
+        {rows.map((row) => (
+          <OpportunityRow key={row.id} row={row} />
+        ))}
       </div>
     </motion.div>
   );
 }
 
+function OpportunityRow({ row }: {
+  row: {
+    id: string;
+    dot: string;
+    text: string;
+    action?: string;
+    time?: string;
+    sourceUrl?: string;
+  };
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDetail = !!row.action;
+
+  return (
+    <div className="border-b border-white/5 last:border-0">
+      <div
+        className={`flex items-start gap-2.5 py-3 ${hasDetail ? 'cursor-pointer' : ''}`}
+        onClick={() => hasDetail && setExpanded(!expanded)}
+      >
+        <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${row.dot}`} />
+        <p className="text-sm text-white/80 leading-snug flex-1">{row.text}</p>
+        {row.sourceUrl && (
+          <a
+            href={row.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-white/20 hover:text-white/50 transition-colors flex-shrink-0 mt-0.5"
+          >
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        )}
+        {row.time && (
+          <span className="text-[10px] text-white/20 flex-shrink-0 mt-0.5">{row.time}</span>
+        )}
+        {hasDetail && (
+          expanded
+            ? <ChevronUp className="w-3.5 h-3.5 text-white/20 flex-shrink-0 mt-0.5" />
+            : <ChevronDown className="w-3.5 h-3.5 text-white/20 flex-shrink-0 mt-0.5" />
+        )}
+      </div>
+      <AnimatePresence>
+        {expanded && row.action && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden"
+          >
+            <p className="text-xs text-purple-400 pl-[18px] pb-3">&rarr; {row.action}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ============================================================================
-// Section: Competitive Landscape
+// 4. PIPELINE + PERFORMANCE — Funnel bar + conversion chain
 // ============================================================================
 
-function CompetitorSection({
-  competitorSignals,
+function PipelineCard({
+  pipelineData,
+  attribution,
 }: {
-  competitorSignals: MarketSignal[];
+  pipelineData: PipelineSummaryData | null;
+  attribution: AttributionSummary | null;
 }) {
   const navigate = useNavigate();
+
+  const hasAttribution = attribution != null && attribution.emails_sent > 0;
+  const hasPipeline = pipelineData != null && pipelineData.total_leads > 0;
+
+  if (!hasPipeline && !hasAttribution) return null;
+
+  const statusMap = hasPipeline
+    ? new Map(pipelineData.by_status.map((s) => [s.status, s.count]))
+    : new Map<string, number>();
+  const newCount = statusMap.get('new') ?? 0;
+  const qualifiedCount = statusMap.get('qualified') ?? 0;
+  const contactedCount = statusMap.get('contacted') ?? 0;
+  const convertedCount = statusMap.get('converted') ?? 0;
+
+  const topLeads = hasPipeline
+    ? pipelineData.recent_leads.filter((l) => l.fit_score >= 40).slice(0, 3)
+    : [];
+
+  const benchmarkRate = 8;
 
   return (
     <motion.div
@@ -525,826 +556,198 @@ function CompetitorSection({
       transition={{ delay: 0.15 }}
       className="glass-card rounded-xl border border-white/10"
     >
-      <SectionHeader
-        title="Competitive Landscape"
-        action="View all"
-        onAction={() => navigate('/insights')}
-      />
-      <div className="px-5 pb-4">
-        {competitorSignals.length === 0 ? (
-          <div className="py-6 text-center">
-            <Crosshair className="w-5 h-5 text-white/20 mx-auto mb-2" />
-            <p className="text-sm text-white/40">
-              Competitor Analyst monitors your competitive landscape.
-            </p>
-            <p className="text-xs text-white/25 mt-1">
-              Run your first analysis to identify and track key competitors.
-            </p>
-          </div>
-        ) : (
-          <>
-            {competitorSignals.slice(0, 4).map((s) => (
-              <SignalRow key={s.id} signal={s} />
-            ))}
+      <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-white/5">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/30">Pipeline & Performance</p>
+        <button
+          onClick={() => navigate('/prospects')}
+          className="text-xs text-white/30 hover:text-white/60 transition-colors flex items-center gap-1"
+        >
+          All prospects <ArrowRight className="w-3 h-3" />
+        </button>
+      </div>
 
-            {/* Footer — tracking count */}
-            <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-2">
-              <span className="text-[10px] text-white/20">
-                Tracking {competitorSignals.length} competitor{' '}
-                {competitorSignals.length === 1 ? 'signal' : 'signals'}
+      <div className="px-5 pb-5">
+        {/* Segmented pipeline bar */}
+        {hasPipeline && (
+          <div className="pt-3">
+            <SegmentedBar
+              segments={[
+                { value: newCount, color: '#3b82f6', label: 'new' },
+                { value: qualifiedCount, color: '#10b981', label: 'qualified' },
+                { value: contactedCount, color: '#f59e0b', label: 'contacted' },
+                { value: convertedCount, color: '#8b5cf6', label: 'converted' },
+              ]}
+              height={10}
+            />
+            <div className="flex items-center gap-3 mt-2 text-xs">
+              <span className="text-white font-medium">{pipelineData.total_leads} leads</span>
+              {pipelineData.avg_fit_score != null && (
+                <span className="text-white/40">{pipelineData.avg_fit_score.toFixed(0)}% avg fit</span>
+              )}
+              <div className="flex-1" />
+              <span className="flex items-center gap-1 text-[10px] text-white/30">
+                <span className="w-2 h-2 rounded-sm bg-blue-500" />{newCount}
               </span>
-              {competitorSignals[0]?.created_at && (
-                <span className="text-[10px] text-white/15">
-                  Last updated: {timeAgo(competitorSignals[0].created_at)}
-                </span>
+              <span className="flex items-center gap-1 text-[10px] text-white/30">
+                <span className="w-2 h-2 rounded-sm bg-emerald-500" />{qualifiedCount}
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-white/30">
+                <span className="w-2 h-2 rounded-sm bg-amber-500" />{contactedCount}
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-white/30">
+                <span className="w-2 h-2 rounded-sm bg-purple-500" />{convertedCount}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Conversion chain — visual funnel */}
+        {hasAttribution && attribution && (
+          <div className={hasPipeline ? 'mt-4 pt-4 border-t border-white/5' : 'pt-3'}>
+            <div className="flex items-center">
+              <FunnelStep value={attribution.emails_sent} label="sent" />
+              <FunnelArrow />
+              <FunnelStep value={attribution.replies} label="replies" color="text-emerald-400" />
+              <FunnelArrow />
+              <FunnelStep value={attribution.meetings_booked} label="meetings" color="text-purple-400" />
+              {attribution.pipeline_value_sgd > 0 && (
+                <>
+                  <FunnelArrow />
+                  <FunnelStep
+                    value={`$${(attribution.pipeline_value_sgd / 1000).toFixed(0)}K`}
+                    label="pipeline"
+                    color="text-amber-400"
+                  />
+                </>
               )}
             </div>
-          </>
-        )}
-      </div>
-    </motion.div>
-  );
-}
 
-// ============================================================================
-// Section: Pipeline & Prospects
-// ============================================================================
-
-function PipelineSection({
-  pipelineData,
-}: {
-  pipelineData: PipelineSummaryData | null;
-}) {
-  const navigate = useNavigate();
-
-  if (!pipelineData) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="glass-card rounded-xl border border-white/10"
-      >
-        <SectionHeader title="Pipeline & Prospects" />
-        <div className="px-5 pb-4 py-6 text-center">
-          <Users className="w-5 h-5 text-white/20 mx-auto mb-2" />
-          <p className="text-sm text-white/40">
-            Lead Hunter identifies qualified prospects from verified databases.
-          </p>
-          <p className="text-xs text-white/25 mt-1">
-            Your pipeline populates after your first analysis.
-          </p>
-        </div>
-      </motion.div>
-    );
-  }
-
-  const statusMap = new Map(pipelineData.by_status.map((s) => [s.status, s.count]));
-  const maxCount = Math.max(...pipelineData.by_status.map((s) => s.count), 1);
-  const buyingSignalLeads = pipelineData.recent_leads.filter(
-    (l) => l.trigger_events.length > 0
-  );
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.2 }}
-      className="glass-card rounded-xl border border-white/10"
-    >
-      <SectionHeader
-        title="Pipeline & Prospects"
-        action="View all"
-        onAction={() => navigate('/prospects')}
-      />
-      <div className="px-5 pb-4">
-        {/* Status bars */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-3">
-          {PIPELINE_STATUSES.filter((s) => s !== 'lost').map((status) => {
-            const count = statusMap.get(status) ?? 0;
-            const pct = maxCount > 0 ? (count / maxCount) * 100 : 0;
-            return (
-              <div key={status}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-white/50">
-                    {STATUS_LABELS[status]}
-                  </span>
-                  <span className="text-xs font-medium text-white/70 tabular-nums">
-                    {count}
+            {/* Reply rate benchmark bar */}
+            {attribution.reply_rate_pct > 0 && (
+              <div className="mt-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-white/30 w-14">Reply rate</span>
+                  <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden relative">
+                    {/* Benchmark tick */}
+                    <div
+                      className="absolute top-0 bottom-0 w-px bg-white/30"
+                      style={{ left: `${Math.min((benchmarkRate / 30) * 100, 100)}%` }}
+                    />
+                    {/* Actual rate */}
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${
+                        attribution.reply_rate_pct > benchmarkRate
+                          ? 'bg-gradient-to-r from-emerald-500/60 to-emerald-400'
+                          : 'bg-gradient-to-r from-amber-500/60 to-amber-400'
+                      }`}
+                      style={{ width: `${Math.min((attribution.reply_rate_pct / 30) * 100, 100)}%` }}
+                    />
+                  </div>
+                  <span className={`text-xs font-medium tabular-nums ${
+                    attribution.reply_rate_pct > benchmarkRate ? 'text-emerald-400' : 'text-amber-400'
+                  }`}>
+                    {attribution.reply_rate_pct}%
                   </span>
                 </div>
-                <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${STATUS_COLORS[status]} transition-all duration-500`}
-                    style={{ width: `${Math.max(pct, count > 0 ? 8 : 0)}%` }}
-                  />
+                <div className="flex items-center gap-2 mt-0.5 ml-16">
+                  <span className="text-[10px] text-white/20">
+                    Benchmark: {benchmarkRate}%
+                    {attribution.reply_rate_pct > benchmarkRate && (
+                      <span className="text-emerald-400/70 ml-1">
+                        {(attribution.reply_rate_pct / benchmarkRate).toFixed(1)}x above
+                      </span>
+                    )}
+                  </span>
                 </div>
               </div>
-            );
-          })}
-        </div>
-
-        {/* Buying signal callout */}
-        {buyingSignalLeads.length > 0 && (
-          <div className="mt-2 py-3 border-t border-white/5">
-            <div className="flex items-start gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 mt-1.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-white">
-                  {buyingSignalLeads.length}{' '}
-                  {buyingSignalLeads.length === 1 ? 'prospect' : 'prospects'} showing
-                  buying signals
-                </p>
-                <p className="text-xs text-white/40 mt-0.5">
-                  These accounts have active trigger events. Historical conversion is
-                  highest when contacted within 48 hours of signal.
-                </p>
-              </div>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Top leads */}
-        {pipelineData.recent_leads.length > 0 && (
-          <div className="mt-2 pt-3 border-t border-white/5 space-y-2.5">
-            {pipelineData.recent_leads.slice(0, 4).map((lead) => (
+        {/* Top 3 prospects — compact row, not cards */}
+        {topLeads.length > 0 && (
+          <div className={hasAttribution || hasPipeline ? 'mt-4 pt-4 border-t border-white/5' : 'pt-3'}>
+            <p className="text-[10px] uppercase tracking-widest text-white/20 mb-2">Top prospects</p>
+            {topLeads.map((lead) => (
               <div
                 key={lead.id}
-                className="flex items-start gap-3 group cursor-pointer hover:bg-white/5 rounded-lg px-2 py-1.5 -mx-2 transition-colors"
+                className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0 cursor-pointer hover:bg-white/5 rounded-lg px-2 -mx-2 transition-colors"
                 onClick={() => navigate('/prospects')}
               >
                 {/* Fit score badge */}
-                <div
-                  className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold ${
-                    lead.fit_score >= 80
-                      ? 'bg-emerald-500/15 text-emerald-400'
-                      : lead.fit_score >= 60
-                        ? 'bg-blue-500/15 text-blue-400'
-                        : 'bg-white/5 text-white/40'
-                  }`}
-                >
-                  {lead.fit_score}%
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-[11px] font-bold flex-shrink-0 ${
+                  lead.fit_score >= 70 ? 'text-emerald-400 bg-emerald-500/10'
+                    : lead.fit_score >= 50 ? 'text-blue-400 bg-blue-500/10'
+                    : 'text-amber-400 bg-amber-500/10'
+                }`}>
+                  {lead.fit_score}
                 </div>
-
-                {/* Lead info */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-white/80 truncate">
-                      {lead.contact_name ?? lead.lead_company_name ?? 'Unknown'}
-                    </span>
-                    {lead.contact_title && (
-                      <span className="text-[10px] text-white/30 truncate hidden sm:inline">
-                        {lead.contact_title}
-                      </span>
-                    )}
-                  </div>
-                  {lead.lead_company_name && lead.contact_name && (
-                    <span className="text-xs text-white/40">{lead.lead_company_name}</span>
-                  )}
-                  {lead.pain_points.length > 0 && (
-                    <p className="text-[11px] text-white/30 mt-0.5 line-clamp-1">
-                      {lead.pain_points[0]}
-                    </p>
-                  )}
+                  <p className="text-sm text-white/80 font-medium truncate">
+                    {lead.contact_name ?? lead.lead_company_name ?? 'Unknown'}
+                  </p>
+                  <p className="text-[10px] text-white/30 truncate">
+                    {lead.contact_title ? `${lead.contact_title} · ` : ''}{lead.lead_company_name ?? ''}
+                  </p>
                 </div>
-
-                {/* Status */}
-                <span
-                  className={`text-[10px] px-1.5 py-0.5 rounded border border-white/10 text-white/40 flex-shrink-0`}
-                >
-                  {STATUS_LABELS[lead.status] ?? lead.status}
-                </span>
+                {/* Why now — trigger event */}
+                {lead.trigger_events[0] && (
+                  <span className="text-[10px] text-purple-400/60 max-w-[140px] truncate hidden sm:block flex-shrink-0">
+                    {lead.trigger_events[0]}
+                  </span>
+                )}
+                <ArrowRight className="w-3 h-3 text-white/15 flex-shrink-0" />
               </div>
             ))}
           </div>
         )}
-
-        {/* Average fit score */}
-        {pipelineData.avg_fit_score != null && pipelineData.total_leads > 0 && (
-          <div className="mt-3 pt-3 border-t border-white/5">
-            <span className="text-[10px] text-white/20">
-              {pipelineData.total_leads} total leads &middot; avg fit score{' '}
-              {pipelineData.avg_fit_score.toFixed(0)}%
-            </span>
-          </div>
-        )}
       </div>
     </motion.div>
   );
 }
 
-// ============================================================================
-// Section: Strategic Actions
-// ============================================================================
-
-function ActionsSection({
-  pendingApprovals,
-  urgentSignals,
-  pipelineData,
-}: {
-  pendingApprovals: number;
-  urgentSignals: MarketSignal[];
-  pipelineData: PipelineSummaryData | null;
-}) {
-  const navigate = useNavigate();
-  const urgentCount = urgentSignals.length;
-  const newLeads =
-    pipelineData?.by_status.find((s) => s.status === 'new')?.count ?? 0;
-
-  const hasActions = pendingApprovals > 0 || urgentCount > 0 || newLeads > 0;
-
+function FunnelStep({ value, label, color }: { value: number | string; label: string; color?: string }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.25 }}
-      className="glass-card rounded-xl border border-white/10"
-    >
-      <SectionHeader title="Strategic Actions" />
-      <div className="px-5 pb-4">
-        {!hasActions ? (
-          <div className="py-5 text-center">
-            <p className="text-sm text-white/50">
-              No actions required. Your bench is running autonomously.
-            </p>
-            <button
-              onClick={() => navigate('/campaigns')}
-              className="mt-3 text-xs text-purple-400 hover:text-purple-300 transition-colors flex items-center gap-1 mx-auto"
-            >
-              Launch a new campaign to maintain pipeline momentum
-              <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-3 py-2">
-            {/* Pending approvals */}
-            {pendingApprovals > 0 && (
-              <div
-                className="flex items-start gap-3 cursor-pointer hover:bg-white/5 rounded-lg px-2 py-2 -mx-2 transition-colors"
-                onClick={() => navigate('/approvals')}
-              >
-                <div className="p-2 rounded-lg bg-amber-500/10 flex-shrink-0">
-                  <Bell className="w-4 h-4 text-amber-400" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-amber-400">
-                    {pendingApprovals} outreach{' '}
-                    {pendingApprovals === 1 ? 'email' : 'emails'} awaiting approval
-                  </p>
-                  <p className="text-xs text-white/40 mt-0.5">
-                    Delay beyond 24 hours reduces response rates.
-                  </p>
-                </div>
-                <button className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/15 text-amber-400 text-xs font-medium hover:bg-amber-500/25 border border-amber-500/20 transition-colors self-center">
-                  Review & Approve
-                  <ArrowRight className="w-3 h-3" />
-                </button>
-              </div>
-            )}
-
-            {/* Urgent signals */}
-            {urgentCount > 0 && (
-              <div
-                className="flex items-start gap-3 cursor-pointer hover:bg-white/5 rounded-lg px-2 py-2 -mx-2 transition-colors"
-                onClick={() => navigate('/insights')}
-              >
-                <div className="p-2 rounded-lg bg-yellow-500/10 flex-shrink-0">
-                  <Radio className="w-4 h-4 text-yellow-400" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-yellow-400">
-                    {urgentCount} urgent market{' '}
-                    {urgentCount === 1 ? 'signal requires' : 'signals require'} your
-                    input
-                  </p>
-                  <p className="text-xs text-white/40 mt-0.5">
-                    {urgentSignals
-                      .slice(0, 2)
-                      .map(
-                        (s) =>
-                          SIGNAL_TYPE_LABELS[s.signal_type] ??
-                          s.signal_type.replace(/_/g, ' ')
-                      )
-                      .join(' + ')}
-                    .
-                  </p>
-                </div>
-                <button className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-yellow-500/15 text-yellow-400 text-xs font-medium hover:bg-yellow-500/25 border border-yellow-500/20 transition-colors self-center">
-                  Review Signals
-                  <ArrowRight className="w-3 h-3" />
-                </button>
-              </div>
-            )}
-
-            {/* Unqualified leads */}
-            {newLeads > 0 && pendingApprovals === 0 && urgentCount === 0 && (
-              <div
-                className="flex items-start gap-3 cursor-pointer hover:bg-white/5 rounded-lg px-2 py-2 -mx-2 transition-colors"
-                onClick={() => navigate('/prospects')}
-              >
-                <div className="p-2 rounded-lg bg-green-500/10 flex-shrink-0">
-                  <Target className="w-4 h-4 text-green-400" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-green-400">
-                    {newLeads} new {newLeads === 1 ? 'lead needs' : 'leads need'}{' '}
-                    qualifying
-                  </p>
-                  <p className="text-xs text-white/40 mt-0.5">
-                    Fresh prospects in your pipeline. Review and advance to outreach.
-                  </p>
-                </div>
-                <button className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-500/15 text-green-400 text-xs font-medium hover:bg-green-500/25 border border-green-500/20 transition-colors self-center">
-                  View Prospects
-                  <ArrowRight className="w-3 h-3" />
-                </button>
-              </div>
-            )}
-
-            {/* All clear — recommend campaign */}
-            {pendingApprovals === 0 && urgentCount === 0 && newLeads === 0 && (
-              <div
-                className="flex items-start gap-3 cursor-pointer hover:bg-white/5 rounded-lg px-2 py-2 -mx-2 transition-colors"
-                onClick={() => navigate('/campaigns')}
-              >
-                <div className="p-2 rounded-lg bg-purple-500/10 flex-shrink-0">
-                  <Rocket className="w-4 h-4 text-purple-400" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-purple-400">Pipeline clear</p>
-                  <p className="text-xs text-white/40 mt-0.5">
-                    Your bench recommends launching a new campaign to maintain pipeline
-                    momentum.
-                  </p>
-                </div>
-                <button className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/15 text-purple-400 text-xs font-medium hover:bg-purple-500/25 border border-purple-500/20 transition-colors self-center">
-                  Launch Campaign
-                  <ArrowRight className="w-3 h-3" />
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </motion.div>
+    <div className="flex-1 text-center">
+      <p className={`text-lg font-semibold tabular-nums ${color ?? 'text-white'}`}>{value}</p>
+      <p className="text-[10px] text-white/30">{label}</p>
+    </div>
   );
 }
 
-// ============================================================================
-// Weekly Performance Summary
-// ============================================================================
-
-function PerformanceSummary({
-  attribution,
-}: {
-  attribution: AttributionSummary | null;
-}) {
-  const navigate = useNavigate();
-
-  if (!attribution) return null;
-
-  const hasOutreach =
-    attribution.emails_sent > 0 || attribution.replies > 0 || attribution.meetings_booked > 0;
-  const hasPipeline = attribution.pipeline_value_sgd > 0;
-
-  if (!hasOutreach && !hasPipeline) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.3 }}
-      className="glass-card rounded-xl border border-white/10"
-    >
-      <SectionHeader
-        title="This Week's Performance"
-        action="Full report"
-        onAction={() => navigate('/results')}
-      />
-      <div className="px-5 pb-4 pt-3">
-        {/* Outreach metrics row */}
-        {hasOutreach && (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            {attribution.emails_sent > 0 && (
-              <div className="flex items-center gap-2">
-                <Mail className="w-3.5 h-3.5 text-white/30" />
-                <span className="text-sm text-white/70">
-                  <span className="font-medium text-white tabular-nums">
-                    {attribution.emails_sent}
-                  </span>{' '}
-                  emails sent
-                </span>
-              </div>
-            )}
-            {attribution.replies > 0 && (
-              <div className="flex items-center gap-2">
-                <MessageSquare className="w-3.5 h-3.5 text-white/30" />
-                <span className="text-sm text-white/70">
-                  <span className="font-medium text-white tabular-nums">
-                    {attribution.replies}
-                  </span>{' '}
-                  replies ({attribution.reply_rate_pct}%)
-                </span>
-              </div>
-            )}
-            {attribution.meetings_booked > 0 && (
-              <div className="flex items-center gap-2">
-                <Users className="w-3.5 h-3.5 text-white/30" />
-                <span className="text-sm text-white/70">
-                  <span className="font-medium text-white tabular-nums">
-                    {attribution.meetings_booked}
-                  </span>{' '}
-                  meetings
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Reply rate benchmark */}
-        {attribution.reply_rate_pct > 0 && (
-          <p className="text-xs text-emerald-400/80 mt-2">
-            Reply rate {attribution.reply_rate_pct > 8 ? `${(attribution.reply_rate_pct / 8).toFixed(1)}x above` : 'tracking against'} industry benchmark (8%)
-          </p>
-        )}
-
-        {/* Pipeline value */}
-        {hasPipeline && (
-          <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-2">
-            <DollarSign className="w-3.5 h-3.5 text-white/30" />
-            <span className="text-sm text-white/70">
-              SGD{' '}
-              <span className="font-medium text-white tabular-nums">
-                {attribution.pipeline_value_sgd.toLocaleString('en-SG', {
-                  maximumFractionDigits: 0,
-                })}
-              </span>{' '}
-              pipeline generated
-            </span>
-          </div>
-        )}
-
-        {/* View full report */}
-        <button
-          onClick={() => navigate('/results')}
-          className="mt-3 text-xs text-white/30 hover:text-white/60 transition-colors flex items-center gap-1"
-        >
-          View full attribution report
-          <ArrowRight className="w-3 h-3" />
-        </button>
-      </div>
-    </motion.div>
-  );
+function FunnelArrow() {
+  return <ArrowRight className="w-3 h-3 text-white/10 flex-shrink-0 mx-1" />;
 }
 
 // ============================================================================
-// Agent Activity Feed
-// ============================================================================
-
-interface ActivityItem {
-  id: string;
-  agentName: string;
-  description: string;
-  timestamp: string;
-  icon: React.ReactNode;
-  dotColor: string;
-}
-
-function buildActivityFeed(
-  industrySignals: MarketSignal[],
-  competitorSignals: MarketSignal[],
-  pipelineData: PipelineSummaryData | null,
-  pendingApprovals: number,
-): ActivityItem[] {
-  const items: ActivityItem[] = [];
-
-  // Signal Monitor detections
-  const allSignals = [...industrySignals, ...competitorSignals]
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    .slice(0, 3);
-
-  allSignals.forEach((s) => {
-    const typeLabel =
-      SIGNAL_TYPE_LABELS[s.signal_type] ?? s.signal_type.replace(/_/g, ' ');
-    items.push({
-      id: `sig-${s.id}`,
-      agentName: 'Signal Monitor',
-      description: `detected ${typeLabel.toLowerCase()}: ${s.headline}`,
-      timestamp: s.created_at,
-      icon: <Radio className="w-3.5 h-3.5 text-yellow-400" />,
-      dotColor: 'bg-yellow-400',
-    });
-  });
-
-  // Lead Hunter identifications
-  if (pipelineData && pipelineData.recent_leads.length > 0) {
-    const count = pipelineData.recent_leads.length;
-    const mostRecent = pipelineData.recent_leads[0];
-    items.push({
-      id: 'lead-activity',
-      agentName: 'Lead Hunter',
-      description: `identified ${count} qualified ${count === 1 ? 'prospect' : 'prospects'}${mostRecent.contact_name ? ` including ${mostRecent.contact_name}` : ''}`,
-      timestamp: mostRecent.created_at ?? new Date().toISOString(),
-      icon: <Target className="w-3.5 h-3.5 text-green-400" />,
-      dotColor: 'bg-green-400',
-    });
-  }
-
-  // Outreach Executor queued items
-  if (pendingApprovals > 0) {
-    items.push({
-      id: 'approval-activity',
-      agentName: 'Outreach Executor',
-      description: `queued ${pendingApprovals} personalised ${pendingApprovals === 1 ? 'email' : 'emails'} for approval`,
-      timestamp: new Date().toISOString(),
-      icon: <Mail className="w-3.5 h-3.5 text-amber-400" />,
-      dotColor: 'bg-amber-400',
-    });
-  }
-
-  return items
-    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    .slice(0, 6);
-}
-
-function ActivityFeed({ items }: { items: ActivityItem[] }) {
-  if (items.length === 0) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.35 }}
-      className="glass-card rounded-xl border border-white/10"
-    >
-      <SectionHeader title="Bench Activity" />
-      <div className="px-5 pb-3">
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className="flex items-center gap-3 py-2.5 border-b border-white/5 last:border-0"
-          >
-            <span
-              className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${item.dotColor}`}
-            />
-            <div className="flex-shrink-0">{item.icon}</div>
-            <div className="flex-1 min-w-0">
-              <span className="text-sm text-white/70">
-                <span className="font-medium text-white/80">{item.agentName}</span>{' '}
-                {item.description}
-              </span>
-            </div>
-            <span className="text-[10px] text-white/30 flex-shrink-0">
-              {timeAgo(item.timestamp)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </motion.div>
-  );
-}
-
-// ============================================================================
-// Section: GTM Implications (from Vertical Intelligence)
-// ============================================================================
-
-const PRIORITY_COLORS: Record<string, string> = {
-  high: 'text-red-400 bg-red-500/10 border-red-500/20',
-  medium: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
-  low: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
-};
-
-function GTMImplicationsSection({
-  intelligence,
-}: {
-  intelligence: VerticalIntelligenceData | null;
-}) {
-  const navigate = useNavigate();
-
-  if (!intelligence || !intelligence.id) return null;
-
-  const implications = intelligence.gtm_implications ?? [];
-  const financialPulse = intelligence.financial_pulse;
-  const keyTrends = intelligence.key_trends ?? [];
-
-  const hasContent = implications.length > 0 || keyTrends.length > 0 || financialPulse?.sga_median != null;
-  if (!hasContent) return null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.12 }}
-      className="glass-card rounded-xl border border-white/10"
-    >
-      <SectionHeader
-        title="Strategic Intelligence"
-        action="Deep dive"
-        onAction={() => navigate('/insights')}
-      />
-      <div className="px-5 pb-4">
-        {/* GTM Implications — top 3 */}
-        {implications.length > 0 && (
-          <div className="space-y-3 py-3">
-            {implications.slice(0, 3).map((impl, i) => {
-              const priorityColor = PRIORITY_COLORS[impl.priority ?? 'medium'] ?? PRIORITY_COLORS.medium;
-              return (
-                <div key={i} className="flex gap-3">
-                  <div className={`mt-0.5 p-2 rounded-lg flex-shrink-0 ${priorityColor.split(' ').slice(1).join(' ')}`}>
-                    <Zap className={`w-4 h-4 ${priorityColor.split(' ')[0]}`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${priorityColor}`}>
-                        {impl.priority ?? 'medium'}
-                      </span>
-                    </div>
-                    <p className="text-sm font-medium text-white leading-snug line-clamp-2">
-                      {impl.insight}
-                    </p>
-                    {impl.evidence && (
-                      <p className="text-xs text-white/50 mt-0.5 leading-relaxed line-clamp-2">
-                        {impl.evidence}
-                      </p>
-                    )}
-                    {impl.recommended_action && (
-                      <p className="text-xs text-purple-400 mt-1 leading-snug">
-                        &rarr; {impl.recommended_action}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Key Trends — compact list */}
-        {keyTrends.length > 0 && (
-          <div className="mt-2 pt-3 border-t border-white/5">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-white/20 mb-2">
-              Key trends
-            </p>
-            <div className="space-y-2">
-              {keyTrends.slice(0, 3).map((trend, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  <TrendingUp className="w-3 h-3 text-emerald-400/60 mt-1 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs text-white/60 line-clamp-1">{trend.trend}</p>
-                    {trend.impact && (
-                      <p className="text-[10px] text-white/30 line-clamp-1">{trend.impact}</p>
-                    )}
-                  </div>
-                  {trend.source_count != null && trend.source_count > 0 && (
-                    <span className="text-[10px] text-white/20 flex-shrink-0">
-                      {trend.source_count} sources
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Financial Pulse — inline stats */}
-        {financialPulse && financialPulse.sga_median != null && (
-          <div className="mt-3 pt-3 border-t border-white/5">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-white/20 mb-2">
-              Financial pulse
-            </p>
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              {financialPulse.sga_median != null && (
-                <span className="text-xs">
-                  <span className="text-white/50">SG&A ratio</span>{' '}
-                  <span className="text-white/70 font-medium">
-                    {financialPulse.sga_median.toFixed(1)}%
-                  </span>
-                  {financialPulse.sga_trend && (
-                    <span className="text-white/30 ml-1">({financialPulse.sga_trend})</span>
-                  )}
-                </span>
-              )}
-              {financialPulse.rnd_median != null && (
-                <span className="text-xs">
-                  <span className="text-white/50">R&D intensity</span>{' '}
-                  <span className="text-white/70 font-medium">
-                    {financialPulse.rnd_median.toFixed(1)}%
-                  </span>
-                  {financialPulse.rnd_trend && (
-                    <span className="text-white/30 ml-1">({financialPulse.rnd_trend})</span>
-                  )}
-                </span>
-              )}
-              {financialPulse.margin_compression_or_expansion && (
-                <span className="text-xs">
-                  <span className="text-white/50">Margins</span>{' '}
-                  <span className={`font-medium ${financialPulse.margin_compression_or_expansion === 'expansion' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {financialPulse.margin_compression_or_expansion}
-                  </span>
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Report timestamp */}
-        {intelligence.computed_at && (
-          <div className="mt-3 pt-2 border-t border-white/5">
-            <span className="text-[10px] text-white/15">
-              {intelligence.vertical_name ?? 'Industry'} intelligence &middot;{' '}
-              {intelligence.report_period} &middot; updated {timeAgo(intelligence.computed_at)}
-            </span>
-          </div>
-        )}
-      </div>
-    </motion.div>
-  );
-}
-
-// ============================================================================
-// Empty State — first-run experience
+// Empty / No Company States
 // ============================================================================
 
 function EmptyState() {
   const navigate = useNavigate();
-
-  const steps = [
-    {
-      agent: 'Market Intelligence',
-      action: 'scans 142 data sources for market signals',
-    },
-    {
-      agent: 'Competitor Analyst',
-      action: 'profiles your competitive landscape',
-    },
-    {
-      agent: 'Customer Profiler',
-      action: 'defines your ideal buyer persona',
-    },
-    {
-      agent: 'Lead Hunter',
-      action: 'surfaces qualified prospects with verified contacts',
-    },
-    {
-      agent: 'Campaign Architect',
-      action: 'drafts your first personalised outreach',
-    },
-  ];
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="glass-card p-8 sm:p-10 rounded-xl border border-white/10 flex flex-col items-center text-center max-w-lg mx-auto"
+      className="flex flex-col items-center text-center max-w-sm mx-auto py-16"
     >
-      <div className="w-14 h-14 rounded-2xl bg-purple-500/10 flex items-center justify-center mb-5">
+      <div className="w-14 h-14 bg-purple-500/10 rounded-2xl flex items-center justify-center mb-5">
         <Zap className="w-7 h-7 text-purple-400" />
       </div>
-
-      <h2 className="text-lg font-semibold text-white">
-        Your Strategic Bench is ready to deploy
-      </h2>
-      <p className="text-sm text-white/50 mt-2 max-w-sm leading-relaxed">
-        6 specialised agents will map your competitive landscape, identify
-        qualified prospects, and prepare your first campaign brief — all within
-        minutes.
-      </p>
-
+      <h2 className="text-lg font-semibold text-white">Run your first analysis</h2>
+      <p className="text-sm text-white/40 mt-1">6 agents, one click.</p>
       <button
         onClick={() => navigate('/')}
-        className="mt-6 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-purple-500/20 text-purple-400 text-sm font-medium hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
+        className="mt-5 flex items-center gap-2 px-6 py-3 rounded-xl bg-purple-500/20 text-purple-400 text-sm font-medium hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
       >
-        <BarChart3 className="w-4 h-4" />
-        Start Market Analysis
+        Start Analysis
       </button>
-
-      <div className="mt-8 w-full space-y-3">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/20">
-          What happens next
-        </p>
-        {steps.map(({ agent, action }, i) => (
-          <div key={agent} className="flex items-center gap-3 text-left">
-            <span className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center text-[10px] font-bold text-white/40 flex-shrink-0">
-              {i + 1}
-            </span>
-            <div>
-              <span className="text-sm font-medium text-white/70">{agent}</span>
-              <span className="text-xs text-white/30 ml-1.5">{action}</span>
-            </div>
-          </div>
-        ))}
-      </div>
     </motion.div>
   );
 }
 
-// ============================================================================
-// No Company State
-// ============================================================================
-
 function NoCompanyState() {
   const navigate = useNavigate();
-
   return (
     <div className="flex flex-col h-full">
       <div className="flex-shrink-0 px-6 py-4 border-b border-white/10">
@@ -1354,26 +757,17 @@ function NoCompanyState() {
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="glass-card p-10 rounded-xl border border-white/10 flex flex-col items-center text-center max-w-md"
+          className="flex flex-col items-center text-center"
         >
-          <div className="w-14 h-14 rounded-2xl bg-purple-500/10 flex items-center justify-center mb-4">
+          <div className="w-14 h-14 bg-purple-500/10 rounded-2xl flex items-center justify-center mb-5">
             <Zap className="w-7 h-7 text-purple-400" />
           </div>
-          <h2 className="text-lg font-semibold text-white">
-            Welcome to GTM Advisor
-          </h2>
-          <p className="text-sm text-white/50 mt-2 leading-relaxed">
-            Start by running an AI analysis of your company. Your 6-agent bench
-            will map the market, profile competitors, identify qualified
-            prospects, and draft your first campaign — then you manage the
-            entire GTM process from here.
-          </p>
+          <h2 className="text-lg font-semibold text-white">Welcome to Hi Meet.AI</h2>
           <button
-            onClick={() => navigate('/')}
-            className="mt-6 flex items-center gap-2 px-5 py-2.5 rounded-xl bg-purple-500/20 text-purple-400 text-sm font-medium hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
+            onClick={() => navigate('/analyze')}
+            className="mt-5 flex items-center gap-2 px-6 py-3 rounded-xl bg-purple-500/20 text-purple-400 text-sm font-medium hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
           >
-            <Zap className="w-4 h-4" />
-            Run Your First Analysis
+            <Zap className="w-4 h-4" /> Run Your First Analysis
           </button>
         </motion.div>
       </div>
@@ -1386,10 +780,8 @@ function NoCompanyState() {
 // ============================================================================
 
 export function TodayPage() {
-  const { company } = useCompany();
   const companyId = useCompanyId();
 
-  // Data states
   const [loading, setLoading] = useState(true);
   const [verticalData, setVerticalData] = useState<VerticalSummary | null>(null);
   const [industryData, setIndustryData] = useState<IndustrySignalsData | null>(null);
@@ -1409,39 +801,16 @@ export function TodayPage() {
     setLoading(true);
 
     Promise.all([
-      apiClient
-        .get<VerticalSummary>(`/companies/${companyId}/market-data/vertical-summary`)
-        .catch(() => null),
-      apiClient
-        .get<IndustrySignalsData>(`/companies/${companyId}/market-data/industry-signals`)
-        .catch(() => null),
-      apiClient
-        .get<MarketSignal[]>(`/companies/${companyId}/market-data/competitor-signals`)
-        .catch(() => []),
-      apiClient
-        .get<PipelineSummaryData>(`/companies/${companyId}/market-data/pipeline-summary`)
-        .catch(() => null),
-      apiClient
-        .get<{ pending: number }>(`/companies/${companyId}/approvals/count`)
-        .catch(() => ({ pending: 0 })),
-      apiClient
-        .get<AttributionSummary>(`/companies/${companyId}/attribution/summary?days=7`)
-        .catch(() => null),
-      apiClient
-        .get<BriefingStatus>(`/companies/${companyId}/market-data/briefing-status`)
-        .catch(() => null),
+      apiClient.get<VerticalSummary>(`/companies/${companyId}/market-data/vertical-summary`).catch(() => null),
+      apiClient.get<IndustrySignalsData>(`/companies/${companyId}/market-data/industry-signals`).catch(() => null),
+      apiClient.get<MarketSignal[]>(`/companies/${companyId}/market-data/competitor-signals`).catch(() => []),
+      apiClient.get<PipelineSummaryData>(`/companies/${companyId}/market-data/pipeline-summary`).catch(() => null),
+      apiClient.get<{ pending: number }>(`/companies/${companyId}/approvals/count`).catch(() => ({ pending: 0 })),
+      apiClient.get<AttributionSummary>(`/companies/${companyId}/attribution/summary?days=7`).catch(() => null),
+      apiClient.get<BriefingStatus>(`/companies/${companyId}/market-data/briefing-status`).catch(() => null),
       fetchVerticalIntelligence(companyId),
     ]).then(
-      ([
-        vertical,
-        industry,
-        competitors,
-        pipeline,
-        approvals,
-        attr,
-        briefing,
-        intel,
-      ]) => {
+      ([vertical, industry, competitors, pipeline, approvals, attr, briefing, intel]) => {
         setVerticalData(vertical);
         setIndustryData(industry);
         setCompetitorSignals(competitors);
@@ -1450,59 +819,32 @@ export function TodayPage() {
         setAttribution(attr);
         setBriefingStatus(briefing);
         setIntelligence(intel);
-      }
+      },
     ).finally(() => setLoading(false));
   }, [companyId]);
 
-  // Compute urgent signals — match backend SignalUrgency enum values
-  const urgentCompetitorSignals = useMemo(
-    () => competitorSignals.filter((s) => s.urgency === 'immediate' || s.urgency === 'this_week'),
-    [competitorSignals]
-  );
-  const urgentIndustrySignals = useMemo(
-    () =>
-      (industryData?.signals ?? []).filter(
-        (s) => s.urgency === 'immediate' || s.urgency === 'this_week'
-      ),
-    [industryData]
-  );
-  const allUrgentSignals = useMemo(
-    () => [...urgentIndustrySignals, ...urgentCompetitorSignals],
-    [urgentIndustrySignals, urgentCompetitorSignals]
+  const urgentSignals = useMemo(
+    () => [
+      ...(industryData?.signals ?? []),
+      ...competitorSignals,
+    ].filter((s) => s.urgency === 'immediate' || s.urgency === 'this_week'),
+    [industryData, competitorSignals],
   );
 
-  // Activity feed
-  const activityItems = useMemo(
-    () =>
-      buildActivityFeed(
-        industryData?.signals ?? [],
-        competitorSignals,
-        pipelineData,
-        pendingApprovals
-      ),
-    [industryData, competitorSignals, pipelineData, pendingApprovals]
-  );
-
-  // Determine if this is a first-run (empty) state.
-  // Show the briefing even if no analysis was run — signals and articles from
-  // the intelligence pipeline (RSS, curated intel) are always available.
   const hasAnyIntel =
     (industryData?.signals.length ?? 0) > 0 ||
     (industryData?.articles.length ?? 0) > 0 ||
     competitorSignals.length > 0 ||
     (pipelineData?.total_leads ?? 0) > 0 ||
     (intelligence?.id ? true : false);
+
   const isFirstRun =
     !hasAnyIntel &&
     briefingStatus != null &&
     !briefingStatus.has_completed_analysis;
 
-  // ---- No company selected ----
-  if (!companyId) {
-    return <NoCompanyState />;
-  }
+  if (!companyId) return <NoCompanyState />;
 
-  // ---- Loading ----
   if (loading) {
     return (
       <div className="flex flex-col h-full">
@@ -1516,58 +858,38 @@ export function TodayPage() {
     );
   }
 
-  // ---- Greeting ----
-  const firstName = getUserFirstName();
-  const displayName = firstName
-    ? firstName
-    : company?.name
-      ? titleCase(company.name)
-      : null;
-
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex-shrink-0 px-6 py-4 border-b border-white/10">
-        <h1 className="text-lg font-semibold text-white">
-          {getGreeting()}
-          {displayName ? `, ${displayName}` : ''}
-        </h1>
-        <p className="text-xs text-white/40 mt-0.5">Your daily strategic briefing</p>
-      </div>
-
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {/* Strategic Bench */}
-        <AgentTeamRoster activities={[]} isAnalyzing={false} />
-
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {isFirstRun ? (
           <EmptyState />
         ) : (
           <>
-            {/* Market Intelligence Briefing */}
-            <IndustrySection
-              industryData={industryData}
-              verticalData={verticalData}
-            />
-
-            {/* Vertical Intelligence — GTM implications + financial pulse + trends */}
-            <GTMImplicationsSection intelligence={intelligence} />
-
-            <CompetitorSection competitorSignals={competitorSignals} />
-
-            <PipelineSection pipelineData={pipelineData} />
-
-            <ActionsSection
+            {/* 1. ACTIONS — What needs deciding right now */}
+            <ActionBar
               pendingApprovals={pendingApprovals}
-              urgentSignals={allUrgentSignals}
-              pipelineData={pipelineData}
+              urgentSignalCount={urgentSignals.length}
+              topSignal={urgentSignals[0] ?? null}
             />
 
-            {/* Weekly Performance */}
-            <PerformanceSummary attribution={attribution} />
+            {/* 2. MARKET PULSE — One card, visual indicators */}
+            <MarketPulseCard
+              verticalData={verticalData}
+              intelligence={intelligence}
+            />
 
-            {/* Agent Activity Feed */}
-            <ActivityFeed items={activityItems} />
+            {/* 3. OPPORTUNITIES — Ranked list, visual priority dots */}
+            <OpportunitiesCard
+              intelligence={intelligence}
+              industrySignals={industryData?.signals ?? []}
+              competitorSignals={competitorSignals}
+            />
+
+            {/* 4. PIPELINE + PERFORMANCE — Funnel bar, conversion chain, top prospects */}
+            <PipelineCard
+              pipelineData={pipelineData}
+              attribution={attribution}
+            />
           </>
         )}
       </div>

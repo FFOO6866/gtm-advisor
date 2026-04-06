@@ -472,6 +472,25 @@ Focus on Singapore/APAC market context."""
         # Get seed companies to research (from context or generate list)
         seed_companies = context.get("seed_companies", [])
 
+        # Store VI targeting context for strategic archetype derivation.
+        # Initialized here (outside seed_companies guard) so it's always available.
+        self._vi_targeting = {
+            "key_trends": context.get("vi_key_trends") or [],
+            "competitive_dynamics": context.get("vi_competitive_dynamics") or {},
+            "gtm_implications": context.get("vi_gtm_implications") or [],
+            "signal_digest": context.get("vi_signal_digest") or [],
+            "financial_pulse": context.get("vi_financial_pulse") or {},
+            "market_overview": context.get("vi_market_overview") or {},
+        }
+        _has_vi = bool(self._vi_targeting["key_trends"] or self._vi_targeting.get("competitive_dynamics"))
+        if _has_vi:
+            self._logger.info(
+                "vi_targeting_loaded",
+                trends=len(self._vi_targeting["key_trends"]),
+                implications=len(self._vi_targeting["gtm_implications"]),
+                signals=len(self._vi_targeting["signal_digest"]),
+            )
+
         # If no seed companies, generate search queries for LLM
         if not seed_companies:
             industry_term = (
@@ -489,6 +508,7 @@ Focus on Singapore/APAC market context."""
 
             # Derive USP-driven buyer archetypes for multi-vertical search
             # Each archetype = a distinct buyer TYPE that would purchase this product
+            # When VI data is available, archetypes are informed by market intelligence
             archetypes = await self._derive_buyer_archetypes(context)
             self._buyer_archetypes = archetypes  # store for _do()
 
@@ -1407,15 +1427,135 @@ Focus on Singapore/APAC market context."""
 
         return companies
 
+    @staticmethod
+    def _format_vi_for_archetypes(vi: dict[str, Any], location: str) -> str:
+        """Format VI targeting data into a prompt section for archetype derivation.
+
+        Translates raw vertical intelligence into strategic targeting guidance:
+        - Declining competitors → displacement targets
+        - Service line gaps → underserved segments
+        - Key trends → industries affected by those trends
+        - GTM implications → evidence-backed recommended actions
+        """
+        if not vi:
+            return ""
+
+        sections: list[str] = []
+
+        # Key trends → industries experiencing these shifts need solutions
+        trends = vi.get("key_trends") or []
+        if trends:
+            trend_lines = []
+            for t in trends[:4]:
+                trend_text = t.get("trend", "") if isinstance(t, dict) else str(t)
+                impact = t.get("impact", "") if isinstance(t, dict) else ""
+                if trend_text:
+                    trend_lines.append(f"  - {trend_text}" + (f" → {impact}" if impact else ""))
+            if trend_lines:
+                sections.append("KEY MARKET TRENDS (target industries affected by these):\n" + "\n".join(trend_lines))
+
+        # Competitive dynamics → weakening competitors = displacement targets
+        cd = vi.get("competitive_dynamics") or {}
+        if isinstance(cd, dict):
+            movers_down = cd.get("movers_down") or []
+            if movers_down:
+                declining = []
+                for m in movers_down[:5]:
+                    name = m.get("name", "") if isinstance(m, dict) else str(m)
+                    growth = m.get("revenue_growth_yoy") if isinstance(m, dict) else None
+                    if name:
+                        growth_str = f" ({growth*100:+.0f}% YoY)" if growth is not None else ""
+                        declining.append(f"  - {name}{growth_str}")
+                if declining:
+                    sections.append(
+                        "DECLINING COMPETITORS (their clients are displacement targets):\n"
+                        + "\n".join(declining)
+                    )
+
+            # Service line gaps
+            slm = cd.get("service_line_matrix") or {}
+            if isinstance(slm, dict) and slm:
+                lines_sorted = sorted(slm.items(), key=lambda x: x[1].get("count", 0) if isinstance(x[1], dict) else 0)
+                low_density = [name for name, data in lines_sorted[:3] if isinstance(data, dict) and data.get("count", 0) <= 5]
+                if low_density:
+                    sections.append(f"UNDERSERVED SERVICE LINES (few providers → opportunity):\n  - {', '.join(low_density)}")
+
+            # Segment breakdown → which segments are crowded vs underserved
+            segments = cd.get("segment_breakdown") or {}
+            if isinstance(segments, dict) and segments:
+                seg_sorted = sorted(segments.items(), key=lambda x: x[1] if isinstance(x[1], int | float) else 0)
+                small_segs = [name for name, count in seg_sorted[:3] if isinstance(count, int | float) and count <= 5]
+                if small_segs:
+                    sections.append(f"UNDERSERVED SEGMENTS (low competition → opportunity):\n  - {', '.join(small_segs)}")
+
+        # GTM implications → evidence-backed strategic recommendations
+        implications = vi.get("gtm_implications") or []
+        if implications:
+            impl_lines = []
+            for impl in implications[:3]:
+                if isinstance(impl, dict):
+                    insight = impl.get("insight", "")
+                    action = impl.get("recommended_action", "")
+                    evidence = impl.get("evidence", "")
+                    if insight:
+                        line = f"  - {insight}"
+                        if action:
+                            line += f"\n    Action: {action}"
+                        if evidence:
+                            line += f"\n    Evidence: {evidence[:120]}"
+                        impl_lines.append(line)
+            if impl_lines:
+                sections.append("STRATEGIC RECOMMENDATIONS (from market analysis):\n" + "\n".join(impl_lines))
+
+        # Signal digest → current market signals as buying triggers
+        signals = vi.get("signal_digest") or []
+        if signals:
+            sig_lines = []
+            for sig in signals[:4]:
+                if isinstance(sig, dict):
+                    headline = sig.get("headline", "")
+                    sig_type = sig.get("signal_type", "")
+                    if headline and len(headline) > 20:
+                        sig_lines.append(f"  - [{sig_type}] {headline[:100]}")
+            if sig_lines:
+                sections.append("CURRENT MARKET SIGNALS (use as buying triggers):\n" + "\n".join(sig_lines))
+
+        # Financial pulse → operational trends
+        fp = vi.get("financial_pulse") or {}
+        if isinstance(fp, dict):
+            pulse_parts = []
+            if fp.get("sga_trend"):
+                pulse_parts.append(f"SG&A spend is {fp['sga_trend']}")
+            if fp.get("rnd_trend"):
+                pulse_parts.append(f"R&D intensity is {fp['rnd_trend']}")
+            if fp.get("margin_compression_or_expansion"):
+                pulse_parts.append(f"Margins: {fp['margin_compression_or_expansion']}")
+            if pulse_parts:
+                sections.append(f"INDUSTRY FINANCIAL PULSE:\n  - {'; '.join(pulse_parts)}")
+
+        if not sections:
+            return ""
+
+        return (
+            f"\n\n=== VERTICAL INTELLIGENCE FOR {location.upper()} MARKET ===\n"
+            + "Use this intelligence to inform your archetype selection — target industries\n"
+            + "where the data shows real opportunity, not just generic guesses.\n\n"
+            + "\n\n".join(sections)
+            + "\n"
+        )
+
     async def _derive_buyer_archetypes(
         self,
         context: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """Derive 3-5 buyer archetypes from the company's USP.
+        """Derive 3-8 buyer archetypes from USP + vertical intelligence.
 
-        For each archetype, we identify WHICH types of companies would buy this
-        product (not just companies in the same industry). This is the USP sweet-spot
-        mapping step that makes lead discovery accurate for any client.
+        When VI data is available (competitive dynamics, key trends, market signals),
+        archetypes are strategically informed:
+        - Declining competitors → their clients are displacement targets
+        - Service line gaps → industries underserved in those areas
+        - Key trends → industries affected by those trends need solutions
+        - GTM implications → recommended actions translate to buyer profiles
 
         Returns a list of archetype dicts, each with:
           - vertical: industry vertical label (e.g. "advertising agencies")
@@ -1444,10 +1584,14 @@ Focus on Singapore/APAC market context."""
                 f"hire agencies/consultancies instead of using {company_name}."
             )
 
+        # Build VI intelligence section if available
+        vi = getattr(self, "_vi_targeting", {})
+        vi_section = self._format_vi_for_archetypes(vi, location)
+
         prompt = f"""You are a B2B sales strategist. A company called "{company_name}" offers:
 
 {product_context}{competitor_clause}
-
+{vi_section}
 Identify 8 DISTINCT buyer archetypes — types of END-USER companies that would PURCHASE this product.
 These are SMEs that HAVE THE PROBLEM this product solves — across a WIDE range of industries.
 
@@ -1464,7 +1608,8 @@ Return a JSON array of 8 objects, each with:
 - "buying_trigger": one signal that shows they are in-market now (e.g. "opening new outlets", "hiring marketing staff", "recent funding round")
 - "queries": array of 2 search strings to find these buyers in {location}, e.g. ["growing law firms {location} 2026", "{location} F&B chains expanding 2026"]
 
-CRITICAL: Buyers are END USERS, not companies in the same space as the competitors. Ensure at least 4 of 8 archetypes are NON-TECH industries."""
+CRITICAL: Buyers are END USERS, not companies in the same space as the competitors. Ensure at least 4 of 8 archetypes are NON-TECH industries.
+{"STRATEGIC PRIORITY: At least 2 archetypes MUST target industries identified in the market intelligence above — these are evidence-backed opportunities, not guesses." if vi_section else ""}"""
 
         messages = [
             {"role": "system", "content": "Return only valid JSON. No markdown. No explanation."},

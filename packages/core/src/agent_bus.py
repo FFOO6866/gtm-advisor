@@ -57,6 +57,14 @@ class DiscoveryType(str, Enum):
     CHANNEL_RECOMMENDED = "channel_recommended"
     MESSAGE_CRAFTED = "message_crafted"
     CAMPAIGN_READY = "campaign_ready"
+    ROADMAP_READY = "roadmap_ready"
+    STRATEGY_PROPOSED = "strategy_proposed"
+
+    # Creative & distribution pipeline
+    CREATIVE_BRIEF = "creative_brief"
+    CREATIVE_READY = "creative_ready"
+    CONTENT_APPROVED = "content_approved"
+    ENGAGEMENT_RECEIVED = "engagement_received"
 
     # Workforce insights
     WORKFORCE_READY = "workforce_ready"

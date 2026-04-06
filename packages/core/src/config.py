@@ -1,4 +1,4 @@
-"""GTM Advisor Configuration Management."""
+"""Kairos Configuration Management."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ class Environment(str, Enum):
 
 
 class GTMConfig(BaseSettings):
-    """Central configuration for GTM Advisor platform."""
+    """Central configuration for Kairos platform."""
 
     model_config = SettingsConfigDict(
         env_prefix="GTM_",

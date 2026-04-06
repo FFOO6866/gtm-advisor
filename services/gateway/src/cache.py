@@ -1,4 +1,4 @@
-"""Caching infrastructure for GTM Advisor Gateway.
+"""Caching infrastructure for Kairos Gateway.
 
 Provides Redis-backed caching with in-memory fallback for development.
 Used for user session data and other high-frequency lookups.

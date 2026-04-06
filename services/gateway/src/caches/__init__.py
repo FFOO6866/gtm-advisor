@@ -1,4 +1,4 @@
-"""Hot and warm tier caching for GTM Advisor.
+"""Hot and warm tier caching for Kairos.
 
 Three cache classes wrapping the existing CacheBackend infrastructure:
 - EnrichmentCache: Company enrichment data, 24h TTL (hot tier)

@@ -1,5 +1,5 @@
 /**
- * WhyUsPage — Full-page "Why GTM Advisor vs ChatGPT" comparison.
+ * WhyUsPage — Full-page "Why Hi Meet.AI vs ChatGPT" comparison.
  *
  * Accessible via sidebar nav so users can share/bookmark the differentiator.
  */
@@ -23,8 +23,8 @@ export function WhyUsPage() {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h1 className="text-lg font-semibold text-white">Why GTM Advisor?</h1>
-            <p className="text-xs text-white/40">Not a chatbot. An always-on AI workforce.</p>
+            <h1 className="text-lg font-semibold text-white">Why Hi Meet.AI?</h1>
+            <p className="text-xs text-white/40">Not a chatbot. A strategic growth system.</p>
           </div>
         </div>
       </div>

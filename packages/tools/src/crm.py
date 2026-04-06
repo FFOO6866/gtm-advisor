@@ -771,7 +771,7 @@ class PipedriveTool(BaseTool):
 
 
 class CRMSyncTool(BaseTool):
-    """Sync data between CRMs and GTM Advisor.
+    """Sync data between CRMs and Kairos.
 
     Provides unified interface for multi-CRM environments.
     """

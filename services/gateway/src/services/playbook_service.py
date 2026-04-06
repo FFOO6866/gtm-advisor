@@ -38,7 +38,7 @@ BUILT_IN_PLAYBOOKS: list[dict[str, Any]] = [
         "sequence_config": {
             "steps": [
                 {"day_offset": 0, "step_type": "cold_intro", "subject_pattern": "Quick question about {company_name}", "body_instructions": "Write a concise cold intro (under 100 words). Reference their industry and a specific pain point from the ICP analysis. End with one clear question."},
-                {"day_offset": 4, "step_type": "value_insight", "subject_pattern": "Insight for {industry} leaders in SG", "body_instructions": "Share a specific market insight relevant to their industry (use signal events if available). Tie back to how GTM Advisor addresses it. Soft CTA."},
+                {"day_offset": 4, "step_type": "value_insight", "subject_pattern": "Insight for {industry} leaders in SG", "body_instructions": "Share a specific market insight relevant to their industry (use signal events if available). Tie back to how Kairos addresses it. Soft CTA."},
                 {"day_offset": 9, "step_type": "social_proof", "subject_pattern": "How similar companies solved this", "body_instructions": "Reference a social proof point or outcome. Ask if this challenge resonates. Direct meeting request."},
                 {"day_offset": 14, "step_type": "breakup", "subject_pattern": "Closing the loop, {first_name}", "body_instructions": "Brief break-up email. Acknowledge they may be busy. Leave door open. No hard sell."},
             ]

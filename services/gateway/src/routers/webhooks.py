@@ -18,7 +18,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 
-from packages.database.src.models import AttributionEvent, Lead
+from packages.database.src.models import AttributionEvent, CreativeAsset, EngagementEvent, Lead
 from packages.database.src.session import async_session_factory
 from services.gateway.src.services.sequence_engine import SequenceEngine
 
@@ -49,10 +49,22 @@ _PAUSE_EVENT_TYPES = frozenset({
 _ENGAGEMENT_EVENT_MAP: dict[str, str] = {
     "open": "email_opened",
     "click": "email_clicked",
+    "inbound": "reply_received",
 }
 
 # Delivery failure events — logged but not stored (no lead-level consequence yet)
 _BOUNCE_EVENT_TYPES = frozenset({"bounce", "deferred", "dropped"})
+
+# SendGrid event → EngagementEvent.event_type (Phase 4 granular tracking)
+_ENGAGEMENT_EVENT_TYPE_MAP: dict[str, str] = {
+    "open": "email_open",
+    "click": "email_click",
+    "bounce": "email_bounce",
+    "unsubscribe": "email_unsubscribe",
+    "group_unsubscribe": "email_unsubscribe",
+    "spamreport": "email_spam",
+    "spam_report": "email_spam",
+}
 
 
 @router.post("/webhooks/sendgrid")
@@ -150,6 +162,21 @@ async def sendgrid_webhook(request: Request) -> dict:
                     reason=event.get("reason", ""),
                 )
 
+            # Phase 4: write a granular EngagementEvent row for all trackable event types
+            if event_type in _ENGAGEMENT_EVENT_TYPE_MAP:
+                custom_args: dict = event.get("custom_args") or {}
+                await _write_engagement_event(
+                    sg_event_type=event_type,
+                    sg_message_id=event.get("sg_message_id") or event.get("sg_event_id"),
+                    email=raw_email,
+                    lead_id_str=lead_id_str or custom_args.get("lead_id"),
+                    company_id_str=custom_args.get("company_id"),
+                    campaign_id_str=custom_args.get("campaign_id"),
+                    asset_id_str=custom_args.get("asset_id"),
+                    url_clicked=event.get("url"),
+                    timestamp=event.get("timestamp"),
+                )
+
         except Exception as e:
             logger.error("sendgrid_webhook_event_failed", event=event_type, error=str(e))
 
@@ -158,6 +185,95 @@ async def sendgrid_webhook(request: Request) -> dict:
         "enrollments_paused": paused,
         "engagement_recorded": engagement_recorded,
     }
+
+
+async def _write_engagement_event(
+    sg_event_type: str,
+    sg_message_id: str | None,
+    email: str | None,
+    lead_id_str: str | None,
+    company_id_str: str | None,
+    campaign_id_str: str | None,
+    asset_id_str: str | None,
+    url_clicked: str | None,
+    timestamp: int | float | None,
+) -> None:
+    """Create an EngagementEvent row and update CreativeAsset counters if applicable.
+
+    company_id is required — if it cannot be resolved the event is dropped.
+    All other FK fields are optional and silently skipped if the UUID is invalid.
+    """
+    from datetime import datetime
+    from uuid import UUID
+
+    engagement_event_type = _ENGAGEMENT_EVENT_TYPE_MAP.get(sg_event_type)
+    if not engagement_event_type:
+        return
+
+    # company_id is mandatory for EngagementEvent
+    if not company_id_str:
+        logger.debug(
+            "sendgrid_webhook_engagement_event_skipped_no_company",
+            sg_event_type=sg_event_type,
+            email=email or "",
+        )
+        return
+
+    def _parse_uuid(value: str | None) -> UUID | None:
+        if not value:
+            return None
+        try:
+            return UUID(value)
+        except (ValueError, AttributeError):
+            return None
+
+    company_id = _parse_uuid(company_id_str)
+    if company_id is None:
+        return
+
+    campaign_id = _parse_uuid(campaign_id_str)
+    asset_id = _parse_uuid(asset_id_str)
+    lead_id = _parse_uuid(lead_id_str)
+
+    occurred_at: datetime | None = None
+    if timestamp is not None:
+        try:
+            occurred_at = datetime.utcfromtimestamp(float(timestamp))
+        except (ValueError, OSError, OverflowError):
+            occurred_at = None
+
+    async with async_session_factory() as db:
+        ev = EngagementEvent(
+            company_id=company_id,
+            campaign_id=campaign_id,
+            asset_id=asset_id,
+            lead_id=lead_id,
+            event_type=engagement_event_type,
+            channel="email",
+            source_message_id=sg_message_id,
+            url_clicked=url_clicked if sg_event_type == "click" else None,
+            metadata_json={"email": email or "", "sg_event_type": sg_event_type},
+        )
+        if occurred_at is not None:
+            ev.occurred_at = occurred_at
+        db.add(ev)
+
+        # Increment CreativeAsset performance counters when asset_id is present
+        if asset_id is not None:
+            asset: CreativeAsset | None = await db.get(CreativeAsset, asset_id)
+            if asset is not None:
+                if sg_event_type == "open":
+                    asset.impressions += 1
+                elif sg_event_type == "click":
+                    asset.clicks += 1
+
+        await db.commit()
+        logger.info(
+            "sendgrid_webhook_engagement_event_written",
+            event_type=engagement_event_type,
+            company_id=str(company_id),
+            asset_id=str(asset_id) if asset_id else None,
+        )
 
 
 async def _record_engagement_event(
@@ -243,5 +359,10 @@ async def _handle_inbound_reply(raw_from: str) -> None:
     """Handle inbound parse (multipart form) reply.
 
     raw_from may be "Name <email@domain.com>" — _pause_by_email calls _extract_email.
+    Also records a reply_received AttributionEvent for attribution tracking.
     """
     await _pause_by_email(raw_from)
+    # Record reply attribution event
+    email = _extract_email(raw_from)
+    if email:
+        await _record_engagement_event(None, email, "reply_received")

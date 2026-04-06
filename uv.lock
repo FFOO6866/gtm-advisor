@@ -42,7 +42,13 @@ members = [
     "gtm-advisor-tools",
     "gtm-advisor-vertical-intelligence",
     "gtm-advisor-workforce-architect",
+    "gtm-campaign-monitor",
+    "gtm-campaign-strategist",
     "gtm-company-enricher",
+    "gtm-edm-designer",
+    "gtm-graphic-designer",
+    "gtm-social-publisher",
+    "gtm-strategy-proposer",
     "intelligence",
     "knowledge",
     "vector-store",
@@ -1775,9 +1781,39 @@ requires-dist = [
 ]
 
 [[package]]
+name = "gtm-campaign-monitor"
+version = "0.1.0"
+source = { virtual = "agents/campaign_monitor" }
+
+[[package]]
+name = "gtm-campaign-strategist"
+version = "0.1.0"
+source = { virtual = "agents/campaign_strategist" }
+
+[[package]]
 name = "gtm-company-enricher"
 version = "0.1.0"
 source = { editable = "agents/company_enricher" }
+
+[[package]]
+name = "gtm-edm-designer"
+version = "0.1.0"
+source = { virtual = "agents/edm_designer" }
+
+[[package]]
+name = "gtm-graphic-designer"
+version = "0.1.0"
+source = { virtual = "agents/graphic_designer" }
+
+[[package]]
+name = "gtm-social-publisher"
+version = "0.1.0"
+source = { virtual = "agents/social_publisher" }
+
+[[package]]
+name = "gtm-strategy-proposer"
+version = "0.1.0"
+source = { virtual = "agents/strategy_proposer" }
 
 [[package]]
 name = "h11"

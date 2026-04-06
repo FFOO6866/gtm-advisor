@@ -1,4 +1,4 @@
-"""SQLAlchemy models for GTM Advisor.
+"""SQLAlchemy models for Kairos.
 
 Tables:
 - users: User accounts with subscription tiers
@@ -101,6 +101,23 @@ class CampaignStatus(str, PyEnum):
     COMPLETED = "completed"
 
 
+class RoadmapPhase(str, PyEnum):
+    """Time horizon for a campaign within a GTM roadmap."""
+
+    IMMEDIATE = "immediate"      # Week 1-2: Foundation setup
+    SHORT_TERM = "short_term"    # 30-60-90 days: Quick wins
+    MID_TERM = "mid_term"        # 3-6 months: Growth engine
+    LONG_TERM = "long_term"      # 6-12+ months: Scale + brand
+
+
+class RoadmapStatus(str, PyEnum):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    REVISED = "revised"
+
+
 class User(Base):
     """User account model."""
 
@@ -118,14 +135,14 @@ class User(Base):
 
     # Usage tracking
     daily_requests = Column(Integer, default=0)
-    last_request_date = Column(DateTime)
+    last_request_date = Column(DateTime(timezone=True))
 
     # User preferences
     preferences = Column(JSON, default=dict)  # UI settings, notifications, etc.
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     companies = relationship("Company", back_populates="owner")
@@ -171,11 +188,11 @@ class Company(Base):
 
     # Enrichment metadata
     enrichment_confidence = Column(Float, default=0.0)
-    last_enriched_at = Column(DateTime)
+    last_enriched_at = Column(DateTime(timezone=True))
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     owner = relationship("User", back_populates="companies")
@@ -233,8 +250,8 @@ class Analysis(Base):
     tool_calls = Column(Integer, default=0)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    completed_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    completed_at = Column(DateTime(timezone=True))
 
     # Relationships
     user = relationship("User", back_populates="analyses")
@@ -281,11 +298,11 @@ class Competitor(Base):
 
     # Tracking
     is_active = Column(Boolean, default=True)
-    last_updated = Column(DateTime, default=lambda: datetime.now(UTC))
+    last_updated = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     company = relationship("Company", back_populates="tracked_competitors")
@@ -320,8 +337,8 @@ class CompetitorAlert(Base):
     is_dismissed = Column(Boolean, default=False)
 
     # Timestamps
-    detected_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    read_at = Column(DateTime)
+    detected_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    read_at = Column(DateTime(timezone=True))
 
     # Relationships
     competitor = relationship("Competitor", back_populates="tracking_alerts")
@@ -363,8 +380,8 @@ class ICP(Base):
     is_active = Column(Boolean, default=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     company = relationship("Company", back_populates="icps")
@@ -408,8 +425,8 @@ class Persona(Base):
     is_active = Column(Boolean, default=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     icp = relationship("ICP", back_populates="personas")
@@ -466,10 +483,10 @@ class Lead(Base):
     tags = Column(JSON, default=list)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
-    contacted_at = Column(DateTime)
-    converted_at = Column(DateTime)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    contacted_at = Column(DateTime(timezone=True))
+    converted_at = Column(DateTime(timezone=True))
 
     # Relationships
     company = relationship("Company", back_populates="leads")
@@ -482,6 +499,111 @@ class Lead(Base):
 
     def __repr__(self) -> str:
         return f"<Lead {self.lead_company_name}>"
+
+
+# ---------------------------------------------------------------------------
+# Strategy Layer (sits between Insights and Campaigns)
+# Insights → Strategy (human gate) → Campaigns → Execute → Monitor
+# ---------------------------------------------------------------------------
+
+
+class StrategyStatus(str, PyEnum):
+    """Lifecycle status of an AI-proposed strategic initiative."""
+
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    REVISED = "revised"
+
+
+class StrategyPriority(str, PyEnum):
+    """User-visible priority of a strategic initiative."""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class Strategy(Base):
+    """A high-level strategic initiative — AI-proposed, user-approved.
+
+    The Strategy layer sits between Insights and Campaigns:
+    Insights → Strategy (human gate) → Campaigns → Execute → Monitor
+
+    Strategies are GENERIC — they work for any company on the platform.
+    The AI proposes them based on whatever insights the analysis produces.
+    """
+
+    __tablename__ = "strategies"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    roadmap_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("gtm_roadmaps.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Strategy content (AI-generated from insights)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    insight_sources: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # Which insights triggered this
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)  # Advisory language — why this matters
+    expected_outcome: Mapped[str] = mapped_column(String(500), nullable=False)
+    success_metrics: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # [{metric, target, current}]
+    priority: Mapped[StrategyPriority] = mapped_column(Enum(StrategyPriority), default=StrategyPriority.MEDIUM, nullable=False)
+    estimated_timeline: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    target_segment: Mapped[str | None] = mapped_column(String(300), nullable=True)  # Which ICP/segment this targets
+
+    # User interaction
+    status: Mapped[StrategyStatus] = mapped_column(Enum(StrategyStatus), default=StrategyStatus.PROPOSED, nullable=False, index=True)
+    user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<Strategy {self.name[:60]} ({self.status.value})>"
+
+
+# ---------------------------------------------------------------------------
+# GTM Roadmap (Phase 4 — Strategic Campaign Planning)
+# ---------------------------------------------------------------------------
+
+
+class GTMRoadmap(Base):
+    """AI-generated strategic GTM roadmap for a company.
+
+    The Campaign Strategist agent produces this based on analysis results,
+    market intelligence, and knowledge from 14 marketing reference books.
+    """
+
+    __tablename__ = "gtm_roadmaps"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    analysis_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    executive_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    gtm_motion: Mapped[str] = mapped_column(String(50), nullable=False)  # plg, slg, mlg, hybrid
+    status: Mapped[RoadmapStatus] = mapped_column(Enum(RoadmapStatus), default=RoadmapStatus.PROPOSED, nullable=False, index=True)
+    planning_horizon_months: Mapped[int] = mapped_column(Integer, default=12, nullable=False)
+
+    # AI reasoning transparency
+    company_diagnosis: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)  # maturity, gaps, strengths
+    frameworks_applied: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # [{name, why, campaigns_using}]
+    knowledge_sources: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # book/guide citations
+
+    # Confidence
+    confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<GTMRoadmap {self.title[:60]}>"
 
 
 class Campaign(Base):
@@ -522,15 +644,29 @@ class Campaign(Base):
     # Budget and timeline
     budget = Column(Float)
     currency = Column(String(3), default="SGD")
-    start_date = Column(DateTime)
-    end_date = Column(DateTime)
+    start_date = Column(DateTime(timezone=True))
+    end_date = Column(DateTime(timezone=True))
 
     # Performance (for tracking)
     metrics = Column(JSON, default=dict)  # impressions, clicks, leads, etc.
 
+    # Roadmap integration (Phase 4)
+    roadmap_id = Column(UUID(as_uuid=True), ForeignKey("gtm_roadmaps.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Strategy integration — link campaign back to the approved strategic initiative it executes
+    strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategies.id", ondelete="SET NULL"), nullable=True, index=True)
+    phase = Column(Enum(RoadmapPhase), nullable=True)  # immediate, short_term, mid_term, long_term
+    priority_rank = Column(Integer, nullable=True)  # Order within phase
+    framework_rationale = Column(Text, nullable=True)  # "RACE:Reach + Cialdini:Social Proof"
+    knowledge_source = Column(Text, nullable=True)  # Which book/guide drove this recommendation
+    recommended_by_ai = Column(Boolean, default=False)  # AI-proposed vs user-created
+    estimated_impact = Column(String(20), nullable=True)  # High, Medium, Low
+    depends_on_campaign_id = Column(UUID(as_uuid=True), ForeignKey("campaigns.id"), nullable=True)
+    content_types_needed = Column(JSON, default=list)  # ["linkedin_post", "edm", "whitepaper", "webinar"]
+    strategy_track = Column(String(200), nullable=True)  # "Digital Presence", "Outbound Sales", etc.
+
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     company = relationship("Company", back_populates="campaigns")
@@ -566,7 +702,7 @@ class MarketInsight(Base):
     # Source
     source_name = Column(String(200))
     source_url = Column(String(500))
-    published_at = Column(DateTime)
+    published_at = Column(DateTime(timezone=True))
 
     # Actionability
     recommended_actions = Column(JSON, default=list)
@@ -577,8 +713,8 @@ class MarketInsight(Base):
     is_archived = Column(Boolean, default=False)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    expires_at = Column(DateTime)  # When insight becomes stale
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    expires_at = Column(DateTime(timezone=True))  # When insight becomes stale
 
     # Relationships
     company = relationship("Company", back_populates="market_insights")
@@ -611,9 +747,9 @@ class Consent(Base):
     ip_address = Column(String(45))  # IPv4 or IPv6
 
     # Validity
-    granted_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    expires_at = Column(DateTime)
-    revoked_at = Column(DateTime)
+    granted_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    expires_at = Column(DateTime(timezone=True))
+    revoked_at = Column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("ix_consents_user_id", "user_id"),
@@ -653,7 +789,7 @@ class AuditLog(Base):
     duration_ms = Column(Float)
 
     # Timestamps
-    timestamp = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False, index=True)
 
     __table_args__ = (
         Index("ix_audit_logs_user_event", "user_id", "event_type"),
@@ -713,8 +849,8 @@ class StrategyRun(Base):
     execution_time_ms = Column(Float, default=0.0)
 
     # Timestamps
-    started_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    completed_at = Column(DateTime)
+    started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    completed_at = Column(DateTime(timezone=True))
 
     # Relationships
     phases = relationship(
@@ -745,8 +881,8 @@ class StrategyPhase(Base):
     icon = Column(String(10))
 
     # Timestamps
-    started_at = Column(DateTime)
-    completed_at = Column(DateTime)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
 
     # Relationships
     strategy_run = relationship("StrategyRun", back_populates="phases")
@@ -773,8 +909,8 @@ class StrategyRecommendation(Base):
     status = Column(Enum(RecommendationStatus), default=RecommendationStatus.PENDING)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     strategy_run = relationship("StrategyRun", back_populates="recommendations")
@@ -801,7 +937,7 @@ class AgentActivity(Base):
     icon = Column(String(10))
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 
     # Relationships
     strategy_run = relationship("StrategyRun", back_populates="activities")
@@ -847,8 +983,8 @@ class AgentRun(Base):
     result_summary = Column(Text)
 
     # Timestamps
-    started_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    completed_at = Column(DateTime)
+    started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    completed_at = Column(DateTime(timezone=True))
 
     __table_args__ = (
         Index("ix_agent_runs_company_id", "company_id"),
@@ -883,7 +1019,7 @@ class GeneratedContent(Base):
     include_cta = Column(Boolean, default=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 
     __table_args__ = (
         Index("ix_generated_content_company_id", "company_id"),
@@ -981,10 +1117,10 @@ class EvidencedFact(Base):
     raw_excerpt = Column(Text)  # Original text from source
 
     # Temporal context
-    published_at = Column(DateTime)  # When the source was published
-    captured_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    valid_from = Column(DateTime)  # When fact became true
-    valid_until = Column(DateTime)  # When fact stopped being true (if known)
+    published_at = Column(DateTime(timezone=True))  # When the source was published
+    captured_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    valid_from = Column(DateTime(timezone=True))  # When fact became true
+    valid_until = Column(DateTime(timezone=True))  # When fact stopped being true (if known)
 
     # Confidence scoring
     confidence = Column(Float, default=0.8, nullable=False)  # 0-1 confidence
@@ -1000,8 +1136,8 @@ class EvidencedFact(Base):
     is_stale = Column(Boolean, default=False)  # Marked as outdated
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     entity_links = relationship(
@@ -1047,7 +1183,7 @@ class Entity(Base):
 
     # Confidence and freshness
     confidence = Column(Float, default=0.8)
-    last_updated = Column(DateTime, default=lambda: datetime.now(UTC))
+    last_updated = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     fact_count = Column(Integer, default=0)  # Number of facts about this entity
 
     # Status
@@ -1055,8 +1191,8 @@ class Entity(Base):
     merged_into_id = Column(UUID(as_uuid=True))  # If entity was merged/deduplicated
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     fact_links = relationship(
@@ -1108,13 +1244,13 @@ class EntityRelation(Base):
     confidence = Column(Float, default=0.8)
 
     # Temporal validity
-    valid_from = Column(DateTime)
-    valid_until = Column(DateTime)
+    valid_from = Column(DateTime(timezone=True))
+    valid_until = Column(DateTime(timezone=True))
     is_current = Column(Boolean, default=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     source_entity = relationship(
@@ -1157,7 +1293,7 @@ class FactEntityLink(Base):
     relevance = Column(Float, default=1.0)  # How relevant the fact is to the entity
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 
     # Relationships
     fact = relationship("EvidencedFact", back_populates="entity_links")
@@ -1185,7 +1321,7 @@ class FactRelationLink(Base):
     is_primary_evidence = Column(Boolean, default=False)  # Is this the main evidence?
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 
     # Relationships
     fact = relationship("EvidencedFact", back_populates="relation_links")
@@ -1225,8 +1361,8 @@ class LeadJustification(Base):
     evidence_summary = Column(Text)  # Human-readable summary of evidence
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    detected_at = Column(DateTime, default=lambda: datetime.now(UTC))  # When signal was detected
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    detected_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC))  # When signal was detected
 
     __table_args__ = (
         Index("ix_lead_justifications_lead", "lead_id"),
@@ -1265,12 +1401,12 @@ class CompetitorSignal(Base):
 
     # Status
     is_acknowledged = Column(Boolean, default=False)
-    acknowledged_at = Column(DateTime)
+    acknowledged_at = Column(DateTime(timezone=True))
     response_status = Column(String(20))  # pending, in_progress, addressed, ignored
 
     # Timestamps
-    detected_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    detected_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 
     __table_args__ = (
         Index("ix_competitor_signals_competitor", "competitor_id"),
@@ -1302,8 +1438,8 @@ class MCPDataSource(Base):
     # Status
     is_enabled = Column(Boolean, default=True)
     is_healthy = Column(Boolean, default=True)
-    last_health_check = Column(DateTime)
-    last_sync = Column(DateTime)
+    last_health_check = Column(DateTime(timezone=True))
+    last_sync = Column(DateTime(timezone=True))
 
     # Usage tracking
     total_facts_produced = Column(Integer, default=0)
@@ -1313,11 +1449,11 @@ class MCPDataSource(Base):
     # Rate limiting
     rate_limit_per_hour = Column(Integer)
     requests_this_hour = Column(Integer, default=0)
-    rate_limit_reset_at = Column(DateTime)
+    rate_limit_reset_at = Column(DateTime(timezone=True))
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     __table_args__ = (
         Index("ix_mcp_data_sources_name", "name"),
@@ -1380,8 +1516,8 @@ class WorkforceConfig(Base):
     agent_count = Column(Integer, default=0)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
     # Relationships
     company = relationship("Company")
@@ -1430,8 +1566,8 @@ class ExecutionRun(Base):
     execution_log = Column(JSON, default=list)
 
     # Timestamps
-    started_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
-    completed_at = Column(DateTime)
+    started_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
+    completed_at = Column(DateTime(timezone=True))
 
     # Relationships
     workforce_config = relationship("WorkforceConfig", back_populates="execution_runs")
@@ -1475,7 +1611,7 @@ class ExecutionMetric(Base):
     agent_type = Column(String(100))
     notes = Column(Text)
 
-    captured_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    captured_at = Column(DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False)
 
     # Relationships
     execution_run = relationship("ExecutionRun", back_populates="metrics")
@@ -1679,6 +1815,95 @@ class AttributionEvent(Base):
 
 
 # ---------------------------------------------------------------------------
+# Creative Assets & Engagement Tracking (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+class CreativeAssetType(str, PyEnum):
+    """Type of creative asset."""
+
+    EDM_HTML = "edm_html"
+    SOCIAL_IMAGE = "social_image"
+    AD_BANNER = "ad_banner"
+    LANDING_PAGE = "landing_page"
+
+
+class CreativeAssetStatus(str, PyEnum):
+    DRAFT = "draft"
+    PENDING_REVIEW = "pending_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    PUBLISHED = "published"
+
+
+class CreativeAsset(Base):
+    """A produced creative asset linked to a campaign."""
+
+    __tablename__ = "creative_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    campaign_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False, index=True)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_type: Mapped[CreativeAssetType] = mapped_column(Enum(CreativeAssetType), nullable=False)
+    status: Mapped[CreativeAssetStatus] = mapped_column(Enum(CreativeAssetStatus), default=CreativeAssetStatus.DRAFT, nullable=False, index=True)
+
+    # Content
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    content_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    image_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    copy_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    call_to_action: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    target_platform: Mapped[str | None] = mapped_column(String(50), nullable=True)  # linkedin, instagram, facebook, x, email
+    target_persona: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # Variant tracking
+    variant_label: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "A", "B", "C"
+    parent_asset_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("creative_assets.id"), nullable=True)
+
+    # Approval
+    approved_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Publishing
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    external_post_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    publish_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Performance (populated by monitor agent)
+    impressions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    clicks: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    engagements: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    conversions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
+
+
+class EngagementEvent(Base):
+    """Granular engagement event from email webhooks or social API polling."""
+
+    __tablename__ = "engagement_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
+    campaign_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("campaigns.id"), nullable=True, index=True)
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("creative_assets.id"), nullable=True, index=True)
+    lead_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("leads.id"), nullable=True, index=True)
+
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    # event_type values: email_open, email_click, email_bounce, email_unsubscribe,
+    #                    social_impression, social_like, social_share, social_comment,
+    #                    social_click, page_visit, form_fill
+
+    channel: Mapped[str] = mapped_column(String(30), nullable=False)  # email, linkedin, facebook, x, instagram
+    source_message_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    url_clicked: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+# ---------------------------------------------------------------------------
 # Playbook Templates (built-in + custom)
 # ---------------------------------------------------------------------------
 
@@ -1732,6 +1957,7 @@ class MarketVertical(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     slug: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    industry_category: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     ssic_sections: Mapped[list] = mapped_column(JSON, default=list)    # e.g. ["K", "J"]
     ssic_codes: Mapped[list] = mapped_column(JSON, default=list)       # specific 5-digit codes

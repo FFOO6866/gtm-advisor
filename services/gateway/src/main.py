@@ -1,6 +1,6 @@
-"""GTM Advisor Gateway - FastAPI Application.
+"""Kairos Gateway - FastAPI Application.
 
-Main entry point for the GTM Advisor API.
+Main entry point for the Kairos API.
 Provides endpoints for:
 - Agent interaction
 - Company profile management
@@ -59,9 +59,11 @@ from .routers import (  # noqa: E402
     leads,
     market_data,
     playbooks,
+    roadmap,
     sequences,
     settings,
     signals,
+    strategies,
     strategy,
     webhooks,
     websocket,
@@ -75,7 +77,7 @@ logger = structlog.get_logger()
 async def lifespan(_app: FastAPI):
     """Application lifespan handler."""
     # Startup
-    logger.info("gtm_advisor_starting", version="0.1.0")
+    logger.info("kairos_starting", version="0.1.0")
     config = get_config()
     logger.info(
         "config_loaded",
@@ -183,7 +185,7 @@ async def lifespan(_app: FastAPI):
     await stop_scheduler()
 
     # Shutdown
-    logger.info("gtm_advisor_stopping")
+    logger.info("kairos_stopping")
     await close_cache()
     logger.info("cache_closed")
     await close_db()
@@ -191,7 +193,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
-    title="GTM Advisor API",
+    title="Kairos API",
     description=(
         "Self-Service Agentic AI Platform for Go-To-Market Advisory. "
         "Empowers Singapore SMEs with AI-driven GTM strategies and lead generation."
@@ -238,8 +240,10 @@ app.include_router(competitors.router, prefix="/api/v1/companies", tags=["Compet
 app.include_router(icps.router, prefix="/api/v1/companies", tags=["ICPs & Personas"])
 app.include_router(leads.router, prefix="/api/v1/companies", tags=["Leads"])
 app.include_router(campaigns.router, prefix="/api/v1/companies", tags=["Campaigns"])
+app.include_router(roadmap.router, prefix="/api/v1/companies", tags=["GTM Roadmap"])
 app.include_router(insights.router, prefix="/api/v1/companies", tags=["Market Insights"])
 app.include_router(strategy.router, prefix="/api/v1/companies", tags=["Strategy"])
+app.include_router(strategies.router, prefix="/api/v1/companies", tags=["Strategies"])
 app.include_router(company_agents.router, prefix="/api/v1/companies", tags=["Company Agents"])
 app.include_router(exports.router, prefix="/api/v1/exports", tags=["Exports"])
 app.include_router(settings.router, prefix="/api/v1/settings", tags=["Settings"])
@@ -258,9 +262,9 @@ app.include_router(documents.router, tags=["Documents"])
 async def root() -> dict[str, Any]:
     """Root endpoint with API information."""
     return {
-        "name": "GTM Advisor API",
+        "name": "Kairos API",
         "version": "0.1.0",
-        "description": "AI-powered Go-To-Market Advisory Platform",
+        "description": "AI-powered Go-To-Market Advisory Platform — Kairos",
         "docs": "/docs",
         "health": "/health",
     }

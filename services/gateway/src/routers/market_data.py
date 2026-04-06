@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from packages.core.src.vertical import detect_vertical_slug
+from packages.core.src.vertical import _VERTICAL_KEYWORDS, detect_vertical_slug
 from packages.database.src.models import (
     Analysis,
     Company,
@@ -80,6 +80,7 @@ class LeaderLaggardResponse(BaseModel):
 class VerticalSummaryResponse(BaseModel):
     vertical_slug: str | None = None
     vertical_name: str | None = None
+    industry_category: str | None = None
     listed_companies_count: int = 0
     market_cap_total_sgd: float | None = None
     benchmarks: list[BenchmarkPeriodResponse] = []
@@ -260,6 +261,7 @@ async def vertical_summary(
     return VerticalSummaryResponse(
         vertical_slug=vertical.slug,
         vertical_name=vertical.name,
+        industry_category=vertical.industry_category,
         listed_companies_count=agg.cnt or 0,
         market_cap_total_sgd=agg.mcap,
         benchmarks=benchmarks,
@@ -346,9 +348,21 @@ async def industry_signals(
                 MarketArticle.published_at >= cutoff,
             )
             .order_by(desc(MarketArticle.published_at))
-            .limit(limit)
+            .limit(limit * 3)  # over-fetch to compensate for relevance filtering
         )
         art_rows = (await db.execute(art_stmt)).scalars().all()
+
+        # Filter articles by vertical keyword relevance so off-topic RSS
+        # items (e.g. "Hawaii Invasive Pests") never surface.
+        keywords = _VERTICAL_KEYWORDS.get(vertical.slug, [])
+        if keywords:
+            filtered: list[MarketArticle] = []
+            for a in art_rows:
+                title_lower = (a.title or "").lower()
+                if any(kw in title_lower for kw in keywords):
+                    filtered.append(a)
+            art_rows = filtered[:limit]
+
         articles = [
             MarketArticleResponse(
                 id=str(a.id),
@@ -533,6 +547,7 @@ class VerticalIntelligenceResponse(BaseModel):
     id: str
     vertical_slug: str | None = None
     vertical_name: str | None = None
+    industry_category: str | None = None
     report_period: str
     computed_at: str | None = None
     market_overview: dict = {}
@@ -635,8 +650,8 @@ def _report_to_response(
     key_trends = [
         KeyTrendResponse(
             trend=t.get("trend", "") if isinstance(t, dict) else str(t),
-            evidence=t.get("evidence") if isinstance(t, dict) else None,
-            impact=t.get("impact") if isinstance(t, dict) else None,
+            evidence=", ".join(t["evidence"]) if isinstance(t, dict) and isinstance(t.get("evidence"), list) else (t.get("evidence") if isinstance(t, dict) else None),
+            impact=", ".join(t["impact"]) if isinstance(t, dict) and isinstance(t.get("impact"), list) else (t.get("impact") if isinstance(t, dict) else None),
             source_count=t.get("source_count") if isinstance(t, dict) else None,
         )
         for t in key_trends_raw
@@ -709,6 +724,7 @@ def _report_to_response(
         id=str(report.id),
         vertical_slug=vertical.slug,
         vertical_name=vertical.name,
+        industry_category=vertical.industry_category,
         report_period=report.report_period,
         computed_at=report.computed_at.isoformat() if report.computed_at else None,
         market_overview=report.market_overview or {},

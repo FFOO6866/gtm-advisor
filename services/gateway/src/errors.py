@@ -1,4 +1,4 @@
-"""Error handling and exception handlers for GTM Advisor Gateway.
+"""Error handling and exception handlers for Kairos Gateway.
 
 Provides consistent error response formatting and logging across all endpoints.
 """
@@ -28,7 +28,7 @@ def _is_production() -> bool:
 
 
 class GTMError(Exception):
-    """Base exception for GTM Advisor application errors."""
+    """Base exception for Kairos application errors."""
 
     def __init__(
         self,

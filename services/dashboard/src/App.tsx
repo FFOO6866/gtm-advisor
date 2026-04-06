@@ -1,7 +1,7 @@
 /**
- * GTM Advisor Dashboard - Main Application
+ * Hi Meet.AI Dashboard - Main Application
  *
- * Production-ready dashboard connecting to real backend API.
+ * Dashboard connecting to real backend API.
  * NO mock data, NO simulations - live agent execution only.
  */
 
@@ -45,6 +45,8 @@ import {
   ApprovalsInbox,
   SignalsFeed,
   WhyUsPage,
+  InsightsPage,
+  StrategyPage,
   DashboardPage,
   SequencesPage,
   PlaybooksPage,
@@ -53,6 +55,7 @@ import {
   CampaignsPage,
   ContentPage,
   ResultsPage,
+  LandingPage,
   LoginPage,
   RegisterPage,
 } from './pages';
@@ -73,7 +76,8 @@ function App() {
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/analyze" element={<Dashboard />} />
 
           {/* Agent workspace pages — own full-screen layout, no auth required */}
           <Route path="/agent/market-intelligence" element={<IntelligenceWorkspace />} />
@@ -86,22 +90,26 @@ function App() {
           <Route path="/agent/:agentId" element={<GenericAgentWorkspace />} />
 
           {/* Authenticated app — AppShell provides Header + SidebarNav + Aurora */}
+          {/* Route order follows campaign lifecycle: Observe → Understand → Create → Approve → Track → Measure */}
           <Route element={<AppShell />}>
+            {/* Primary nav (campaign lifecycle) */}
             <Route path="/today" element={<TodayPage />} />
+            <Route path="/insights" element={<InsightsPage />} />
+            <Route path="/strategy" element={<StrategyPage />} />
             <Route path="/campaigns" element={<CampaignsPage />} />
-            <Route path="/prospects" element={<LeadsPipeline />} />
-            <Route path="/content" element={<ContentPage />} />
-            <Route path="/insights" element={<SignalsFeed />} />
-            <Route path="/results" element={<ResultsPage />} />
-            {/* Operational / legacy routes */}
-            <Route path="/leads" element={<LeadsPipeline />} />
             <Route path="/approvals" element={<ApprovalsInbox />} />
+            <Route path="/prospects" element={<LeadsPipeline />} />
+            <Route path="/results" element={<ResultsPage />} />
+            {/* Operations */}
+            <Route path="/sequences" element={<SequencesPage />} />
+            <Route path="/workforce" element={<WorkforceWorkspacePage />} />
+            {/* Legacy / redirect routes */}
+            <Route path="/content" element={<ContentPage />} />
+            <Route path="/leads" element={<LeadsPipeline />} />
             <Route path="/signals" element={<SignalsFeed />} />
             <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/sequences" element={<SequencesPage />} />
             <Route path="/playbooks" element={<PlaybooksPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/workforce" element={<WorkforceWorkspacePage />} />
             <Route path="/why-us" element={<WhyUsPage />} />
           </Route>
         </Routes>
@@ -610,7 +618,7 @@ function Dashboard() {
       <div className="min-h-screen bg-surface flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-white/70">Connecting to GTM Advisor...</p>
+          <p className="text-white/70">Connecting to Hi Meet.AI...</p>
         </div>
       </div>
     );

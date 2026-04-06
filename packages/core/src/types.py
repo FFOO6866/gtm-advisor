@@ -1,4 +1,4 @@
-"""GTM Advisor Type Definitions.
+"""Kairos Type Definitions.
 
 Domain-specific types for GTM advisory platform.
 """

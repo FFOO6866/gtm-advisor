@@ -160,7 +160,7 @@ export function StrategyWorkspace() {
         <EmptyState
           icon="🏢"
           title="No Company Selected"
-          description="Please complete onboarding to start your GTM strategy."
+          description="Please complete onboarding to start your growth strategy."
         />
       </AgentWorkspace>
     );
@@ -182,7 +182,7 @@ export function StrategyWorkspace() {
         <div className="space-y-6">
           {/* Strategy Phases */}
           <Card>
-            <h3 className="text-lg font-semibold text-white mb-4">GTM Strategy Phases</h3>
+            <h3 className="text-lg font-semibold text-white mb-4">Strategy Phases</h3>
             {phases.length > 0 ? (
               <div className="flex items-center justify-between">
                 {phases.map((phase, index) => (
@@ -195,7 +195,7 @@ export function StrategyWorkspace() {
               </div>
             ) : (
               <p className="text-white/50 text-center py-4">
-                Run the strategist to begin your GTM journey
+                Run the strategist to begin your growth strategy
               </p>
             )}
           </Card>

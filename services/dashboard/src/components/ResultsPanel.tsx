@@ -87,7 +87,7 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
             className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm"
           >
             <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-purple-400">
-              GTM Intelligence Summary
+              Growth Intelligence Summary
             </h3>
             <p className="text-base leading-relaxed text-white/90">{results.executiveSummary}</p>
           </motion.div>
@@ -101,7 +101,7 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
             className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6 backdrop-blur-sm"
           >
             <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-emerald-400">
-              Your GTM Action Plan
+              Your Action Plan
             </h3>
             <div className="space-y-3">
               {results.keyRecommendations.map((rec, i) => (
@@ -526,11 +526,11 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
                 <p className="text-xs text-white/50 uppercase tracking-wider font-medium mb-3">Included in full access</p>
                 <div className="space-y-2">
                   {[
-                    { icon: Bot, label: 'AI Command Centre — live daily briefing' },
-                    { icon: Zap, label: 'Signal Feed — competitor & market alerts' },
-                    { icon: Mail, label: 'Automated outreach sequences' },
-                    { icon: Users, label: 'Full prospect pipeline (Kanban)' },
-                    { icon: TrendingUp, label: 'Revenue attribution & ROI tracking' },
+                    { icon: Bot, label: 'Daily intelligence briefing' },
+                    { icon: Zap, label: 'Competitive & market signal monitoring' },
+                    { icon: Mail, label: 'Coordinated outreach sequences' },
+                    { icon: Users, label: 'Prospect pipeline & fit scoring' },
+                    { icon: TrendingUp, label: 'Performance attribution & tracking' },
                   ].map(({ icon: Icon, label }) => (
                     <div key={label} className="flex items-center gap-2.5 text-white/40">
                       <Lock className="w-3 h-3 text-white/20 flex-shrink-0" />
@@ -549,10 +549,10 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
                 className="w-full py-3.5 rounded-xl bg-gradient-to-r from-purple-500 to-blue-600 text-white font-semibold hover:from-purple-600 hover:to-blue-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20"
               >
                 <Zap className="w-4 h-4" />
-                Unlock Full Dashboard
+                Get Full Access
                 <ArrowRight className="w-4 h-4" />
               </motion.button>
-              <p className="text-center text-xs text-white/30 mt-2">Free to start · No credit card required</p>
+              <p className="text-center text-xs text-white/30 mt-2">Request access to the full platform</p>
 
               <div className="mt-3 text-center">
                 <button

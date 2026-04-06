@@ -1,4 +1,4 @@
-"""GTM Advisor Tools Package.
+"""Kairos Tools Package.
 
 Operational tools for real-world data operations.
 All tools have explicit access boundaries and audit logging.

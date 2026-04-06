@@ -1,6 +1,6 @@
 """Static marketing frameworks distilled from reference literature.
 
-Layer 1 of the GTM Advisor knowledge synthesis pipeline.  These are
+Layer 1 of the Kairos knowledge synthesis pipeline.  These are
 hand-curated, structured representations of the most important frameworks from
 the 14 reference books.  They are always available — no PDF parsing, no
 embeddings, no network calls.
@@ -363,7 +363,7 @@ MESSAGING_FRAMEWORKS: dict[str, dict] = {
             "Your AEs spend 6 hours per week on manual CRM data entry instead of selling.' "
             "After: 'Imagine a pipeline where every lead is pre-qualified, every contact record "
             "is auto-enriched, and your AEs spend 6 hours per day in meaningful conversations.' "
-            "Bridge: 'GTM Advisor identifies and scores your ideal prospects using live market "
+            "Bridge: 'Kairos identifies and scores your ideal prospects using live market "
             "signals, pre-enriches them with firmographic data, and queues personalised outreach "
             "— automatically.'"
         ),
@@ -553,7 +553,7 @@ MADE_TO_STICK_SUCCESS: dict[str, dict] = {
             "someone outside your industry understand this immediately?"
         ),
         "example": (
-            "GTM Advisor's simple core idea: 'Real GTM strategy, not generic AI advice.' "
+            "Kairos's simple core idea: 'Real GTM strategy, not generic AI advice.' "
             "Every feature, message, and campaign should reinforce this single idea. "
             "When a message has three equally prominent ideas, it has no ideas."
         ),
@@ -770,7 +770,7 @@ STP_FRAMEWORK: dict[str, dict] = {
             },
             "by_competitor": {
                 "description": "Position explicitly against a known alternative",
-                "example": "'Salesforce for large enterprises. GTM Advisor for Singapore SMEs.'",
+                "example": "'Salesforce for large enterprises. Kairos for Singapore SMEs.'",
             },
             "by_price_quality": {
                 "description": "Own the high-value or value-for-money position",

@@ -1,4 +1,4 @@
-"""GTM Advisor Error Hierarchy.
+"""Kairos Error Hierarchy.
 
 All custom errors inherit from GTMError for consistent handling.
 """
@@ -9,7 +9,7 @@ from typing import Any
 
 
 class GTMError(Exception):
-    """Base exception for all GTM Advisor errors."""
+    """Base exception for all Kairos errors."""
 
     def __init__(
         self,

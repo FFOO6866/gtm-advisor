@@ -4,7 +4,7 @@ Computes percentile distributions for a vertical's listed companies.
 Used by:
 - VerticalBenchmark DB rows (precomputed, refreshed weekly)
 - MarketIntelAgent._do() for real-time peer comparison
-- GTM Advisor UI: "Your company vs peers"
+- Kairos UI: "Your company vs peers"
 
 Metrics for OPERATING COMPANIES:
   revenue_growth_yoy, gross_margin, ebitda_margin, net_margin, roe, net_debt_ebitda

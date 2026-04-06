@@ -198,7 +198,7 @@ export function PlaybooksPage() {
       <div className="flex-shrink-0 px-6 py-4 border-b border-white/10">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">GTM Playbooks</h1>
+            <h1 className="text-lg font-semibold text-white">Growth Playbooks</h1>
             <p className="text-xs text-white/40">Pre-built outreach strategies for Singapore SMEs</p>
           </div>
           <div className="flex items-center gap-2 text-xs text-white/30">
