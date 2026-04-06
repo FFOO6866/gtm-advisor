@@ -87,6 +87,16 @@ class SequenceEngine:
         if existing.scalar_one_or_none():
             raise ValueError(f"Lead {lead_id} already has an active sequence enrollment")
 
+        # Block re-enrollment of opted-out leads (PDPA compliance)
+        opted_out = await self._db.execute(
+            select(SequenceEnrollment).where(
+                SequenceEnrollment.lead_id == lead_id,
+                SequenceEnrollment.status == EnrollmentStatus.OPTED_OUT,
+            )
+        )
+        if opted_out.scalar_one_or_none():
+            raise ValueError(f"Lead {lead_id} has opted out and cannot be re-enrolled")
+
         # Get template to determine first step due date
         template = await self._db.get(SequenceTemplate, template_id)
         if not template:
@@ -104,6 +114,21 @@ class SequenceEngine:
             trigger_signal_id=trigger_signal_id,
         )
         self._db.add(enrollment)
+
+        # Record consent audit trail (PDPA compliance)
+        from packages.database.src.models import AttributionEvent
+        self._db.add(AttributionEvent(
+            company_id=company_id,
+            lead_id=lead_id,
+            event_type="consent_recorded",
+            recorded_by="system",
+            metadata_json={
+                "purpose": "MARKETING",
+                "source": "sequence_enrollment",
+                "template_id": str(template_id),
+            },
+        ))
+
         await self._db.commit()
         await self._db.refresh(enrollment)
 

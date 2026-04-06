@@ -161,6 +161,13 @@ async def bulk_approve(
                 item.approved_by = body.approved_by
                 item.reviewed_at = datetime.now(UTC)
                 item.scheduled_send_at = datetime.now(UTC)
+                db.add(AttributionEvent(
+                    company_id=company_id,
+                    lead_id=item.lead_id,
+                    approval_item_id=item.id,
+                    event_type="email_approved",
+                    recorded_by=body.approved_by,
+                ))
                 to_send.append((item.id, item.to_email, item.to_name, item.final_subject, item.final_body, str(item.lead_id)))
                 approved += 1
         except Exception:
@@ -225,6 +232,7 @@ async def _send_approved_email(
             approval_item_id=item.id,
             event_type="email_sent" if sent else "email_send_skipped",
             recorded_by="system",
+            metadata_json={"message_id": message_id} if message_id else {},
         ))
         await db.commit()
 

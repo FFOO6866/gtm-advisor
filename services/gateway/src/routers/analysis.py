@@ -251,9 +251,10 @@ async def start_analysis(
         )
         if _existing_co:
             company_id = _existing_co.id
-            # Update fields with latest input
+            # Update fields with latest input — preserve manually curated industry
             _existing_co.description = analysis_request.description or _existing_co.description
-            _existing_co.industry = analysis_request.industry.value
+            if analysis_request.industry != IndustryVertical.OTHER and not _existing_co.industry:
+                _existing_co.industry = analysis_request.industry.value
             _existing_co.website = analysis_request.website or _existing_co.website
             _existing_co.goals = analysis_request.goals or _existing_co.goals
             _existing_co.challenges = analysis_request.challenges or _existing_co.challenges
@@ -436,19 +437,31 @@ async def quick_analysis(
         result = await run_analysis_sync(analysis_request)
         processing_time = time.time() - start_time
 
-        # Save to database
-        company = Company(
-            name=analysis_request.company_name,
-            website=analysis_request.website,
-            description=analysis_request.description,
-            industry=analysis_request.industry.value,
-            owner_id=user_id,
-            context_sources=(
-                [_make_source_entry("document", "uploaded_document", analysis_request.additional_context)]
-                if analysis_request.additional_context else []
-            ),
+        # Save to database — reuse existing company if one matches
+        _dedup_filters = [Company.name == analysis_request.company_name]
+        if user_id:
+            _dedup_filters.append(Company.owner_id == user_id)
+        else:
+            _dedup_filters.append(Company.owner_id.is_(None))
+        company = await db.scalar(
+            select(Company).where(*_dedup_filters).order_by(Company.created_at.desc()).limit(1)
         )
-        db.add(company)
+        if company:
+            company.description = analysis_request.description or company.description
+            company.website = analysis_request.website or company.website
+        else:
+            company = Company(
+                name=analysis_request.company_name,
+                website=analysis_request.website,
+                description=analysis_request.description,
+                industry=analysis_request.industry.value,
+                owner_id=user_id,
+                context_sources=(
+                    [_make_source_entry("document", "uploaded_document", analysis_request.additional_context)]
+                    if analysis_request.additional_context else []
+                ),
+            )
+            db.add(company)
         await db.flush()
 
         analysis = Analysis(
@@ -652,6 +665,16 @@ async def run_analysis(analysis_id: UUID, request: AnalysisRequest) -> None:
                             original=request.industry.value,
                             detected=_vi_slug,
                         )
+                    # Persist the detected vertical back to the company so
+                    # TodayPage shows the correct vertical on subsequent visits.
+                    try:
+                        async with async_session_factory() as _up_db:
+                            _co = await _up_db.get(Company, analysis.company_id)
+                            if _co and _co.industry != _vi_slug:
+                                _co.industry = _vi_slug
+                                await _up_db.commit()
+                    except Exception:
+                        pass  # best-effort
             except Exception as _vi_err:
                 logger.debug("vi_preflight_failed", error=str(_vi_err))
 

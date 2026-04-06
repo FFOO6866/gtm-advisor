@@ -207,19 +207,21 @@ class TestSignatureRegistry:
         register_signature(sig2)
         assert get_signature("my-agent").required_context_keys == ["b"]
 
-    def test_reset_restores_6_defaults(self):
+    def test_reset_restores_defaults(self):
         reset_signature_registry()
         sigs = list_signatures()
         names = {s.agent_name for s in sigs}
         expected = {
-            "market-intelligence", "competitor-analyst", "customer-profiler",
-            "lead-hunter", "campaign-architect", "gtm-strategist",
+            "company-enricher", "gtm-strategist", "market-intelligence",
+            "competitor-analyst", "customer-profiler", "lead-hunter",
+            "campaign-architect", "workforce-architect", "outreach-executor",
+            "crm-sync", "signal-monitor", "lead-enrichment",
         }
         assert names == expected
 
     def test_list_signatures_returns_all(self):
         reset_signature_registry()
-        assert len(list_signatures()) == 6
+        assert len(list_signatures()) == 12
 
     def test_lead_hunter_emits_lead_found(self):
         """lead-hunter must declare LEAD_FOUND in its emit list."""

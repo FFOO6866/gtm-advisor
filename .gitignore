@@ -88,6 +88,7 @@ logs/
 # Database
 *.db
 *.sqlite3
+gtm_dev.db
 
 # Secrets (never commit these!)
 secrets/
@@ -104,6 +105,8 @@ data/knowledge/
 data/qdrant/
 # Vertical intelligence data (generated locally, too large for git)
 data/intel/
+# DALL-E generated creative assets (binary PNGs, generated on demand)
+data/creative_assets/
 
 # Node modules (for dashboard)
 node_modules/
@@ -118,3 +121,4 @@ services/dashboard/.next/
 tmp/
 temp/
 *.tmp
+dump.rdb
