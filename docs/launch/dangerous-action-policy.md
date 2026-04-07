@@ -76,13 +76,35 @@ These endpoints touch execution-related state but pass the policy test (no exter
 
 ---
 
-## Watch list (potential dangerous actions to review in Cycle 4)
+## Watch list (potential dangerous actions, reviewed each cycle)
 
-These endpoints **may become dangerous** as the execution layer evolves. Cycle 4 (Execution Layer Verification) will re-audit:
+These endpoints **may become dangerous** as the execution layer evolves. Re-audited in each cycle's execution verification.
 
-- `POST /companies/{id}/campaigns/{id}/activate` — currently safe, but if it ever triggers a sequence runner or sends, it becomes dangerous
-- `POST /companies/{id}/workforce/design` — currently creates a config record only, but if it ever auto-executes the design, it becomes dangerous
+- `POST /companies/{id}/campaigns/{id}/activate` — currently safe. **Re-audited in Cycle 4**: grep for `CampaignStatus.ACTIVE` returns only the setter itself; no scheduler or handler consumes it. Still a watch item for any future wiring. (LD-9)
+- `POST /companies/{id}/workforce/design` — currently creates a config record only; re-audited Cycle 4 as safe.
+- `PATCH /companies/{id}/workforce/{id}/approve` — transitions DRAFT → ACTIVE. Before Cycle 4's F-1 fix, this implicitly enabled a scheduler cascade (signal monitor → auto-enroll → enrollments). Cycle 4 broke the cascade at the scheduler call site, so `/approve` does not need HTTP protection and remains exempt. See Cycle 4 finding F-2 in `execution-verification.md`.
+- `POST /api/v1/agents/{name}/run` and `POST /api/v1/companies/{id}/agents/{id}/run` — currently safe because the agent registry at `agents_registry.py` narrows to the 6 analysis agents. This is an **implicit** gate; if execution agents (outreach-executor, crm-sync) are ever added to the registry, these endpoints become bypasses. See Cycle 4 finding F-4.
 - Any new agent endpoint that posts to social media, books meetings, or calls external APIs
+
+## Scheduler coverage (added in Cycle 4)
+
+The dangerous-action policy was originally expressed in terms of HTTP endpoints. Cycle 4 extended it to scheduler jobs, because background automation is the second surface of the execution layer.
+
+**Gated execution-tier scheduler jobs** (registered only when `GTM_LAUNCH_MODE != v1`; `_run_sequence_runner` also has a call-time check):
+
+| Job | Gate | Reason |
+|---|---|---|
+| `sequence_runner_daily` | Registration gate + call-time `is_launch_mode_v1()` | Clause 1 (processes due steps into approval queue, then SendGrid send) |
+| `lead_enrichment_weekly` | Registration gate only | Currently no external effect; runtime gate is a polish item (LD-10) |
+| `roi_summary_weekly` | Registration gate only | Currently no external effect; TODO at `scheduler.py:537` would flip this to clause-1 dangerous — runtime gate is a watch item |
+
+**Embedded cascade gated at the call site** (Cycle 4):
+
+| Job | Gate | Reason |
+|---|---|---|
+| `_run_signal_monitor_all_active` — `auto_enroll_from_signals` call | Call-time `is_launch_mode_v1()` skip around the enrollment call only; signal monitor itself continues to run | Clause 3 (cascading state transition): creating `SequenceEnrollment` rows is the cascade's dangerous step. See Cycle 4 finding F-1. |
+
+**Non-execution scheduler jobs** (research, analytics, embedding — 14 jobs): not gated. None produce external effects. Full enumeration in `execution-verification.md` section C.
 
 ---
 

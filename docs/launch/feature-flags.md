@@ -89,12 +89,16 @@ Together: a customer who discovers a leaked URL hits a silent redirect; an attac
 | `lead_enrichment_weekly` | Sun 02:00 SGT | ✅ | No re-enrichment pipeline exposed |
 | `roi_summary_weekly` | Mon 07:00 SGT | ✅ | No attribution data yet |
 
-**14 other scheduler jobs remain enabled** (RSS ingestion, financial sync, vertical benchmarks, signal monitor, article intelligence, etc.).
+**15 other scheduler jobs remain enabled** (RSS ingestion, financial sync, vertical benchmarks, signal monitor, article intelligence, etc.).
 
-Additionally, `_run_sequence_runner` has a runtime safety check (added Cycle 2):
-it calls `is_launch_mode_v1()` at job invocation time, not just at registration
-time. This protects against the case where the scheduler is started without
-the env var, the var is set later, and a stale job somehow executes.
+Additionally, two runtime safety checks are active inside scheduled jobs:
+
+| Job | Runtime check | Added | Purpose |
+|-----|---------------|-------|---------|
+| `_run_sequence_runner` | Whole-job `is_launch_mode_v1()` early-return | Cycle 2 | Prevents sequence runner from firing if env was unset at startup but set later |
+| `_run_signal_monitor_all_active` — `auto_enroll_from_signals` call | Gate around the embedded call only; signal monitoring itself continues | **Cycle 4, finding F-1** | Signal monitor is benign research, but its embedded call to `auto_enroll_from_signals` creates `SequenceEnrollment` rows — a cascading state transition per policy clause 3. Must be gated at the cascade's source, not just at the downstream runner. |
+
+The Cycle 4 gate is regression-tested in `tests/unit/test_launch_mode_deny.py::TestSchedulerAutoEnrollGate`.
 
 ## Protected backend endpoints (Cycle 2; refined Cycle 3)
 

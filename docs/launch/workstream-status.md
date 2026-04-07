@@ -1,7 +1,7 @@
 # Hi Meet AI — v1 Workstream Status
 
 **Branch**: `rc/v0.1.0` (v1 development trunk)
-**Last updated**: Cycle 3 (Tier-2 Surface Polish + Program Refinements)
+**Last updated**: Cycle 4 (Execution Layer Verification)
 
 ## Workstream overview
 
@@ -9,7 +9,7 @@
 |--------|-------|--------|
 | **A — Core Workflows** | Onboarding, Analysis, Results, TodayPage, Prospects, Campaign Plans, Settings | Complete for launch surfaces (Cycle 2); LD-1 fragility resolved (Cycle 3) |
 | **B — Feature Completion** | Content Studio, Signals, Playbooks, Battlecards, Exports | **Polish complete** (Cycle 3); QA gate doc written; Content Studio stays Hidden by default pending 57/57 gate execution |
-| **C — Execution Layer** | Sequences, Approvals, Outreach, CRM Sync, Webhooks, Workforce, Attribution | Backend deny dependency aligned with policy (Cycle 3); verification in Cycle 4 |
+| **C — Execution Layer** | Sequences, Approvals, Outreach, CRM Sync, Webhooks, Workforce, Attribution | Verified Cycle 4 (policy-to-endpoint + scheduler coverage matrix, 1 defense-in-depth fix landed, 4 watch items + 2 debt items catalogued) |
 | **D — Platform Hardening** | Feature flags, Route guards, Tests, CI/CD, Logging, Deployment, Runbooks | Cycle 1 foundation complete; dangerous-action policy formalized (Cycle 3); ongoing |
 | **E — Brand & UX Coherence** | Hi Meet AI rename, CTA language, empty states, launch story | Partial passes in Cycle 2 + 3 (touched files); full sweep in Cycle 5 |
 
@@ -64,6 +64,39 @@
 
 **Verification**: 581 pytest pass (no new tests added in Cycle 3 — refinements were doc + existing-feature changes), ruff clean on touched files, TypeScript --noEmit clean, Vite production build 642.99KB.
 
+### Cycle 4 — Execution Layer Verification (Stream C)
+
+**Three program constraints incorporated** (`cycle-4-incorporation-plan.md`):
+1. **Verification-first rule** — no dashboard changes, no new endpoints, no flag promotions. Only safety fixes, runtime gates, doc updates, and regression tests allowed.
+2. **Policy-to-endpoint coverage matrix** — every execution-capable HTTP route AND scheduler job inventoried and classified (protected / exempt / watch / inconsistent).
+3. **Qualitative override on numeric gates** — Content Studio QA gate strengthened: 57/57 is a floor, not a ceiling; any reviewer may veto on qualitative grounds.
+
+**Deliverables**:
+- NEW `docs/launch/cycle-4-incorporation-plan.md` — how the 3 constraints are absorbed
+- NEW `docs/launch/execution-verification.md` — verification plan + HTTP coverage matrix (~40 routes) + scheduler coverage matrix (18 jobs) + findings
+- NEW `docs/launch/cycle-4-redteam.md` — red-team memo with self-challenge revision
+- UPDATED `docs/launch/dangerous-action-policy.md` — scheduler coverage section + Cycle 4 watch-list re-audit
+- UPDATED `docs/launch/feature-flags.md` — scheduler gating table adds the auto-enroll runtime gate
+- UPDATED `docs/launch/content-studio-qa.md` — "Qualitative override" section (Constraint 3)
+- UPDATED `services/gateway/src/scheduler.py` — Finding F-1 fix (see below)
+- UPDATED `services/gateway/src/auth/launch_mode.py` — docstring cites scheduler gates + execution-verification.md
+- UPDATED `tests/unit/test_launch_mode_deny.py` — `TestSchedulerAutoEnrollGate` regression tests
+
+**Findings** (full detail in `execution-verification.md`):
+- **F-1 (Medium, fixed)** — `_run_signal_monitor_all_active` called `auto_enroll_from_signals` unconditionally every hour. Creating `SequenceEnrollment` rows is a cascading state transition per policy clause 3. Added call-time `is_launch_mode_v1()` gate around the embedded call only; signal monitor itself still runs. Regression test asserts the gate order.
+- **F-2 (Low, no action)** — `PATCH /workforce/{id}/approve` is a state-only transition that enabled the F-1 cascade. After F-1, the cascade is broken at its source; `/approve` correctly remains exempt (protecting it would be an aesthetic fix, regressing Cycle 3's "protect what is dangerous, leave the rest alone" discipline).
+- **F-3 (Low, deferred → LD-10)** — `_run_lead_enrichment_all` and `_run_weekly_roi_summary` have registration-only gating; adding belt-and-suspenders runtime checks is a Cycle 5 polish item. Neither has an external effect today.
+- **F-4 (Low, deferred → LD-11)** — `/agents/{name}/run` is implicitly gated by the narrow agent registry (6 analysis agents only). Adding a registry-lock test prevents a future bypass if execution agents are added.
+- **F-5 (Pass)** — Webhook handler `POST /api/v1/webhooks/sendgrid` verified to only pause, record, and log; no send path exists. Intentional exemption stands.
+- **F-6 (Pass — LD-9 watch re-audit)** — `POST /campaigns/{id}/activate` re-verified as state-only. Grep for `CampaignStatus.ACTIVE` returns only the setter; no consumers. Watch item remains.
+- **F-7 (Pass)** — `POST /campaigns/generate-content` uses LLM provider; platform-billed, no external communication.
+
+**Launch-exposure delta**: none. No frontend changes. No new endpoints. No flag promotions.
+**Launch-behavior delta**: strictly narrowed — in `GTM_LAUNCH_MODE=v1`, signal monitor no longer creates enrollments.
+**Launch-promise delta**: none.
+
+**Verification**: pytest + ruff + TypeScript + Vite build all pass (numbers recorded in `cycle-4-redteam.md`). No new tests touching frontend or product surfaces; the new tests live entirely in the launch-mode regression suite.
+
 ## Cycle plan
 
 | # | Name | Streams | Goal |
@@ -93,7 +126,9 @@ Tracked launch debt — items that are NOT blockers but carry future risk and mu
 | LD-6 | SidebarNav workspace header subtitle reads "GTM Dashboard" | Non-blocker | Low | Cycle 5 | Customer-visible but minor; full sweep covers it. |
 | LD-7 | Bundle size 642KB (Vite warns >500KB) | Non-blocker | Low | Post-launch | Code-splitting candidate. Not a launch blocker — gzip is 174KB. |
 | LD-8 | TodayPage `attribution` state variable still declared even when feature is gated | Non-blocker | Low | Cycle 3 setup | Cosmetic — `setAttribution(null)` in launch mode is harmless but indicates dead state. Acceptable. |
-| LD-9 | Backend `campaigns/{id}/activate` endpoint is unprotected (currently safe) | Latent | Medium | **Cycle 4 watch item** | If activation ever wires to actual execution, it becomes dangerous and must be added to `require_execution_enabled`. Documented in dangerous-action-policy.md watch list. |
+| LD-9 | Backend `campaigns/{id}/activate` endpoint is unprotected (currently safe) | Latent | Medium | **Cycle 4 re-audit: still safe; carry forward** | Cycle 4 grep confirmed no consumers of `CampaignStatus.ACTIVE`. Still a watch item for any future wiring. See `execution-verification.md` finding F-6. |
+| LD-10 | `_run_lead_enrichment_all` and `_run_weekly_roi_summary` lack belt-and-suspenders runtime `is_launch_mode_v1()` checks | Non-blocker | Low | Cycle 5 | Registration gate is sufficient today (neither job has external effect). Runtime gate would be consistency with `_run_sequence_runner`. Must be added if the ROI summary TODO at `scheduler.py:537` (send summary email) is ever implemented. See Cycle 4 finding F-3. |
+| LD-11 | `/agents/{name}/run` and `/companies/{id}/agents/{id}/run` are implicitly gated by narrow registry; no test locks the registry | Latent | Medium | Cycle 5 or 6 | Current registry (`agents_registry.py`) exposes only the 6 analysis agents. A single-line test that asserts the exact registry contents would prevent a future bypass if execution agents are added. See Cycle 4 finding F-4. |
 
 **Adding new debt**: when a cycle red-team identifies a deferred item, add it to this register with classification + target cycle. Do not let "deferred" items disappear into casual notes.
 

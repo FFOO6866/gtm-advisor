@@ -383,26 +383,45 @@ async def _run_signal_monitor_all_active() -> None:
                             ))
                         await db.commit()
 
-                    # Auto-enroll leads when high-relevance signals detected
-                    try:
-                        from services.gateway.src.services.sequence_engine import SequenceEngine
-                        engine = SequenceEngine(db)
-                        enrollments = await engine.auto_enroll_from_signals(
+                    # Auto-enroll leads when high-relevance signals detected.
+                    #
+                    # Cycle 4 finding F-1: auto_enroll_from_signals creates
+                    # SequenceEnrollment rows — a cascading state transition
+                    # per docs/launch/dangerous-action-policy.md clause 3.
+                    # In GTM_LAUNCH_MODE=v1, skip this call so the cascade is
+                    # broken at its source. The signal monitor itself (benign
+                    # research + SignalEvent rows) continues to run.
+                    #
+                    # Call-time check — re-evaluates env at invocation time
+                    # rather than relying on a registration-time constant.
+                    from services.gateway.src.auth.launch_mode import is_launch_mode_v1
+
+                    if is_launch_mode_v1():
+                        logger.info(
+                            "auto_enroll_from_signals_skipped",
                             company_id=str(company.id),
-                            db=db,
+                            reason="v1_launch_mode",
                         )
-                        if enrollments > 0:
-                            logger.info(
-                                "auto_enrolled_from_signals",
+                    else:
+                        try:
+                            from services.gateway.src.services.sequence_engine import SequenceEngine
+                            engine = SequenceEngine(db)
+                            enrollments = await engine.auto_enroll_from_signals(
                                 company_id=str(company.id),
-                                count=enrollments,
+                                db=db,
                             )
-                    except Exception as e:
-                        logger.warning(
-                            "auto_enroll_from_signals_failed",
-                            company_id=str(company.id),
-                            error=str(e),
-                        )
+                            if enrollments > 0:
+                                logger.info(
+                                    "auto_enrolled_from_signals",
+                                    company_id=str(company.id),
+                                    count=enrollments,
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                "auto_enroll_from_signals_failed",
+                                company_id=str(company.id),
+                                error=str(e),
+                            )
                 except Exception as e:
                     logger.error(
                         "signal_monitor_company_failed",

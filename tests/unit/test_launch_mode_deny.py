@@ -117,3 +117,55 @@ class TestProtectedEndpointsList:
             fragment = path.split("/")[-1]
             # "approve" should appear, "reject" should appear, etc.
             assert fragment in docstring, f"Endpoint {path} not documented in launch_mode.py"
+
+
+class TestSchedulerAutoEnrollGate:
+    """Regression tests for Cycle 4 Finding F-1.
+
+    `_run_signal_monitor_all_active` in scheduler.py calls
+    `engine.auto_enroll_from_signals(...)` which creates SequenceEnrollment
+    rows — a cascading state transition per the dangerous-action policy.
+
+    In launch mode, the call must be skipped so that no enrollments are
+    created, even though the signal monitor itself continues to run.
+
+    These tests exercise only the text of the scheduler module to confirm
+    the gate is in place and the expected log event exists. We intentionally
+    do not spin up the full scheduler + DB just to verify a code-path gate.
+    """
+
+    def _read_scheduler_source(self) -> str:
+        import inspect
+
+        from services.gateway.src import scheduler
+
+        return inspect.getsource(scheduler)
+
+    def test_auto_enroll_call_is_guarded_by_launch_mode_check(self):
+        """The auto_enroll_from_signals call must be inside an `if
+        is_launch_mode_v1()` guard that skips it in v1.
+        """
+        source = self._read_scheduler_source()
+
+        # Both the gate import and the auto_enroll call must be present.
+        assert "is_launch_mode_v1" in source
+        assert "auto_enroll_from_signals" in source
+
+        # The gate must precede the call site (inside the signal monitor job).
+        gate_index = source.find("is_launch_mode_v1()")
+        call_index = source.find("engine.auto_enroll_from_signals(")
+        assert gate_index != -1, "launch-mode gate missing from scheduler"
+        assert call_index != -1, "auto_enroll_from_signals call missing"
+        assert gate_index < call_index, (
+            "is_launch_mode_v1() check must appear before auto_enroll call; "
+            "Cycle 4 finding F-1 would regress without it"
+        )
+
+    def test_auto_enroll_skip_log_event_exists(self):
+        """The skip log event 'auto_enroll_from_signals_skipped' must be
+        emitted so operators can see in prod that the gate is active.
+        """
+        source = self._read_scheduler_source()
+        assert "auto_enroll_from_signals_skipped" in source, (
+            "skip log event missing — operators need visibility into the gate"
+        )

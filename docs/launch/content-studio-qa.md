@@ -115,6 +115,28 @@ Comparing the same theme across all 3 verticals, the outputs show vertical-speci
 
 No partial credit. No "we'll fix it next week." No "the differentiation criterion is subjective so we'll average." If the gate fails, Content Studio remains Hidden in v1 and is reconsidered in v1.1 after improvement work.
 
+## Qualitative override (added Cycle 4)
+
+**57/57 is a floor, not a ceiling.** The rubric exists to catch clear failures early — it does not exist to manufacture confidence.
+
+Even when the rubric passes, a promotion recommendation must answer three qualitative questions, and any reviewer may veto on any of them. One veto = stay Hidden. No reconciliation, no averaging.
+
+1. **Is this meaningfully better than generic prompting?** Not "technically specific" — *qualitatively* better. If a well-written ChatGPT prompt could produce comparable output in 2 minutes, the rubric's claim that Hi Meet AI earned the slot is wrong.
+2. **Does this reflect Hi Meet AI workflow context and positioning?** Output that reads like generic SDR spam fails this question even if it passes every tone and specificity check. The voice must be the briefing-room voice, not the growth-hacker voice.
+3. **Is this coherent across multiple verticals?** A feature that shines for one vertical and embarrasses another is not a product, it is a vertical-specific demo. Cross-vertical coherence must hold in the qualitative judgment, not just in the per-criterion evaluation.
+
+### Why this section exists
+
+Rubrics are useful when they accelerate judgment, not when they replace it. A 57/57 result says "no output on the test set tripped an obvious failure" — it does not say "this feature improves on the customer's alternative." The two are different claims, and the second one is the one that matters at launch.
+
+The cost of confusing the two is the same as the cost of shipping mediocre AI content: a positioning collapse. The rubric is supposed to prevent a false positive; the qualitative questions are supposed to prevent a *score-driven* false positive.
+
+### Applies to other rubric gates too
+
+If any future hidden surface (Playbooks, Signals, Workforce, any v1.1 feature) introduces a promotion rubric, the same override applies: score completion is a precondition for promotion consideration, not a sufficient reason. The qualitative questions are binding.
+
+This rule was added in Cycle 4's incorporation plan as Constraint 3 (`cycle-4-incorporation-plan.md`).
+
 ### Reviewer requirements
 
 - **Two independent reviewers**, one product lead and one customer-facing lead (sales or CS)

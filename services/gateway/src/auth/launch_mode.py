@@ -63,8 +63,14 @@ def require_execution_enabled() -> None:
       - POST /sequences/enrollments/{id}/pause       (state-only)
       - POST /sequences/enrollments/{id}/resume      (state-only)
 
-    See docs/launch/dangerous-action-policy.md for the full audit and the
-    rule for what qualifies as "dangerous".
+    Scheduler runtime gates (Cycle 2 + Cycle 4):
+      - _run_sequence_runner: call-time is_launch_mode_v1() skip (Cycle 2)
+      - _run_signal_monitor_all_active: call-time is_launch_mode_v1() skip
+        around auto_enroll_from_signals (Cycle 4, finding F-1)
+
+    See docs/launch/dangerous-action-policy.md for the full audit, the rule
+    for what qualifies as "dangerous", and docs/launch/execution-verification.md
+    for the Cycle 4 policy-to-endpoint + scheduler coverage matrix.
 
     Usage:
         from services.gateway.src.auth.launch_mode import require_execution_enabled
