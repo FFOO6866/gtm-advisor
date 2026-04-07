@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Routes, Route, useNavigate, useSearchParams } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuroraBackground } from './components/AuroraBackground';
 import { AgentNetwork } from './components/AgentNetwork';
@@ -29,6 +29,7 @@ import { transformAnalysisResult } from './api/transforms';
 // Import context providers
 import { CompanyProvider, useCompany, useCompanyId, createCompanyFromForm } from './context/CompanyContext';
 import { ToastProvider } from './components/common';
+import { FeatureGate } from './components/FeatureGate';
 
 // Import agent workspace pages
 import {
@@ -75,34 +76,37 @@ function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/" element={<Dashboard />} />
 
-          {/* Agent workspace pages — own full-screen layout, no auth required */}
-          <Route path="/agent/market-intelligence" element={<IntelligenceWorkspace />} />
-          <Route path="/agent/campaign-architect" element={<CampaignWorkspace />} />
-          <Route path="/agent/lead-hunter" element={<DemandWorkspace />} />
-          <Route path="/agent/gtm-strategist" element={<StrategyWorkspace />} />
-          <Route path="/agent/competitor-analyst" element={<CompetitorWorkspace />} />
-          <Route path="/agent/customer-profiler" element={<CustomerWorkspace />} />
-          <Route path="/agent/company-enricher" element={<EnricherWorkspace />} />
-          <Route path="/agent/:agentId" element={<GenericAgentWorkspace />} />
+          {/* Agent workspace pages — gated (hidden in production, internal-only) */}
+          <Route path="/agent/market-intelligence" element={<FeatureGate flag="agentWorkspaces"><IntelligenceWorkspace /></FeatureGate>} />
+          <Route path="/agent/campaign-architect" element={<FeatureGate flag="agentWorkspaces"><CampaignWorkspace /></FeatureGate>} />
+          <Route path="/agent/lead-hunter" element={<FeatureGate flag="agentWorkspaces"><DemandWorkspace /></FeatureGate>} />
+          <Route path="/agent/gtm-strategist" element={<FeatureGate flag="agentWorkspaces"><StrategyWorkspace /></FeatureGate>} />
+          <Route path="/agent/competitor-analyst" element={<FeatureGate flag="agentWorkspaces"><CompetitorWorkspace /></FeatureGate>} />
+          <Route path="/agent/customer-profiler" element={<FeatureGate flag="agentWorkspaces"><CustomerWorkspace /></FeatureGate>} />
+          <Route path="/agent/company-enricher" element={<FeatureGate flag="agentWorkspaces"><EnricherWorkspace /></FeatureGate>} />
+          <Route path="/agent/:agentId" element={<FeatureGate flag="agentWorkspaces"><GenericAgentWorkspace /></FeatureGate>} />
 
           {/* Authenticated app — AppShell provides Header + SidebarNav + Aurora */}
           <Route element={<AppShell />}>
+            {/* Launch surfaces — always visible */}
             <Route path="/today" element={<TodayPage />} />
             <Route path="/campaigns" element={<CampaignsPage />} />
             <Route path="/prospects" element={<LeadsPipeline />} />
-            <Route path="/content" element={<ContentPage />} />
-            <Route path="/insights" element={<SignalsFeed />} />
-            <Route path="/results" element={<ResultsPage />} />
-            {/* Operational / legacy routes */}
-            <Route path="/leads" element={<LeadsPipeline />} />
-            <Route path="/approvals" element={<ApprovalsInbox />} />
-            <Route path="/signals" element={<SignalsFeed />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/sequences" element={<SequencesPage />} />
-            <Route path="/playbooks" element={<PlaybooksPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/workforce" element={<WorkforceWorkspacePage />} />
             <Route path="/why-us" element={<WhyUsPage />} />
+
+            {/* Gated surfaces — hidden in production, internal-only */}
+            <Route path="/content" element={<FeatureGate flag="contentBeta"><ContentPage /></FeatureGate>} />
+            <Route path="/insights" element={<FeatureGate flag="signalsFeed"><SignalsFeed /></FeatureGate>} />
+            <Route path="/signals" element={<FeatureGate flag="signalsFeed"><SignalsFeed /></FeatureGate>} />
+            <Route path="/results" element={<FeatureGate flag="attributionResults"><ResultsPage /></FeatureGate>} />
+            {/* Legacy alias — /leads was the old path; /prospects is canonical. Redirect for inbound links. */}
+            <Route path="/leads" element={<Navigate to="/prospects" replace />} />
+            <Route path="/approvals" element={<FeatureGate flag="approvals"><ApprovalsInbox /></FeatureGate>} />
+            <Route path="/dashboard" element={<FeatureGate flag="dashboardOps"><DashboardPage /></FeatureGate>} />
+            <Route path="/sequences" element={<FeatureGate flag="sequences"><SequencesPage /></FeatureGate>} />
+            <Route path="/playbooks" element={<FeatureGate flag="playbooks"><PlaybooksPage /></FeatureGate>} />
+            <Route path="/workforce" element={<FeatureGate flag="workforce"><WorkforceWorkspacePage /></FeatureGate>} />
           </Route>
         </Routes>
       </ToastProvider>

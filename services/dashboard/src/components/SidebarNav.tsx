@@ -4,40 +4,61 @@
  * Unlocks after a company workspace exists (companyId is set).
  * Before that, the app shows the onboarding/analysis flow full-width.
  *
- * Primary nav: Today, Campaigns, Prospects, Content, Insights, Results
- * Secondary nav: Approvals (badge), Sequences, Workforce
- * Bottom: Why Us, Settings
+ * Nav items are filtered by the feature-flag registry (services/dashboard/
+ * src/config/features.ts). In production builds, only launch surfaces are
+ * visible. In INTERNAL builds (VITE_LAUNCH_MODE=internal), all surfaces
+ * are visible. See docs/launch/feature-flags.md for the canonical policy.
  */
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import type { LucideIcon } from 'lucide-react';
 import {
   Sun, Megaphone, Users, FileText, Lightbulb, TrendingUp,
   Bell, Mail, Bot, Search, Settings, ChevronRight, HelpCircle, Zap
 } from 'lucide-react';
 import { approvalsApi } from '../api/approvals';
+import { FEATURES, type FeatureFlag } from '../config/features';
 
 interface SidebarNavProps {
   companyId: string;
   companyName?: string;
 }
 
-const PRIMARY_NAV = [
-  { path: '/today', icon: Sun, label: 'Today', color: 'text-amber-400' },
-  { path: '/campaigns', icon: Megaphone, label: 'Campaigns', color: 'text-purple-400' },
-  { path: '/prospects', icon: Users, label: 'Prospects', color: 'text-blue-400' },
-  { path: '/content', icon: FileText, label: 'Content', color: 'text-cyan-400' },
-  { path: '/insights', icon: Lightbulb, label: 'Insights', color: 'text-yellow-400' },
-  { path: '/results', icon: TrendingUp, label: 'Results', color: 'text-emerald-400' },
+interface NavItem {
+  path: string;
+  icon: LucideIcon;
+  label: string;
+  color: string;
+  flag: FeatureFlag;
+  badge?: boolean;
+}
+
+// Full nav catalog — filtered by feature flags at render time.
+// Order in this list is the display order.
+const PRIMARY_NAV_ALL: readonly NavItem[] = [
+  { path: '/today', icon: Sun, label: 'Today', color: 'text-amber-400', flag: 'today' },
+  { path: '/campaigns', icon: Megaphone, label: 'Campaign Plans', color: 'text-purple-400', flag: 'campaignPlans' },
+  { path: '/prospects', icon: Users, label: 'Prospects', color: 'text-blue-400', flag: 'prospects' },
+  // Gated surfaces — only visible in internal builds
+  { path: '/content', icon: FileText, label: 'Content', color: 'text-cyan-400', flag: 'contentBeta' },
+  { path: '/insights', icon: Lightbulb, label: 'Insights', color: 'text-yellow-400', flag: 'signalsFeed' },
+  { path: '/results', icon: TrendingUp, label: 'Results', color: 'text-emerald-400', flag: 'attributionResults' },
 ];
 
-const SECONDARY_NAV = [
-  { path: '/approvals', icon: Bell, label: 'Approvals', color: 'text-red-400', badge: true },
-  { path: '/sequences', icon: Mail, label: 'Sequences', color: 'text-cyan-400' },
-  { path: '/workforce', icon: Bot, label: 'Workforce', color: 'text-pink-400' },
-  { path: '/', icon: Search, label: 'Analysis', color: 'text-white/60' },
+const SECONDARY_NAV_ALL: readonly NavItem[] = [
+  { path: '/approvals', icon: Bell, label: 'Approvals', color: 'text-red-400', flag: 'approvals', badge: true },
+  { path: '/sequences', icon: Mail, label: 'Sequences', color: 'text-cyan-400', flag: 'sequences' },
+  { path: '/workforce', icon: Bot, label: 'Workforce', color: 'text-pink-400', flag: 'workforce' },
+  // Run Analysis — always visible (launch flag)
+  { path: '/', icon: Search, label: 'Run Analysis', color: 'text-white/60', flag: 'analysis' },
 ];
+
+const PRIMARY_NAV = PRIMARY_NAV_ALL.filter((item) => FEATURES[item.flag]);
+const SECONDARY_NAV = SECONDARY_NAV_ALL.filter((item) => FEATURES[item.flag]);
+const HAS_ANY_SECONDARY = SECONDARY_NAV.length > 0;
+const SHOW_APPROVALS_BADGE = FEATURES.approvals;
 
 export function SidebarNav({ companyId, companyName }: SidebarNavProps) {
   const navigate = useNavigate();
@@ -46,7 +67,10 @@ export function SidebarNav({ companyId, companyName }: SidebarNavProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
-    if (!companyId) return;
+    // Only poll approvals when the Approvals nav item is visible in this build.
+    // In production (launch mode), there is no outreach UI, so approvals polling
+    // is unnecessary noise against the API.
+    if (!companyId || !SHOW_APPROVALS_BADGE) return;
     approvalsApi.count(companyId)
       .then(r => setPendingCount(r.pending))
       .catch(() => {});
@@ -108,13 +132,13 @@ export function SidebarNav({ companyId, companyName }: SidebarNavProps) {
           })}
         </div>
 
-        {/* Divider */}
-        {!collapsed && (
+        {/* Divider — only rendered when secondary nav has items */}
+        {HAS_ANY_SECONDARY && !collapsed && (
           <p className="px-3 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-white/20">
-            Operations
+            {SECONDARY_NAV.length === 1 && SECONDARY_NAV[0]?.path === '/' ? '' : 'Operations'}
           </p>
         )}
-        {collapsed && <div className="my-3 border-t border-white/10" />}
+        {HAS_ANY_SECONDARY && collapsed && <div className="my-3 border-t border-white/10" />}
 
         {/* Secondary — operational */}
         <div className="space-y-1">
@@ -180,19 +204,21 @@ export function SidebarNav({ companyId, companyName }: SidebarNavProps) {
           </button>
         );
       })}
-      {/* Approvals with badge */}
-      <button
-        onClick={() => navigate('/approvals')}
-        className={`flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-colors relative ${location.pathname === '/approvals' ? 'text-white' : 'text-white/40'}`}
-      >
-        <Bell className="w-5 h-5 flex-shrink-0" />
-        <span className="text-[9px] font-medium">Approvals</span>
-        {pendingCount > 0 && (
-          <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[8px] font-bold flex items-center justify-center">
-            {pendingCount > 9 ? '9+' : pendingCount}
-          </span>
-        )}
-      </button>
+      {/* Approvals with badge — only rendered when approvals feature is visible */}
+      {SHOW_APPROVALS_BADGE && (
+        <button
+          onClick={() => navigate('/approvals')}
+          className={`flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-colors relative ${location.pathname === '/approvals' ? 'text-white' : 'text-white/40'}`}
+        >
+          <Bell className="w-5 h-5 flex-shrink-0" />
+          <span className="text-[9px] font-medium">Approvals</span>
+          {pendingCount > 0 && (
+            <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[8px] font-bold flex items-center justify-center">
+              {pendingCount > 9 ? '9+' : pendingCount}
+            </span>
+          )}
+        </button>
+      )}
     </nav>
     </>
   );

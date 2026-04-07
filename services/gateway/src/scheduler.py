@@ -28,6 +28,7 @@ APScheduler is embedded in-process (no external queue needed for MVP).
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -42,6 +43,17 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 _scheduler: AsyncIOScheduler | None = None
+
+# --- Launch-mode gating -----------------------------------------------------
+# In v1 launch mode, execution-tier jobs (sequence runner, ROI summary,
+# lead re-enrichment) are not registered. This matches the frontend launch
+# package: no outreach UI, no sequences, no attribution dashboards.
+#
+# Set GTM_LAUNCH_MODE=v1 in production to enable conservative launch posture.
+# Unset (or any other value) enables the full scheduler for internal/dev use.
+#
+# See docs/launch/feature-flags.md for the full feature-exposure policy.
+_LAUNCH_MODE_V1 = os.getenv("GTM_LAUNCH_MODE", "").lower() == "v1"
 
 
 def get_scheduler() -> AsyncIOScheduler:
@@ -75,38 +87,49 @@ async def start_scheduler() -> None:
         misfire_grace_time=300,
     )
 
-    # --- Job 2: Sequence Runner (daily 08:00 SGT) ---
-    scheduler.add_job(
-        _run_sequence_runner,
-        trigger=CronTrigger(hour=8, minute=0, timezone="Asia/Singapore"),
-        id="sequence_runner_daily",
-        name="Sequence Runner — process due steps",
-        replace_existing=True,
-        max_instances=1,
-        misfire_grace_time=600,
-    )
+    # --- Job 2: Sequence Runner (daily 08:00 SGT) — EXECUTION-TIER ---
+    # Gated: only registered when GTM_LAUNCH_MODE != "v1".
+    # In v1 launch mode, no outreach UI exists; this job has nothing to do.
+    if not _LAUNCH_MODE_V1:
+        scheduler.add_job(
+            _run_sequence_runner,
+            trigger=CronTrigger(hour=8, minute=0, timezone="Asia/Singapore"),
+            id="sequence_runner_daily",
+            name="Sequence Runner — process due steps",
+            replace_existing=True,
+            max_instances=1,
+            misfire_grace_time=600,
+        )
+    else:
+        logger.info("scheduler_job_skipped", job="sequence_runner_daily", reason="v1_launch_mode")
 
-    # --- Job 3: Lead Re-enrichment (weekly Sunday 02:00 SGT) ---
-    scheduler.add_job(
-        _run_lead_enrichment_all,
-        trigger=CronTrigger(day_of_week="sun", hour=2, minute=0, timezone="Asia/Singapore"),
-        id="lead_enrichment_weekly",
-        name="Lead Enrichment — weekly re-enrichment",
-        replace_existing=True,
-        max_instances=1,
-        misfire_grace_time=1800,
-    )
+    # --- Job 3: Lead Re-enrichment (weekly Sunday 02:00 SGT) — EXECUTION-TIER ---
+    if not _LAUNCH_MODE_V1:
+        scheduler.add_job(
+            _run_lead_enrichment_all,
+            trigger=CronTrigger(day_of_week="sun", hour=2, minute=0, timezone="Asia/Singapore"),
+            id="lead_enrichment_weekly",
+            name="Lead Enrichment — weekly re-enrichment",
+            replace_existing=True,
+            max_instances=1,
+            misfire_grace_time=1800,
+        )
+    else:
+        logger.info("scheduler_job_skipped", job="lead_enrichment_weekly", reason="v1_launch_mode")
 
-    # --- Job 4: Weekly ROI Summary (Monday 07:00 SGT) ---
-    scheduler.add_job(
-        _run_weekly_roi_summary,
-        trigger=CronTrigger(day_of_week="mon", hour=7, minute=0, timezone="Asia/Singapore"),
-        id="roi_summary_weekly",
-        name="Weekly ROI Summary — attribution digest",
-        replace_existing=True,
-        max_instances=1,
-        misfire_grace_time=1800,
-    )
+    # --- Job 4: Weekly ROI Summary (Monday 07:00 SGT) — EXECUTION-TIER ---
+    if not _LAUNCH_MODE_V1:
+        scheduler.add_job(
+            _run_weekly_roi_summary,
+            trigger=CronTrigger(day_of_week="mon", hour=7, minute=0, timezone="Asia/Singapore"),
+            id="roi_summary_weekly",
+            name="Weekly ROI Summary — attribution digest",
+            replace_existing=True,
+            max_instances=1,
+            misfire_grace_time=1800,
+        )
+    else:
+        logger.info("scheduler_job_skipped", job="roi_summary_weekly", reason="v1_launch_mode")
 
     # --- Job 5: RSS Feed Ingestion (every 2 hours) ---
     scheduler.add_job(
