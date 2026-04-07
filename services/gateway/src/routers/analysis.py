@@ -253,7 +253,7 @@ async def start_analysis(
             company_id = _existing_co.id
             # Update fields with latest input — preserve manually curated industry
             _existing_co.description = analysis_request.description or _existing_co.description
-            if analysis_request.industry != IndustryVertical.OTHER and not _existing_co.industry:
+            if analysis_request.industry != IndustryVertical.OTHER:
                 _existing_co.industry = analysis_request.industry.value
             _existing_co.website = analysis_request.website or _existing_co.website
             _existing_co.goals = analysis_request.goals or _existing_co.goals
@@ -449,6 +449,14 @@ async def quick_analysis(
         if company:
             company.description = analysis_request.description or company.description
             company.website = analysis_request.website or company.website
+            if analysis_request.industry != IndustryVertical.OTHER:
+                company.industry = analysis_request.industry.value
+            if analysis_request.additional_context:
+                sources: list[dict] = list(company.context_sources or [])
+                new_entry = _make_source_entry("document", "uploaded_document", analysis_request.additional_context)
+                sources = [s for s in sources if not (s.get("type") == "document" and s.get("name") == "uploaded_document")]
+                sources.append(new_entry)
+                company.context_sources = sources
         else:
             company = Company(
                 name=analysis_request.company_name,

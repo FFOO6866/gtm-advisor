@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.src.models import (
     ApprovalQueueItem,
     ApprovalStatus,
+    AttributionEvent,
     EnrollmentStatus,
     Lead,
     LeadStatus,
@@ -94,7 +95,7 @@ class SequenceEngine:
                 SequenceEnrollment.status == EnrollmentStatus.OPTED_OUT,
             )
         )
-        if opted_out.scalar_one_or_none():
+        if opted_out.scalars().first():
             raise ValueError(f"Lead {lead_id} has opted out and cannot be re-enrolled")
 
         # Get template to determine first step due date
@@ -116,7 +117,6 @@ class SequenceEngine:
         self._db.add(enrollment)
 
         # Record consent audit trail (PDPA compliance)
-        from packages.database.src.models import AttributionEvent
         self._db.add(AttributionEvent(
             company_id=company_id,
             lead_id=lead_id,
