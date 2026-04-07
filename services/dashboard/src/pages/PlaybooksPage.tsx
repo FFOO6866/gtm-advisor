@@ -1,18 +1,21 @@
 /**
- * PlaybooksPage — Pre-built GTM outreach playbooks for Singapore SMEs.
+ * PlaybooksPage — Hi Meet AI's GTM methodology library.
  *
- * Shows 6 built-in playbooks in a responsive grid. Each card displays
- * name, description, best-for context, step/duration stats, success
- * benchmark, Singapore-specific badge, and an Activate CTA that
- * navigates to /sequences.
+ * Methodology mode (Cycle 3): read-only documentation of the playbooks
+ * Hi Meet AI's analysis can adapt for your business. No Activate CTAs
+ * — activation is part of the advisory-mode setup, not a self-serve
+ * surface in v1.
+ *
+ * The page is gated by FEATURES.playbooks (default: hidden in production).
+ * When promoted, it serves as educational content describing the playbook
+ * library, not as an interactive activation tool.
  */
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Clock, TrendingUp, Users, CheckCircle, Play } from 'lucide-react';
+import { Zap, Clock, TrendingUp, Users, CheckCircle, BookOpen } from 'lucide-react';
 import { useCompanyId } from '../context/CompanyContext';
 import { apiClient } from '../api/client';
-import { useNavigate } from 'react-router-dom';
 
 interface Playbook {
   id: string;
@@ -105,7 +108,6 @@ const PLAYBOOK_TYPE_ICONS: Record<string, React.ReactNode> = {
 };
 
 function PlaybookCard({ playbook }: { playbook: Playbook }) {
-  const navigate = useNavigate();
   const icon = PLAYBOOK_TYPE_ICONS[playbook.playbook_type] ?? <Zap className="w-4 h-4 text-purple-400" />;
 
   return (
@@ -155,14 +157,12 @@ function PlaybookCard({ playbook }: { playbook: Playbook }) {
         </p>
       )}
 
-      {/* Activate button */}
-      <button
-        onClick={() => navigate('/sequences')}
-        className="mt-auto flex items-center justify-center gap-2 w-full px-4 py-2 rounded-lg bg-purple-500/20 text-purple-300 text-xs font-medium hover:bg-purple-500/30 transition-colors border border-purple-500/20"
-      >
-        <Play className="w-3 h-3" />
-        Activate
-      </button>
+      {/* Methodology footer — read-only, no activation in v1 */}
+      <div className="mt-auto pt-2 border-t border-white/5">
+        <p className="text-[10px] text-white/30 italic">
+          Available through guided onboarding.
+        </p>
+      </div>
     </motion.div>
   );
 }
@@ -198,12 +198,17 @@ export function PlaybooksPage() {
       <div className="flex-shrink-0 px-6 py-4 border-b border-white/10">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">GTM Playbooks</h1>
-            <p className="text-xs text-white/40">Pre-built outreach strategies for Singapore SMEs</p>
+            <h1 className="text-lg font-semibold text-white flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-purple-400" />
+              GTM Methodology
+            </h1>
+            <p className="text-xs text-white/40">
+              The playbooks Hi Meet AI's analysis can adapt for your business
+            </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-white/30">
             <TrendingUp className="w-4 h-4 text-purple-400" />
-            <span>{playbooks.length} playbooks available</span>
+            <span>{playbooks.length} playbooks in library</span>
           </div>
         </div>
       </div>

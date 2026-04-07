@@ -582,9 +582,12 @@ export function ContentPage() {
             <h1 className="text-lg font-semibold text-white flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-purple-400" />
               Content Studio
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-semibold border border-amber-500/30 uppercase tracking-wider">
+                Beta
+              </span>
             </h1>
             <p className="text-xs text-white/40">
-              AI-generated content for your GTM campaigns
+              Beta — AI drafts based on your analysis. Review and edit before sending or posting.
             </p>
           </div>
 

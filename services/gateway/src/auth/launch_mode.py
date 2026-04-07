@@ -52,12 +52,19 @@ def require_execution_enabled() -> None:
     side effects (sending email, enrolling in sequences, starting execution
     runs, triggering external sync).
 
-    Protected endpoints (v1 launch):
-      - POST /companies/{id}/approvals/{id}/approve
-      - POST /companies/{id}/approvals/{id}/reject
-      - POST /companies/{id}/approvals/bulk-approve
-      - POST /companies/{id}/sequences/activate-playbook
-      - POST /companies/{id}/workforce/{id}/execute
+    Protected endpoints (v1 launch — actions with external effect):
+      - POST /companies/{id}/approvals/{id}/approve   (sends email)
+      - POST /companies/{id}/approvals/bulk-approve   (sends emails)
+      - POST /companies/{id}/sequences/activate-playbook   (cascades to sends)
+      - POST /companies/{id}/workforce/{id}/execute   (cascades to sends)
+
+    Intentionally NOT protected (state-only, no external effect):
+      - POST /companies/{id}/approvals/{id}/reject   (status change + internal log)
+      - POST /sequences/enrollments/{id}/pause       (state-only)
+      - POST /sequences/enrollments/{id}/resume      (state-only)
+
+    See docs/launch/dangerous-action-policy.md for the full audit and the
+    rule for what qualifies as "dangerous".
 
     Usage:
         from services.gateway.src.auth.launch_mode import require_execution_enabled

@@ -96,31 +96,33 @@ it calls `is_launch_mode_v1()` at job invocation time, not just at registration
 time. This protects against the case where the scheduler is started without
 the env var, the var is set later, and a stale job somehow executes.
 
-## Protected backend endpoints (added Cycle 2)
+## Protected backend endpoints (Cycle 2; refined Cycle 3)
 
 The `require_execution_enabled` dependency returns `404 Not Found` for these
-endpoints when `GTM_LAUNCH_MODE=v1`:
+endpoints when `GTM_LAUNCH_MODE=v1`. Selection is governed by the
+**dangerous-action policy** (`docs/launch/dangerous-action-policy.md`).
 
-| Endpoint | File | Reason |
-|---------|------|--------|
-| `POST /companies/{id}/approvals/{id}/approve` | `routers/approvals.py` | Triggers SendGrid email send |
-| `POST /companies/{id}/approvals/{id}/reject` | `routers/approvals.py` | State symmetry with approve |
-| `POST /companies/{id}/approvals/bulk-approve` | `routers/approvals.py` | Triggers batch SendGrid sends |
-| `POST /companies/{id}/sequences/activate-playbook` | `routers/sequences.py` | Creates enrollments that queue emails |
-| `POST /companies/{id}/workforce/{id}/execute` | `routers/workforce.py` | Starts a workforce execution run |
+| Endpoint | File | Policy clause | Reason |
+|---|---|---|---|
+| `POST /companies/{id}/approvals/{id}/approve` | `routers/approvals.py` | 1. External communication | Triggers SendGrid email send |
+| `POST /companies/{id}/approvals/bulk-approve` | `routers/approvals.py` | 1. External communication | Triggers batch SendGrid sends |
+| `POST /companies/{id}/sequences/activate-playbook` | `routers/sequences.py` | 3. Cascading state transition | Creates enrollments that queue emails |
+| `POST /companies/{id}/workforce/{id}/execute` | `routers/workforce.py` | 3. Cascading state transition | Starts a workforce execution run |
 
-**Pause/resume enrollment endpoints are NOT protected** — they are state-only
-transitions and should remain available for advisory-mode customers who need
-to pause their sequences during troubleshooting.
+**Endpoints intentionally NOT protected** (state-only, no external effect):
 
-**Webhook endpoint `POST /api/v1/webhooks/sendgrid` is NOT protected** — it
-receives inbound events from SendGrid and must remain callable for advisory
-customers who have outreach enabled.
+| Endpoint | Why not |
+|---|---|
+| `POST /companies/{id}/approvals/{id}/reject` | Status change + internal log; no outbound message |
+| `POST /sequences/enrollments/{id}/pause` | State-only; halts existing flow |
+| `POST /sequences/enrollments/{id}/resume` | State-only; scheduler decides next action |
+| `POST /api/v1/webhooks/sendgrid` | Inbound webhook; advisory customers depend on it |
+| `POST /companies/{id}/campaigns/{id}/activate` | Currently flips internal status only; **watch item** for Cycle 4 if execution wires in |
 
-**Adding a new protected endpoint** requires:
-1. Adding `dependencies=[Depends(require_execution_enabled)]` to the route
-2. Updating the docstring in `launch_mode.py` with the new endpoint
-3. Updating this table
+**Adding a new protected endpoint** requires the procedure documented in
+`docs/launch/dangerous-action-policy.md` ("Adding a new protected endpoint"
+section). PRs that add `Depends(require_execution_enabled)` without
+justifying against the policy clauses will be rejected.
 
 ## Emergency kill switch
 

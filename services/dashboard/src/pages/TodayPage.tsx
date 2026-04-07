@@ -1427,46 +1427,47 @@ export function TodayPage() {
           .catch(() => null)
       : Promise.resolve(null);
 
-    Promise.all([
-      apiClient
+    // Named-key fetch object — resolves LD-1 (positional destructuring fragility).
+    // All promises are kicked off in parallel via Promise.all(Object.values(...)).
+    // After they all settle, each setter awaits its named promise (instant, since
+    // each is already resolved). Adding a new fetch requires editing exactly TWO
+    // places: the `fetches` object below and the matching setter in the .then().
+    const fetches = {
+      vertical: apiClient
         .get<VerticalSummary>(`/companies/${companyId}/market-data/vertical-summary`)
         .catch(() => null),
-      apiClient
+      industry: apiClient
         .get<IndustrySignalsData>(`/companies/${companyId}/market-data/industry-signals`)
         .catch(() => null),
-      apiClient
+      competitors: apiClient
         .get<MarketSignal[]>(`/companies/${companyId}/market-data/competitor-signals`)
-        .catch(() => []),
-      apiClient
+        .catch(() => [] as MarketSignal[]),
+      pipeline: apiClient
         .get<PipelineSummaryData>(`/companies/${companyId}/market-data/pipeline-summary`)
         .catch(() => null),
-      approvalsFetch,
-      attributionFetch,
-      apiClient
+      approvals: approvalsFetch,
+      attribution: attributionFetch,
+      briefing: apiClient
         .get<BriefingStatus>(`/companies/${companyId}/market-data/briefing-status`)
         .catch(() => null),
-      fetchVerticalIntelligence(companyId),
-    ]).then(
-      ([
-        vertical,
-        industry,
-        competitors,
-        pipeline,
-        approvals,
-        attr,
-        briefing,
-        intel,
-      ]) => {
-        setVerticalData(vertical);
-        setIndustryData(industry);
-        setCompetitorSignals(competitors);
-        setPipelineData(pipeline);
-        setPendingApprovals(approvals.pending ?? 0);
-        setAttribution(attr);
-        setBriefingStatus(briefing);
-        setIntelligence(intel);
-      }
-    ).finally(() => setLoading(false));
+      intelligence: fetchVerticalIntelligence(companyId),
+    };
+
+    Promise.all(Object.values(fetches))
+      .then(async () => {
+        // All promises are now settled; await each by name (instant).
+        // Note: this access pattern is the LD-1 fragility fix — order-independent
+        // and adding a new fetch requires editing only `fetches` + this block.
+        setVerticalData(await fetches.vertical);
+        setIndustryData(await fetches.industry);
+        setCompetitorSignals(await fetches.competitors);
+        setPipelineData(await fetches.pipeline);
+        setPendingApprovals((await fetches.approvals).pending ?? 0);
+        setAttribution(await fetches.attribution);
+        setBriefingStatus(await fetches.briefing);
+        setIntelligence(await fetches.intelligence);
+      })
+      .finally(() => setLoading(false));
   }, [companyId]);
 
   // Compute urgent signals — match backend SignalUrgency enum values

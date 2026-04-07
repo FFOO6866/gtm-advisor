@@ -93,9 +93,11 @@ class TestProtectedEndpointsList:
     versa.
     """
 
+    # Per docs/launch/dangerous-action-policy.md — protected endpoints have
+    # external effects (send email, cascade to sends). reject_item is NOT
+    # in this list because it is state-only (status change + internal log).
     PROTECTED_ENDPOINTS = [
         ("POST", "/api/v1/companies/{company_id}/approvals/{item_id}/approve"),
-        ("POST", "/api/v1/companies/{company_id}/approvals/{item_id}/reject"),
         ("POST", "/api/v1/companies/{company_id}/approvals/bulk-approve"),
         ("POST", "/api/v1/companies/{company_id}/sequences/activate-playbook"),
         ("POST", "/api/v1/companies/{company_id}/workforce/{config_id}/execute"),

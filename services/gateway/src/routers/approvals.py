@@ -121,10 +121,12 @@ async def approve_item(
     )
     return {"status": "approved", "id": str(item.id)}
 
-@router.post(
-    "/{company_id}/approvals/{item_id}/reject",
-    dependencies=[Depends(require_execution_enabled)],
-)
+# Note: reject_item is intentionally NOT protected by require_execution_enabled.
+# Per docs/launch/dangerous-action-policy.md, this endpoint is state-only:
+# it sets ApprovalQueueItem.status to REJECTED and records an internal
+# AttributionEvent. No outbound email, no third-party API call, no cascading
+# state transition. State-only mutations are not "dangerous" by policy.
+@router.post("/{company_id}/approvals/{item_id}/reject")
 async def reject_item(
     company_id: UUID,
     item_id: UUID,

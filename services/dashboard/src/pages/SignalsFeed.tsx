@@ -5,7 +5,8 @@
  * competitor news, market trends, regulatory changes, financial signals.
  *
  * Each signal has: urgency badge, relevance score, recommended action,
- * and a "Deploy Playbook" CTA for high-relevance signals.
+ * and a "Plan Campaign from Signal" CTA for high-relevance signals (links
+ * to the launch-visible /campaigns wizard with the signal pre-filled).
  */
 
 import { useState, useEffect } from 'react';
@@ -83,7 +84,7 @@ function SignalCard({ signal, onAction }: { signal: SignalEvent; onAction: (id: 
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-300 text-xs font-medium hover:bg-purple-500/30 transition-colors"
               >
                 <Zap className="w-3 h-3" />
-                Deploy Playbook
+                Plan Campaign from Signal
               </button>
             )}
             {signal.source_url && (

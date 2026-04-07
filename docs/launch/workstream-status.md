@@ -1,17 +1,17 @@
 # Hi Meet AI — v1 Workstream Status
 
 **Branch**: `rc/v0.1.0` (v1 development trunk)
-**Last updated**: Cycle 2 (Core Workflow Completion + Backend Two-Layer Defense)
+**Last updated**: Cycle 3 (Tier-2 Surface Polish + Program Refinements)
 
 ## Workstream overview
 
 | Stream | Focus | Status |
 |--------|-------|--------|
-| **A — Core Workflows** | Onboarding, Analysis, Results, TodayPage, Prospects, Campaign Plans, Settings | **Complete for launch surfaces** (Cycle 2) |
-| **B — Feature Completion** | Content Studio, Signals, Playbooks, Battlecards, Exports | Not started (Cycle 3) |
-| **C — Execution Layer** | Sequences, Approvals, Outreach, CRM Sync, Webhooks, Workforce, Attribution | Backend deny dependency in place (Cycle 2); verification in Cycle 4 |
-| **D — Platform Hardening** | Feature flags, Route guards, Tests, CI/CD, Logging, Deployment, Runbooks | Cycle 1 foundation complete; ongoing |
-| **E — Brand & UX Coherence** | Hi Meet AI rename, CTA language, empty states, launch story | Partial pass in Cycle 2 (touched files); full sweep in Cycle 5 |
+| **A — Core Workflows** | Onboarding, Analysis, Results, TodayPage, Prospects, Campaign Plans, Settings | Complete for launch surfaces (Cycle 2); LD-1 fragility resolved (Cycle 3) |
+| **B — Feature Completion** | Content Studio, Signals, Playbooks, Battlecards, Exports | **Polish complete** (Cycle 3); QA gate doc written; Content Studio stays Hidden by default pending 57/57 gate execution |
+| **C — Execution Layer** | Sequences, Approvals, Outreach, CRM Sync, Webhooks, Workforce, Attribution | Backend deny dependency aligned with policy (Cycle 3); verification in Cycle 4 |
+| **D — Platform Hardening** | Feature flags, Route guards, Tests, CI/CD, Logging, Deployment, Runbooks | Cycle 1 foundation complete; dangerous-action policy formalized (Cycle 3); ongoing |
+| **E — Brand & UX Coherence** | Hi Meet AI rename, CTA language, empty states, launch story | Partial passes in Cycle 2 + 3 (touched files); full sweep in Cycle 5 |
 
 ## Cycle history
 
@@ -42,6 +42,28 @@
 
 **Outcome**: The 6 launch surfaces work end-to-end with no hidden-surface links, no execution-implying CTAs, and honest empty states. Backend + frontend now form a two-layer defense for dangerous actions. Touched launch-facing files carry "Hi Meet AI" branding. Full suite: 581 pytest pass, TypeScript clean, Vite production build successful (642KB bundle, down 3KB from Cycle 1 via dead-code elimination on gated branches).
 
+### Cycle 3 — Tier-2 Surface Polish + Program Refinements (Streams B + D + E partial)
+
+**Program refinements applied (4)**:
+1. **Dangerous-action policy formalized** — `docs/launch/dangerous-action-policy.md` defines the 5-clause rule. Audit found `reject_item` was inconsistently protected. Unprotected to align with policy.
+2. **TodayPage `Promise.all` fragility resolved** — refactored from positional destructuring to named-key `fetches` object. Adding new fetches now requires editing exactly 2 places. LD-1 closed.
+3. **Promise-scope audit** — `docs/launch/promise-scope-audit.md` tracks visibility scope vs. promise scope per surface. 4 latent drift items identified, all classified as low severity or already resolved.
+4. **Content Studio QA gate strengthened** — `docs/launch/content-studio-qa.md` defines the 7-criterion gate (specificity, market grounding, ready-to-use, tone fidelity, **differentiation**, **brand fidelity**, **vertical coherence**). Sign-off requires 57/57 across 9 outputs in 3 verticals + 2 reviewers. Default outcome: stay Hidden.
+
+**Tier-2 surface work**:
+- **ContentPage**: Beta badge added to header + disclaimer subtitle ("Beta — AI drafts. Review and edit before sending or posting.")
+- **PlaybooksPage**: Converted from "playbook browse with disabled Activate" to read-only **methodology library**. Header renamed "GTM Playbooks" → "GTM Methodology"; Activate button replaced with "Available through guided onboarding" footer text; navigate import removed; icon updated to BookOpen.
+- **SignalsFeed**: "Deploy Playbook" → "Plan Campaign from Signal" (removes execution implication; navigation target unchanged at `/campaigns?signal=...`)
+- **Exports + battlecards**: verified stable — endpoints handle empty-data conditions gracefully; no code changes needed
+
+**Launch debt register added**: 9 items classified by risk/severity/cycle. LD-1 closed in this cycle; LD-9 (campaigns activate watch item) added.
+
+**Governance docs created/updated**:
+- NEW: `dangerous-action-policy.md`, `promise-scope-audit.md`, `content-studio-qa.md`
+- UPDATED: `feature-flags.md` (Protected Endpoints table refined per policy), `launch-package.md` (Promise Scope reference added), `naming-conventions.md` (no changes needed), `workstream-status.md` (Cycle 3 history + Launch Debt Register)
+
+**Verification**: 581 pytest pass (no new tests added in Cycle 3 — refinements were doc + existing-feature changes), ruff clean on touched files, TypeScript --noEmit clean, Vite production build 642.99KB.
+
 ## Cycle plan
 
 | # | Name | Streams | Goal |
@@ -52,6 +74,30 @@
 | 4 | Execution Layer Verification | C | Trace sequence → approval → outreach → attribution |
 | 5 | Brand & UX Coherence | E (full) | Hi Meet AI rename, launch-story alignment |
 | 6 | Launch Readiness Review | — | Hostile reviewer simulation, final go/no-go |
+
+## Launch debt register
+
+Tracked launch debt — items that are NOT blockers but carry future risk and must be classified, owned, and scheduled. Each entry has:
+
+- **Risk**: blocker / non-blocker / latent
+- **Severity**: high / medium / low
+- **Cycle for fix**: which cycle owns the resolution
+
+| ID | Item | Risk | Severity | Cycle | Notes |
+|---|---|---|---|---|---|
+| LD-1 | TodayPage `Promise.all` positional destructuring (8 fetches) | Non-blocker | Medium | **Cycle 3 setup** | ✅ **Resolved Cycle 3 setup**. Refactored to named `fetches` object; `Promise.all(Object.values(fetches))` parallelizes; setters await each by name. Adding a new fetch now requires editing exactly 2 places (the object + the setter block). |
+| LD-2 | `documents.py:301` ruff B007 unused loop variable `family` | Non-blocker | Low | Cycle 5 | Pre-existing lint error unrelated to launch work. Sweep with full lint pass in Cycle 5. |
+| LD-3 | `App.tsx` module docstring still says "GTM Advisor Dashboard" | Non-blocker | Low | Cycle 5 | Internal-only string (not customer-visible). Sweep with full naming pass. |
+| LD-4 | `scheduler.py` module docstring still says "GTM Advisor agents on a schedule" | Non-blocker | Low | Cycle 5 | Internal-only string. Sweep with full naming pass. |
+| LD-5 | `WORKFORCE_OUTREACH_FROM_NAME` env var default is "GTM Advisor" | Non-blocker | Low | Cycle 5 | Cosmetic; execution layer is gated so this never reaches a customer at v1. |
+| LD-6 | SidebarNav workspace header subtitle reads "GTM Dashboard" | Non-blocker | Low | Cycle 5 | Customer-visible but minor; full sweep covers it. |
+| LD-7 | Bundle size 642KB (Vite warns >500KB) | Non-blocker | Low | Post-launch | Code-splitting candidate. Not a launch blocker — gzip is 174KB. |
+| LD-8 | TodayPage `attribution` state variable still declared even when feature is gated | Non-blocker | Low | Cycle 3 setup | Cosmetic — `setAttribution(null)` in launch mode is harmless but indicates dead state. Acceptable. |
+| LD-9 | Backend `campaigns/{id}/activate` endpoint is unprotected (currently safe) | Latent | Medium | **Cycle 4 watch item** | If activation ever wires to actual execution, it becomes dangerous and must be added to `require_execution_enabled`. Documented in dangerous-action-policy.md watch list. |
+
+**Adding new debt**: when a cycle red-team identifies a deferred item, add it to this register with classification + target cycle. Do not let "deferred" items disappear into casual notes.
+
+**Closing debt**: when an item is resolved, mark it ✅ and link to the cycle red-team where it closed. Do not delete entries — preserve the history.
 
 ## Governance rules (invariant across cycles)
 

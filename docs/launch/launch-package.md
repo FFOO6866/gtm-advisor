@@ -62,6 +62,14 @@ Bottom
 
 **17 hidden routes.** All redirect to `/today` via `FeatureGate` in production builds.
 
+## Promise-scope audit
+
+Visibility scope (this document) tracks WHAT users see. Promise scope tracks WHAT they're led to believe the product does. The two scopes are tracked separately because they can drift independently.
+
+See **[`promise-scope-audit.md`](./promise-scope-audit.md)** for the per-surface promise audit. Updated in each cycle's red-team.
+
+**Rule**: a launch surface can be visible only if its visibility scope AND its promise scope both match the actual product behavior.
+
 ## Customer capabilities at launch
 
 What a v1 customer can do, end-to-end:
