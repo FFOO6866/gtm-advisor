@@ -23,6 +23,8 @@ from packages.database.src.models import (
 )
 from packages.database.src.session import get_db_session
 
+from ..auth.launch_mode import require_execution_enabled
+
 router = APIRouter()
 logger = structlog.get_logger()
 
@@ -239,7 +241,10 @@ async def approve_workforce(
 # Execution
 # ---------------------------------------------------------------------------
 
-@router.post("/{company_id}/workforce/{config_id}/execute")
+@router.post(
+    "/{company_id}/workforce/{config_id}/execute",
+    dependencies=[Depends(require_execution_enabled)],
+)
 async def trigger_execution(
     company_id: UUID,
     config_id: UUID,

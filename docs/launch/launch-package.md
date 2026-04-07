@@ -9,13 +9,15 @@ This document is the definitive list of user-visible surfaces at launch. It diff
 ```
 Primary
 ├── Today              → /today
-├── Run Analysis       → /
-├── Campaign Plans     → /campaigns       (renamed from "Campaigns" in Cycle 2)
-└── Prospects          → /prospects
+├── Campaign Plans     → /campaigns       (✓ Cycle 2: renamed in UI)
+├── Prospects          → /prospects       (✓ Cycle 2: header "Lead Pipeline" → "Prospects")
+
+Operations (single item when other operations are hidden)
+└── Run Analysis       → /
 
 Bottom
 ├── Why Us             → /why-us
-└── Settings           → /settings
+└── Settings           → /settings         (✓ Cycle 2: API keys + Danger Zone hidden)
 ```
 
 **6 nav items.** Everything else is hidden.

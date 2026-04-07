@@ -8,12 +8,12 @@
  * - Fit score badge (green/amber/red)
  * - Email verified badge
  * - Current sequence step (if in sequence)
- * - Quick actions: Enroll in sequence, Mark replied, Book meeting
+ * - Quick actions: Manual status transitions (Qualify → Contact → Won/Lost)
  */
 
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Mail, Building2, Zap, CheckCircle, AlertCircle, TrendingUp } from 'lucide-react';
+import { Mail, Building2, Zap, CheckCircle, AlertCircle, TrendingUp, Users } from 'lucide-react';
 import { useCompanyId } from '../context/CompanyContext';
 import { apiClient } from '../api/client';
 
@@ -187,14 +187,44 @@ export function LeadsPipeline() {
 
   const totalLeads = leads.length;
 
+  // Cold-start: no prospects yet — prompt to run analysis.
+  if (totalLeads === 0) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex-shrink-0 px-6 py-4 border-b border-white/10">
+          <h1 className="text-lg font-semibold text-white">Prospects</h1>
+          <p className="text-xs text-white/40">Qualified prospects matched to your ICP</p>
+        </div>
+        <div className="flex-1 flex items-center justify-center p-6">
+          <div className="glass-card p-8 rounded-xl border border-white/10 flex flex-col items-center text-center max-w-md">
+            <div className="w-12 h-12 rounded-2xl bg-purple-500/10 flex items-center justify-center mb-4">
+              <Users className="w-6 h-6 text-purple-400" />
+            </div>
+            <h2 className="text-base font-semibold text-white">No prospects yet</h2>
+            <p className="text-sm text-white/50 mt-2 leading-relaxed">
+              Run an analysis to generate qualified prospects matched to your
+              ideal customer profile.
+            </p>
+            <button
+              onClick={() => window.location.assign('/')}
+              className="mt-5 flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-500/20 text-purple-400 text-sm font-medium hover:bg-purple-500/30 border border-purple-500/30 transition-colors"
+            >
+              Run Analysis
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex-shrink-0 px-6 py-4 border-b border-white/10">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-semibold text-white">Lead Pipeline</h1>
-            <p className="text-xs text-white/40">{totalLeads} leads across {PIPELINE_STAGES.length} stages</p>
+            <h1 className="text-lg font-semibold text-white">Prospects</h1>
+            <p className="text-xs text-white/40">{totalLeads} prospects across {PIPELINE_STAGES.length} stages</p>
           </div>
           <div className="flex items-center gap-3 text-xs text-white/40">
             <span className="flex items-center gap-1.5">
@@ -230,7 +260,7 @@ export function LeadsPipeline() {
                     <LeadCard key={lead.id} lead={lead} onStatusChange={handleStatusChange} />
                   ))}
                   {stageLeads.length === 0 && (
-                    <div className="text-center py-6 text-white/20 text-xs">No leads</div>
+                    <div className="text-center py-6 text-white/20 text-xs">None</div>
                   )}
                 </div>
               </div>

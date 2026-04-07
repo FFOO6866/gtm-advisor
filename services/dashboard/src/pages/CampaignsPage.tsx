@@ -1,9 +1,13 @@
 /**
- * CampaignsPage — Campaigns backed by the real backend Campaign API.
+ * CampaignsPage — Campaign Plans backed by the real backend Campaign API.
  *
  * Fetches from GET /api/v1/companies/{id}/campaigns, supports creating
- * campaigns via a 3-step wizard (POST), activating/pausing via dedicated
- * endpoints, and deep-linking from signal-triggered playbooks via URLSearchParams.
+ * plans via a 3-step wizard (POST), and deep-linking from signal-triggered
+ * playbooks via URLSearchParams. Execution (activate/pause) is feature-gated.
+ *
+ * Launch posture: "Campaign Plans" — planning-oriented, no execution.
+ * In v1 the Activate/Pause CTAs are hidden behind FEATURES.campaignActivation
+ * to avoid implying outreach capabilities that are not exposed yet.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -23,6 +27,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useCompanyId } from '../context/CompanyContext';
 import { apiClient } from '../api/client';
+import { FEATURES } from '../config/features';
 
 // ============================================================================
 // Types
@@ -241,7 +246,7 @@ function CampaignCard({
 
       {/* Actions */}
       <div className="flex items-center gap-2 mt-auto pt-1">
-        {campaign.status === 'draft' && (
+        {FEATURES.campaignActivation && campaign.status === 'draft' && (
           <button
             disabled={isBusy}
             onClick={() => onActivate(campaign.id)}
@@ -255,7 +260,7 @@ function CampaignCard({
             Activate
           </button>
         )}
-        {campaign.status === 'active' && (
+        {FEATURES.campaignActivation && campaign.status === 'active' && (
           <button
             disabled={isBusy}
             onClick={() => onPause(campaign.id)}
@@ -267,13 +272,15 @@ function CampaignCard({
             Pause
           </button>
         )}
-        <button
-          onClick={() => navigate(`/content?campaign=${campaign.id}`)}
-          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-xs font-medium border border-white/10 transition-colors"
-        >
-          View Content
-          <ChevronRight className="w-3 h-3" />
-        </button>
+        {FEATURES.contentBeta && (
+          <button
+            onClick={() => navigate(`/content?campaign=${campaign.id}`)}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-xs font-medium border border-white/10 transition-colors"
+          >
+            View Content
+            <ChevronRight className="w-3 h-3" />
+          </button>
+        )}
       </div>
     </motion.div>
   );
@@ -692,21 +699,24 @@ export function CampaignsPage() {
             <div>
               <h1 className="text-lg font-semibold text-white flex items-center gap-2">
                 <Megaphone className="w-5 h-5 text-purple-400" />
-                Campaigns
+                Campaign Plans
               </h1>
-              {/* Summary row */}
+              {/* Summary row — planning posture at v1: no "active" count */}
               {!loading && listData && campaigns.length > 0 && (
                 <p className="text-xs text-white/40 mt-0.5">
-                  {listData.total} campaign{listData.total !== 1 ? 's' : ''}
-                  {' · '}
-                  {listData.by_status.active ?? 0} active
+                  {listData.total} plan{listData.total !== 1 ? 's' : ''}
+                  {FEATURES.campaignActivation && (
+                    <> · {listData.by_status.active ?? 0} active</>
+                  )}
                   {listData.total_budget > 0 && (
                     <> · SGD {listData.total_budget.toLocaleString()} budgeted</>
                   )}
                 </p>
               )}
               {!loading && (!listData || campaigns.length === 0) && (
-                <p className="text-xs text-white/40 mt-0.5">No campaigns yet</p>
+                <p className="text-xs text-white/40 mt-0.5">
+                  Plan and document your GTM campaigns.
+                </p>
               )}
               {loading && <p className="text-xs text-white/40 mt-0.5">Loading…</p>}
             </div>
@@ -716,7 +726,7 @@ export function CampaignsPage() {
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-violet-600 text-white text-xs font-semibold hover:from-purple-500 hover:to-violet-500 transition-all"
             >
               <Plus className="w-3.5 h-3.5" />
-              New Campaign
+              New Plan
             </button>
           </div>
         </div>

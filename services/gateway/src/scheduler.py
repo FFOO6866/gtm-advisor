@@ -415,7 +415,24 @@ async def _run_signal_monitor_all_active() -> None:
 
 
 async def _run_sequence_runner() -> None:
-    """Run the sequence engine to process due outreach steps."""
+    """Run the sequence engine to process due outreach steps.
+
+    Belt-and-suspenders safety: even if the job is somehow registered in
+    launch mode (e.g., env var was unset when scheduler started but then
+    set later), this call-time check prevents accidental email sends.
+    """
+    # Call-time safety check — re-evaluates env var rather than relying
+    # solely on the registration-time _LAUNCH_MODE_V1 constant above.
+    from services.gateway.src.auth.launch_mode import is_launch_mode_v1
+
+    if is_launch_mode_v1():
+        logger.info(
+            "scheduled_job_skipped",
+            job="sequence_runner",
+            reason="v1_launch_mode_runtime_check",
+        )
+        return
+
     logger.info("scheduled_job_start", job="sequence_runner")
     try:
         from packages.database.src.session import async_session_factory

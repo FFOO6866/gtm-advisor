@@ -41,15 +41,28 @@ Internal code, import paths, environment variable names, database column names, 
 
 ## Technical debt to resolve (Cycle 5)
 
+Resolved in Cycle 2 (while touching launch-facing files):
+
+| File | Cycle 2 status |
+|------|---------------|
+| `services/dashboard/index.html` — `<title>` | ✓ Now "Hi Meet AI — AI Briefing Room for GTM" |
+| `services/dashboard/index.html` — meta description | ✓ Updated to Hi Meet AI |
+| `services/dashboard/src/pages/TodayPage.tsx` — NoCompanyState welcome card | ✓ "Welcome to Hi Meet AI" |
+| `services/dashboard/src/pages/CampaignsPage.tsx` — "Campaigns" heading | ✓ "Campaign Plans" |
+| `services/dashboard/src/pages/LeadsPipeline.tsx` — "Lead Pipeline" heading | ✓ "Prospects" |
+| `services/dashboard/src/components/ResultsPanel.tsx` — auth/unauth CTAs | ✓ Briefing-room language |
+
+Still deferred to Cycle 5 (internal-only / non-customer-visible strings):
+
 | File | Current | Target |
 |------|---------|--------|
-| `services/dashboard/src/App.tsx:2` | "GTM Advisor Dashboard" | "Hi Meet AI Dashboard" (comment only) |
-| `services/gateway/src/scheduler.py:3` | "GTM Advisor agents on a schedule" | "Hi Meet AI agents on a schedule" (comment only) |
-| Page title (`<title>`) | Currently "GTM Advisor" (check index.html) | "Hi Meet AI" |
-| App branding in Header | Current logo text | Hi Meet AI |
-| Email from_name env var default | "GTM Advisor" (in routers/approvals.py) | Not customer-facing at v1 (execution-layer gated) — cosmetic fix in Cycle 5 |
-| Content Studio disclaimer | (doesn't exist yet) | "Hi Meet AI — Beta. Review and edit before sending or posting." |
-| Launch story docs | Mixed | Single canonical message in `docs/launch/customer-message-v1.md` |
+| `services/dashboard/src/App.tsx:2` | "GTM Advisor Dashboard" (module docstring) | "Hi Meet AI Dashboard" |
+| `services/gateway/src/scheduler.py:3` | "GTM Advisor agents on a schedule" (module docstring) | "Hi Meet AI agents on a schedule" |
+| App logo text in Header | Current logo text (still "GTM Dashboard" in SidebarNav) | "Hi Meet AI" — Cycle 5 |
+| `WORKFORCE_OUTREACH_FROM_NAME` env var default | "GTM Advisor" in `routers/approvals.py` | Not customer-facing at v1 (execution-layer gated); cosmetic fix in Cycle 5 |
+| Content Studio disclaimer | (doesn't exist yet) | "Hi Meet AI — Beta. Review and edit before sending or posting." — Cycle 3 |
+| Canonical customer-message file | Mixed across docs | `docs/launch/customer-message-v1.md` — Cycle 5 |
+| Remaining "GTM Advisor" string audit | Various locations | Full sweep via `rg` in Cycle 5 |
 
 ## Customer-facing story (canonical)
 

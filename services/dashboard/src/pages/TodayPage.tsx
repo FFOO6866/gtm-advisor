@@ -14,6 +14,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
+import { FEATURES } from '../config/features';
 import {
   ArrowRight,
   BarChart3,
@@ -409,8 +410,8 @@ function IndustrySection({
     >
       <SectionHeader
         title="Industry & Market"
-        action="View all"
-        onAction={() => navigate('/insights')}
+        action={FEATURES.signalsFeed ? 'View all' : undefined}
+        onAction={FEATURES.signalsFeed ? () => navigate('/insights') : undefined}
       />
       <div className="px-5 pb-4">
         {isEmpty ? (
@@ -527,8 +528,8 @@ function CompetitorSection({
     >
       <SectionHeader
         title="Competitive Landscape"
-        action="View all"
-        onAction={() => navigate('/insights')}
+        action={FEATURES.signalsFeed ? 'View all' : undefined}
+        onAction={FEATURES.signalsFeed ? () => navigate('/insights') : undefined}
       />
       <div className="px-5 pb-4">
         {competitorSignals.length === 0 ? (
@@ -777,8 +778,8 @@ function ActionsSection({
           </div>
         ) : (
           <div className="space-y-3 py-2">
-            {/* Pending approvals */}
-            {pendingApprovals > 0 && (
+            {/* Pending approvals — only visible when approvals feature is enabled */}
+            {FEATURES.approvals && pendingApprovals > 0 && (
               <div
                 className="flex items-start gap-3 cursor-pointer hover:bg-white/5 rounded-lg px-2 py-2 -mx-2 transition-colors"
                 onClick={() => navigate('/approvals')}
@@ -802,11 +803,13 @@ function ActionsSection({
               </div>
             )}
 
-            {/* Urgent signals */}
+            {/* Urgent signals — when the standalone signals feed is hidden
+                (v1 launch), the card is non-interactive; it still shows the
+                signals summary inline. */}
             {urgentCount > 0 && (
               <div
-                className="flex items-start gap-3 cursor-pointer hover:bg-white/5 rounded-lg px-2 py-2 -mx-2 transition-colors"
-                onClick={() => navigate('/insights')}
+                className={`flex items-start gap-3 ${FEATURES.signalsFeed ? 'cursor-pointer hover:bg-white/5' : ''} rounded-lg px-2 py-2 -mx-2 transition-colors`}
+                onClick={FEATURES.signalsFeed ? () => navigate('/insights') : undefined}
               >
                 <div className="p-2 rounded-lg bg-yellow-500/10 flex-shrink-0">
                   <Radio className="w-4 h-4 text-yellow-400" />
@@ -1139,8 +1142,8 @@ function GTMImplicationsSection({
     >
       <SectionHeader
         title="Strategic Intelligence"
-        action="Deep dive"
-        onAction={() => navigate('/insights')}
+        action={FEATURES.signalsFeed ? 'Deep dive' : undefined}
+        onAction={FEATURES.signalsFeed ? () => navigate('/insights') : undefined}
       />
       <div className="px-5 pb-4">
         {/* GTM Implications — top 3 */}
@@ -1360,13 +1363,13 @@ function NoCompanyState() {
             <Zap className="w-7 h-7 text-purple-400" />
           </div>
           <h2 className="text-lg font-semibold text-white">
-            Welcome to GTM Advisor
+            Welcome to Hi Meet AI
           </h2>
           <p className="text-sm text-white/50 mt-2 leading-relaxed">
-            Start by running an AI analysis of your company. Your 6-agent bench
-            will map the market, profile competitors, identify qualified
-            prospects, and draft your first campaign — then you manage the
-            entire GTM process from here.
+            Get your first briefing in two minutes. Six AI specialists will
+            research your market, profile your competitors, identify qualified
+            prospects, and draft your first campaign plan — then hand it back
+            for you to review and act on.
           </p>
           <button
             onClick={() => navigate('/')}
@@ -1408,6 +1411,22 @@ export function TodayPage() {
 
     setLoading(true);
 
+    // Gate execution-layer fetches: in v1 launch mode, approvals and attribution
+    // have no customer-facing surface, so polling these endpoints is wasted work
+    // AND keeps stale counters alive. AC-3 (Cycle 2): attribution must not be
+    // fetched in launch mode, not merely hidden from render.
+    const approvalsFetch: Promise<{ pending: number }> = FEATURES.approvals
+      ? apiClient
+          .get<{ pending: number }>(`/companies/${companyId}/approvals/count`)
+          .catch(() => ({ pending: 0 }))
+      : Promise.resolve({ pending: 0 });
+
+    const attributionFetch: Promise<AttributionSummary | null> = FEATURES.todayAttributionKpis
+      ? apiClient
+          .get<AttributionSummary>(`/companies/${companyId}/attribution/summary?days=7`)
+          .catch(() => null)
+      : Promise.resolve(null);
+
     Promise.all([
       apiClient
         .get<VerticalSummary>(`/companies/${companyId}/market-data/vertical-summary`)
@@ -1421,12 +1440,8 @@ export function TodayPage() {
       apiClient
         .get<PipelineSummaryData>(`/companies/${companyId}/market-data/pipeline-summary`)
         .catch(() => null),
-      apiClient
-        .get<{ pending: number }>(`/companies/${companyId}/approvals/count`)
-        .catch(() => ({ pending: 0 })),
-      apiClient
-        .get<AttributionSummary>(`/companies/${companyId}/attribution/summary?days=7`)
-        .catch(() => null),
+      approvalsFetch,
+      attributionFetch,
       apiClient
         .get<BriefingStatus>(`/companies/${companyId}/market-data/briefing-status`)
         .catch(() => null),
@@ -1563,8 +1578,12 @@ export function TodayPage() {
               pipelineData={pipelineData}
             />
 
-            {/* Weekly Performance */}
-            <PerformanceSummary attribution={attribution} />
+            {/* Weekly Performance — gated: no attribution data exists until
+                outreach is enabled via advisory setup. In v1 launch mode we
+                neither fetch nor render this section. */}
+            {FEATURES.todayAttributionKpis && (
+              <PerformanceSummary attribution={attribution} />
+            )}
 
             {/* Agent Activity Feed */}
             <ActivityFeed items={activityItems} />

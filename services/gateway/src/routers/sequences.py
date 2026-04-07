@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from packages.database.src.models import SequenceEnrollment
 from packages.database.src.session import get_db_session
 
+from ..auth.launch_mode import require_execution_enabled
 from ..services.playbook_service import PlaybookService
 from ..services.sequence_engine import SequenceEngine
 
@@ -43,7 +44,10 @@ async def list_templates(_company_id: UUID, db: AsyncSession = Depends(get_db_se
     playbooks = await svc.get_all_playbooks()
     return [{"id": str(pb.id), "playbook_type": pb.playbook_type, "name": pb.name, "description": pb.description, "steps_count": pb.steps_count, "duration_days": pb.duration_days, "success_rate_benchmark": pb.success_rate_benchmark, "is_singapore_specific": pb.is_singapore_specific, "best_for": pb.best_for} for pb in playbooks]
 
-@router.post("/{company_id}/sequences/activate-playbook")
+@router.post(
+    "/{company_id}/sequences/activate-playbook",
+    dependencies=[Depends(require_execution_enabled)],
+)
 async def activate_playbook(
     company_id: UUID,
     body: PlaybookActivateRequest,

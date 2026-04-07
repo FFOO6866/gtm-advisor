@@ -1,8 +1,9 @@
 /**
  * SettingsPage — Application settings and preferences.
  *
- * Company profile (read-only from session storage), integrations status,
- * display preferences (persisted to localStorage), and danger zone.
+ * v1 launch package: Profile (read-only) + Display Preferences.
+ * Integrations status and Danger Zone are gated behind FEATURES flags
+ * and only appear in internal builds.
  */
 
 import { useState, useEffect } from 'react';
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useCompanyId } from '../context/CompanyContext';
 import { checkHealth } from '../api/client';
+import { FEATURES } from '../config/features';
 
 // ============================================================================
 // Types
@@ -228,8 +230,9 @@ export function SettingsPage() {
           </div>
 
           {/* ---------------------------------------------------------------- */}
-          {/* Section 2: Integrations Status                                    */}
+          {/* Section 2: Integrations Status (internal only)                    */}
           {/* ---------------------------------------------------------------- */}
+          {FEATURES.settingsApiKeys && (
           <div className="glass-card p-5 rounded-xl mb-4">
             <h2 className="text-sm font-semibold text-white mb-3">
               Integrations
@@ -291,6 +294,7 @@ export function SettingsPage() {
               API keys are configured server-side via environment variables.
             </p>
           </div>
+          )}
 
           {/* ---------------------------------------------------------------- */}
           {/* Section 3: Display Preferences                                    */}
@@ -365,8 +369,9 @@ export function SettingsPage() {
           </div>
 
           {/* ---------------------------------------------------------------- */}
-          {/* Section 4: Danger Zone                                            */}
+          {/* Section 4: Danger Zone (internal only)                            */}
           {/* ---------------------------------------------------------------- */}
+          {FEATURES.settingsDangerZone && (
           <div className="glass-card p-5 rounded-xl mb-4 border border-red-500/30">
             <div className="flex items-center gap-2 mb-2">
               <AlertCircle className="w-4 h-4 text-red-400" />
@@ -387,6 +392,7 @@ export function SettingsPage() {
               Clear local data and restart
             </button>
           </div>
+          )}
         </motion.div>
       </div>
     </div>

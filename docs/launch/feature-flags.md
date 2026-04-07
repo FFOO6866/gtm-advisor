@@ -1,8 +1,22 @@
 # Hi Meet AI — Feature Flag Registry
 
 **Source of truth**: `services/dashboard/src/config/features.ts`
-**Gate primitive**: `services/dashboard/src/components/FeatureGate.tsx`
-**Backend gate**: `GTM_LAUNCH_MODE=v1` env var (scheduler execution jobs)
+**Frontend gate primitive**: `services/dashboard/src/components/FeatureGate.tsx`
+**Backend gate primitive**: `services/gateway/src/auth/launch_mode.py::require_execution_enabled`
+**Backend env**: `GTM_LAUNCH_MODE=v1` (scheduler execution jobs + protected endpoints)
+
+## Two-layer defense (added Cycle 2)
+
+Launch visibility is controlled at two layers:
+
+| Layer | Primitive | Effect |
+|-------|-----------|--------|
+| Frontend | `<FeatureGate flag="...">` | Silent `<Navigate to="/today">` on gated routes |
+| Frontend | `FEATURES[flag]` checks in components | Nav items, CTAs, and sections hidden |
+| Backend | `Depends(require_execution_enabled)` | `404 Not Found` on dangerous endpoints |
+| Backend | `is_launch_mode_v1()` in scheduler jobs | Jobs no-op at call time even if registered |
+
+Together: a customer who discovers a leaked URL hits a silent redirect; an attacker who hits the backend directly gets a 404. No "not available in your plan" language. No permissions. No paywall.
 
 ## Launch posture by build
 
@@ -76,6 +90,37 @@
 | `roi_summary_weekly` | Mon 07:00 SGT | ✅ | No attribution data yet |
 
 **14 other scheduler jobs remain enabled** (RSS ingestion, financial sync, vertical benchmarks, signal monitor, article intelligence, etc.).
+
+Additionally, `_run_sequence_runner` has a runtime safety check (added Cycle 2):
+it calls `is_launch_mode_v1()` at job invocation time, not just at registration
+time. This protects against the case where the scheduler is started without
+the env var, the var is set later, and a stale job somehow executes.
+
+## Protected backend endpoints (added Cycle 2)
+
+The `require_execution_enabled` dependency returns `404 Not Found` for these
+endpoints when `GTM_LAUNCH_MODE=v1`:
+
+| Endpoint | File | Reason |
+|---------|------|--------|
+| `POST /companies/{id}/approvals/{id}/approve` | `routers/approvals.py` | Triggers SendGrid email send |
+| `POST /companies/{id}/approvals/{id}/reject` | `routers/approvals.py` | State symmetry with approve |
+| `POST /companies/{id}/approvals/bulk-approve` | `routers/approvals.py` | Triggers batch SendGrid sends |
+| `POST /companies/{id}/sequences/activate-playbook` | `routers/sequences.py` | Creates enrollments that queue emails |
+| `POST /companies/{id}/workforce/{id}/execute` | `routers/workforce.py` | Starts a workforce execution run |
+
+**Pause/resume enrollment endpoints are NOT protected** — they are state-only
+transitions and should remain available for advisory-mode customers who need
+to pause their sequences during troubleshooting.
+
+**Webhook endpoint `POST /api/v1/webhooks/sendgrid` is NOT protected** — it
+receives inbound events from SendGrid and must remain callable for advisory
+customers who have outreach enabled.
+
+**Adding a new protected endpoint** requires:
+1. Adding `dependencies=[Depends(require_execution_enabled)]` to the route
+2. Updating the docstring in `launch_mode.py` with the new endpoint
+3. Updating this table
 
 ## Emergency kill switch
 

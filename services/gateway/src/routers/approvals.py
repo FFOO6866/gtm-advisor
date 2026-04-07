@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from packages.database.src.models import ApprovalQueueItem, ApprovalStatus, AttributionEvent
 from packages.database.src.session import get_db_session
+from services.gateway.src.auth.launch_mode import require_execution_enabled
 
 router = APIRouter()
 
@@ -66,7 +67,10 @@ async def pending_count(company_id: UUID, db: AsyncSession = Depends(get_db_sess
     )
     return {"pending": result.scalar_one()}
 
-@router.post("/{company_id}/approvals/{item_id}/approve")
+@router.post(
+    "/{company_id}/approvals/{item_id}/approve",
+    dependencies=[Depends(require_execution_enabled)],
+)
 async def approve_item(
     company_id: UUID,
     item_id: UUID,
@@ -117,7 +121,10 @@ async def approve_item(
     )
     return {"status": "approved", "id": str(item.id)}
 
-@router.post("/{company_id}/approvals/{item_id}/reject")
+@router.post(
+    "/{company_id}/approvals/{item_id}/reject",
+    dependencies=[Depends(require_execution_enabled)],
+)
 async def reject_item(
     company_id: UUID,
     item_id: UUID,
@@ -141,7 +148,10 @@ async def reject_item(
     await db.commit()
     return {"status": "rejected"}
 
-@router.post("/{company_id}/approvals/bulk-approve")
+@router.post(
+    "/{company_id}/approvals/bulk-approve",
+    dependencies=[Depends(require_execution_enabled)],
+)
 async def bulk_approve(
     company_id: UUID,
     body: BulkApproveRequest,

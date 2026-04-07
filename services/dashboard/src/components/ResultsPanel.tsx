@@ -549,7 +549,7 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
                 className="w-full py-3.5 rounded-xl bg-gradient-to-r from-purple-500 to-blue-600 text-white font-semibold hover:from-purple-600 hover:to-blue-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20"
               >
                 <Zap className="w-4 h-4" />
-                Unlock Full Dashboard
+                Save to Your Daily Briefing
                 <ArrowRight className="w-4 h-4" />
               </motion.button>
               <p className="text-center text-xs text-white/30 mt-2">Free to start · No credit card required</p>
@@ -567,7 +567,7 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
 
           {localStorage.getItem('gtm_access_token') && (
             <>
-              {/* Primary CTA — authenticated: go to dashboard */}
+              {/* Primary CTA — authenticated: go to Today briefing */}
               <motion.button
                 onClick={() => navigate('/today')}
                 whileHover={{ scale: 1.02 }}
@@ -575,7 +575,7 @@ export function ResultsPanel({ results }: ResultsPanelProps) {
                 className="w-full py-3.5 rounded-xl bg-gradient-to-r from-purple-500 to-blue-600 text-white font-semibold hover:from-purple-600 hover:to-blue-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20"
               >
                 <Zap className="w-4 h-4" />
-                Go to Dashboard
+                Open Today's Briefing
                 <ArrowRight className="w-4 h-4" />
               </motion.button>
             </>
