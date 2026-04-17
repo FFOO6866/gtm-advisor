@@ -97,6 +97,33 @@
 
 **Verification**: pytest + ruff + TypeScript + Vite build all pass (numbers recorded in `cycle-4-redteam.md`). No new tests touching frontend or product surfaces; the new tests live entirely in the launch-mode regression suite.
 
+### Cycle 5 setup — Three program refinements (Streams C + D before main E work)
+
+Three program-level refinements were absorbed before the main Cycle 5 brand/UX work. Recorded in `cycle-5-incorporation-plan.md`.
+
+**Refinement 1 — Close LD-11 (registry-lock regression test)**:
+- NEW `tests/unit/test_launch_mode_deny.py::TestAgentRegistryLock` — three regression tests:
+  - `test_registry_metadata_contains_only_approved_analysis_agents` — exact-set lock on `AGENT_METADATA`
+  - `test_registry_classes_match_metadata` — drift check between `get_all_agent_classes()` and `AGENT_METADATA`
+  - `test_known_execution_agents_are_not_in_registry` — explicit deny list for outreach-executor, crm-sync, workforce-architect, signal-monitor, lead-enrichment with informative failure messages
+- UPDATED `services/gateway/src/agents_registry.py` — module docstring now declares the launch-mode contract: this registry is the implicit gate for `/api/v1/agents/{name}/run`, must contain only pure analysis agents, references the regression test
+- LD-11 marked ✅ Resolved Cycle 5 setup
+
+**Refinement 2 — Formalize watchlist discipline**:
+- NEW section in `workstream-status.md` § Watch-item discipline — defines the four required fields (Owner / Why safe today / Danger trigger / Required response) plus add/re-audit procedures
+- LD-9, LD-10, LD-11 each migrated to formalized records with all four fields
+- UPDATED `dangerous-action-policy.md` Watch list — reformatted as an index pointing to the formalized records; two short-form items retained inline
+
+**Refinement 3 — Dangerous vs destructive permanent policy language**:
+- UPDATED `dangerous-action-policy.md` — new "Dangerous vs destructive (orthogonal concerns)" section after "The Policy"; includes 2×2 grid, definitions, examples table, three justifications, and a rule of thumb
+- Promoted from Cycle 4 self-challenge Challenge 2 (where it lived as a one-line matrix annotation) into standing policy
+
+**Self-challenge revision-pass items** (recorded as guardrails, not new deliverables):
+- **LD-12 (new, Cycle 6)** — `/sequences/enrollments/{id}/resume` is safe only because the sequence runner gate exists at both registration and call time. The dependency is a prose annotation in the matrix; no test fails if the sequence runner gate is removed. Add a regression test in Cycle 6 launch-readiness review.
+- **Cycle 5 final red-team check** — re-verify that the launch-mode contract block in `agents_registry.py` module docstring is intact after any brand-sweep edits. The contract is enforced at the test level, but the in-source explanation is the first thing future editors see and should not be silently removed during a copy/naming sweep.
+
+**Code change scope**: 1 test file (3 new tests) + 1 source file (docstring only) + 3 doc files. No router changes, no scheduler changes, no flag changes, no frontend changes. Verification-first discipline held.
+
 ## Cycle plan
 
 | # | Name | Streams | Goal |
@@ -126,13 +153,68 @@ Tracked launch debt — items that are NOT blockers but carry future risk and mu
 | LD-6 | SidebarNav workspace header subtitle reads "GTM Dashboard" | Non-blocker | Low | Cycle 5 | Customer-visible but minor; full sweep covers it. |
 | LD-7 | Bundle size 642KB (Vite warns >500KB) | Non-blocker | Low | Post-launch | Code-splitting candidate. Not a launch blocker — gzip is 174KB. |
 | LD-8 | TodayPage `attribution` state variable still declared even when feature is gated | Non-blocker | Low | Cycle 3 setup | Cosmetic — `setAttribution(null)` in launch mode is harmless but indicates dead state. Acceptable. |
-| LD-9 | Backend `campaigns/{id}/activate` endpoint is unprotected (currently safe) | Latent | Medium | **Cycle 4 re-audit: still safe; carry forward** | Cycle 4 grep confirmed no consumers of `CampaignStatus.ACTIVE`. Still a watch item for any future wiring. See `execution-verification.md` finding F-6. |
-| LD-10 | `_run_lead_enrichment_all` and `_run_weekly_roi_summary` lack belt-and-suspenders runtime `is_launch_mode_v1()` checks | Non-blocker | Low | Cycle 5 | Registration gate is sufficient today (neither job has external effect). Runtime gate would be consistency with `_run_sequence_runner`. Must be added if the ROI summary TODO at `scheduler.py:537` (send summary email) is ever implemented. See Cycle 4 finding F-3. |
-| LD-11 | `/agents/{name}/run` and `/companies/{id}/agents/{id}/run` are implicitly gated by narrow registry; no test locks the registry | Latent | Medium | Cycle 5 or 6 | Current registry (`agents_registry.py`) exposes only the 6 analysis agents. A single-line test that asserts the exact registry contents would prevent a future bypass if execution agents are added. See Cycle 4 finding F-4. |
+| LD-9 | Backend `campaigns/{id}/activate` endpoint is unprotected (currently safe) | Latent | Medium | **Cycle 4 re-audit: still safe; carry forward** | Cycle 4 grep confirmed no consumers of `CampaignStatus.ACTIVE`. Still a watch item for any future wiring. See `execution-verification.md` finding F-6. Formalized in Watch-item discipline below. |
+| LD-10 | `_run_lead_enrichment_all` and `_run_weekly_roi_summary` lack belt-and-suspenders runtime `is_launch_mode_v1()` checks | Non-blocker | Low | Cycle 5 | Registration gate is sufficient today (neither job has external effect). Runtime gate would be consistency with `_run_sequence_runner`. Must be added if the ROI summary TODO at `scheduler.py:537` (send summary email) is ever implemented. See Cycle 4 finding F-3. Formalized in Watch-item discipline below. |
+| LD-11 | `/agents/{name}/run` and `/companies/{id}/agents/{id}/run` are implicitly gated by narrow registry; no test locks the registry | Latent | Medium | **Cycle 5 setup** | ✅ **Resolved Cycle 5 setup**. Registry-lock regression test added: `tests/unit/test_launch_mode_deny.py::TestAgentRegistryLock` (3 tests: exact-set lock, class/metadata drift check, explicit deny list for known execution agents). Module docstring on `agents_registry.py` documents the launch-mode contract. See Cycle 5 incorporation plan refinement 1. |
+| LD-12 | `/sequences/enrollments/{id}/resume` safety depends on sequence runner gate (prose annotation only, no regression test) | Latent | Low | Cycle 6 launch-readiness | Cycle 5 setup self-challenge identified this dependency: `/resume` is exempt because the sequence runner gate stops the next tick. If the gate is ever removed, `/resume` becomes a cascade trigger. The dependency lives in `execution-verification.md` as a 🟡 Watch annotation but no test asserts the dependency. Add a regression test in Cycle 6 that asserts the sequence runner gate is in place at both registration and call time, with a comment naming `/resume` as the dependent route. |
 
 **Adding new debt**: when a cycle red-team identifies a deferred item, add it to this register with classification + target cycle. Do not let "deferred" items disappear into casual notes.
 
 **Closing debt**: when an item is resolved, mark it ✅ and link to the cycle red-team where it closed. Do not delete entries — preserve the history.
+
+## Watch-item discipline (added Cycle 5 setup)
+
+A **watch item** is a launch-debt entry whose risk is *latent*: today it is safe, but a plausible future change could make it dangerous. Watch items differ from normal debt in that they may never need to be fixed — they need to be *re-audited each cycle* until either (a) the latent path is closed permanently, or (b) the trigger condition fires and the item is converted into a blocker.
+
+The risk with watch items is that the safety argument becomes tribal knowledge. A reviewer two cycles later sees "still safe" and accepts it without re-deriving why. To prevent that, every watch item must declare four fields explicitly:
+
+| Field | Purpose |
+|---|---|
+| **Owner / responsible workstream** | Who must re-audit this item each cycle and own any escalation. Workstreams use the Stream A/B/C/D/E labels from the workstream overview. |
+| **Why it is safe today** | The specific code-path or absent consumer that makes the latent risk dormant. Must be falsifiable by grep or trace, not "by convention". |
+| **What future change would make it dangerous** | The concrete trigger: a new consumer, a new endpoint, an unlock of a flag, an env flip. Must be specific enough that a reviewer can run a single check to detect it. |
+| **Required response** | What must happen the moment the trigger fires — usually "add to dangerous-action policy + protect endpoint + add regression test". Phrased as an action, not a sentiment. |
+
+When the four fields cannot be filled in concretely, the item is not a watch item; it is either undocumented assumption (must be analyzed before cycle exit) or a blocker (must be fixed in-cycle).
+
+### Formalized watch list
+
+Each entry below is the canonical record for the watch item. The launch debt register table above is the index; this section is the source of truth for the safety argument.
+
+#### LD-9 — `POST /campaigns/{id}/activate` is unprotected
+
+- **Owner**: Stream C (Execution Layer); re-audited at the start of every cycle that touches `services/gateway/src/routers/campaigns.py` or `agents/campaign_architect/`.
+- **Why safe today**: `grep -r "CampaignStatus.ACTIVE" services/ agents/` returns exactly one hit — the setter in `campaigns.py:228`. No scheduler job, no agent, no other router consumes `CampaignStatus == ACTIVE` to trigger any external action. The endpoint flips an internal status field and a `start_date` timestamp.
+- **Danger trigger**: any commit that introduces a *consumer* of `CampaignStatus.ACTIVE` — e.g., a scheduler job that scans for ACTIVE campaigns and starts outreach, or an agent that reads campaign status and acts on it, or a webhook that fires on activation.
+- **Required response**: (1) add `Depends(require_execution_enabled)` to `POST /campaigns/{id}/activate` in `routers/campaigns.py`; (2) move LD-9 from the watch list to the protected-endpoints table in `dangerous-action-policy.md` and `feature-flags.md`; (3) add the endpoint to `tests/unit/test_launch_mode_deny.py::TestProtectedEndpointsList::PROTECTED_ENDPOINTS`.
+
+#### LD-10 — Belt-and-suspenders runtime gates missing on two scheduler jobs
+
+- **Owner**: Stream D (Platform Hardening); covered by the Cycle 5 polish sweep.
+- **Why safe today**: `_run_lead_enrichment_all` and `_run_weekly_roi_summary` are gated at *registration* time (`if not _LAUNCH_MODE_V1: scheduler.add_job(...)`). In v1 deployments these jobs are never registered, so they never run. Neither job has any external effect today: lead enrichment validates emails via DNS MX and enriches metadata locally; ROI summary queries the DB and writes a structured log row.
+- **Danger trigger**: two paths. (a) The TODO at `scheduler.py:537` ("send summary email") inside `_run_weekly_roi_summary` is implemented — the job becomes clause-1 dangerous (external communication) and the registration-only gate becomes insufficient if the env var is unset at startup but set later. (b) Lead enrichment grows an outbound HTTP call (e.g., a third-party data provider that bills the customer's account), making it clause-4 dangerous.
+- **Required response**: add a call-time `is_launch_mode_v1()` early-return inside the job function, matching the `_run_sequence_runner` pattern; add a regression test in `TestSchedulerAutoEnrollGate`-style asserting the gate position; update `dangerous-action-policy.md` scheduler coverage table.
+
+#### LD-11 — Registry-lock for `/agents/{name}/run` (✅ closed Cycle 5 setup)
+
+- **Owner**: Stream C (Execution Layer); maintained by `tests/unit/test_launch_mode_deny.py::TestAgentRegistryLock`.
+- **Why safe today**: `services/gateway/src/agents_registry.py::AGENT_METADATA` contains exactly the 6 approved analysis agents. `is_valid_agent()` returns False for every execution-tier agent ID. The run endpoints in `routers/agents.py` and `routers/company_agents.py` reject unknown IDs with 404. The lock is now enforced by the regression test (3 assertions: exact-set lock, class/metadata drift check, explicit deny list of known execution agent IDs).
+- **Danger trigger**: any commit that adds an execution-tier agent (or any agent with external effect) to `AGENT_METADATA` or `get_all_agent_classes()`. The regression test will fail in CI before the change can land.
+- **Required response**: the regression test failure message tells the editor exactly what to do: either confirm the new agent has no external effect AND update `APPROVED_ANALYSIS_AGENTS` in the test, OR add `Depends(require_execution_enabled)` to the run endpoints AND update `dangerous-action-policy.md`. There is no third option.
+
+### Adding a new watch item
+
+1. Confirm the four fields above can be filled in concretely. If not, the item is not a watch item.
+2. Add a row to the launch debt register table with `Risk=Latent`.
+3. Add a formalized entry under "Formalized watch list" with the four fields.
+4. Reference the formalized entry from the cycle's verification doc.
+
+### Re-auditing a watch item
+
+1. Re-derive "Why safe today" from current code (grep or trace, do not trust the prior cycle's claim).
+2. If the safety argument still holds, leave the entry unchanged and note the re-audit cycle in the launch debt register.
+3. If the danger trigger has fired, execute the "Required response" in-cycle. The watch item is converted into a closed debt entry.
+4. If the safety argument no longer holds for a *new* reason not anticipated by the original danger trigger, update the trigger and the response, then re-audit.
 
 ## Governance rules (invariant across cycles)
 

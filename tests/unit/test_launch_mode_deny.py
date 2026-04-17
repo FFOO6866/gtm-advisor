@@ -169,3 +169,129 @@ class TestSchedulerAutoEnrollGate:
         assert "auto_enroll_from_signals_skipped" in source, (
             "skip log event missing — operators need visibility into the gate"
         )
+
+
+class TestAgentRegistryLock:
+    """Regression tests for Cycle 4 Finding F-4 / LD-11 (closed Cycle 5 setup).
+
+    The /api/v1/agents/{agent_name}/run and
+    /api/v1/companies/{company_id}/agents/{agent_id}/run endpoints execute any
+    agent whose ID passes is_valid_agent(). The launch-mode deny dependency
+    does NOT cover these routes — they are implicitly safe only because the
+    agent registry narrows the set to the 6 approved analysis agents.
+
+    These tests lock that registry. If anyone adds an execution agent
+    (outreach-executor, crm-sync, workforce-architect, signal-monitor,
+    lead-enrichment) — or any other agent that has external effect — to the
+    registry, the run endpoints become a launch-mode bypass into the
+    execution layer. These tests fail in that case so the bypass cannot land
+    silently.
+
+    See:
+      - docs/launch/dangerous-action-policy.md (Watch list)
+      - docs/launch/execution-verification.md (Finding F-4)
+      - docs/launch/cycle-5-incorporation-plan.md (Refinement 1)
+    """
+
+    # The exact set of agents that may be exposed via /agents/{name}/run.
+    # Every entry must be a pure analysis agent — no external effects.
+    APPROVED_ANALYSIS_AGENTS = frozenset(
+        {
+            "gtm-strategist",
+            "market-intelligence",
+            "competitor-analyst",
+            "customer-profiler",
+            "lead-hunter",
+            "campaign-architect",
+        }
+    )
+
+    # Explicit deny list for known execution-tier agents. Listed by name so
+    # the failure message is informative when one slips through. This is in
+    # addition to (not a replacement for) the exact-set assertion above.
+    KNOWN_EXECUTION_AGENTS = frozenset(
+        {
+            "outreach-executor",
+            "crm-sync",
+            "workforce-architect",
+            "signal-monitor",
+            "lead-enrichment",
+        }
+    )
+
+    def test_registry_metadata_contains_only_approved_analysis_agents(self):
+        """AGENT_METADATA must equal exactly the approved analysis agent set.
+
+        Any deviation (addition, rename, removal) must be reviewed against
+        the dangerous-action policy before this assertion is updated.
+        """
+        from services.gateway.src.agents_registry import AGENT_METADATA
+
+        registered = set(AGENT_METADATA.keys())
+        assert registered == set(self.APPROVED_ANALYSIS_AGENTS), (
+            f"Agent registry must contain exactly the 6 approved analysis "
+            f"agents. Found: {sorted(registered)}. "
+            f"Expected: {sorted(self.APPROVED_ANALYSIS_AGENTS)}. "
+            f"If you intentionally added a new agent, you must either "
+            f"(a) confirm it has no external effect AND update "
+            f"APPROVED_ANALYSIS_AGENTS in this test, or "
+            f"(b) gate /api/v1/agents/{{name}}/run and "
+            f"/companies/{{id}}/agents/{{id}}/run with require_execution_enabled "
+            f"and update docs/launch/dangerous-action-policy.md."
+        )
+
+    def test_registry_classes_match_metadata(self):
+        """get_all_agent_classes() and AGENT_METADATA must agree on the set.
+
+        Drift between these two would create a state where an agent is
+        validated by is_valid_agent() but cannot be instantiated, or vice
+        versa.
+        """
+        from services.gateway.src.agents_registry import (
+            AGENT_METADATA,
+            get_all_agent_classes,
+        )
+
+        classes = set(get_all_agent_classes().keys())
+        metadata = set(AGENT_METADATA.keys())
+        assert classes == metadata, (
+            f"Drift between agent class registry and metadata. "
+            f"Classes only: {sorted(classes - metadata)}. "
+            f"Metadata only: {sorted(metadata - classes)}."
+        )
+
+    def test_known_execution_agents_are_not_in_registry(self):
+        """No known execution-tier agent ID may pass is_valid_agent() or
+        appear in AGENT_METADATA / get_all_agent_classes().
+
+        This is the explicit deny-list complement to the exact-set assertion.
+        Failure here is a launch-mode bypass: the run endpoints would
+        instantiate and execute an agent that produces external effects
+        without any require_execution_enabled gate.
+        """
+        from services.gateway.src.agents_registry import (
+            AGENT_METADATA,
+            get_all_agent_classes,
+            is_valid_agent,
+        )
+
+        all_classes = get_all_agent_classes()
+        leaked = set()
+        for agent_id in self.KNOWN_EXECUTION_AGENTS:
+            if is_valid_agent(agent_id):
+                leaked.add(agent_id)
+            if agent_id in AGENT_METADATA:
+                leaked.add(agent_id)
+            if agent_id in all_classes:
+                leaked.add(agent_id)
+
+        assert not leaked, (
+            f"Execution agents {sorted(leaked)} are exposed via the agent "
+            f"registry. They are reachable through "
+            f"/api/v1/agents/{{name}}/run and "
+            f"/api/v1/companies/{{id}}/agents/{{id}}/run, which are NOT "
+            f"protected by require_execution_enabled. This is a launch-mode "
+            f"bypass into the execution layer. Either remove them from the "
+            f"registry or add an explicit gate on the run endpoints "
+            f"(see docs/launch/dangerous-action-policy.md)."
+        )

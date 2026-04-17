@@ -1,6 +1,32 @@
 """Shared agent registry for the gateway service.
 
 Provides a single source of truth for agent classes and metadata.
+
+LAUNCH-MODE CONTRACT (Cycle 4 finding F-4 / LD-11 closure, Cycle 5 setup):
+
+This registry is the implicit gate for `/api/v1/agents/{name}/run` and
+`/api/v1/companies/{id}/agents/{id}/run`. Those endpoints execute any agent
+whose ID passes `is_valid_agent()` and are NOT protected by
+`require_execution_enabled`.
+
+The registry must contain ONLY pure analysis agents — agents with no
+external effect, no outbound message, no third-party API write, no
+cascading state transition (per `docs/launch/dangerous-action-policy.md`).
+
+Adding an execution-tier agent here (outreach-executor, crm-sync,
+workforce-architect, signal-monitor, lead-enrichment, or any future agent
+with external effect) would convert these endpoints into a launch-mode
+bypass. Before adding such an agent you must EITHER:
+
+  1. Add `Depends(require_execution_enabled)` to the run endpoints in
+     `routers/agents.py` and `routers/company_agents.py`, AND update
+     `docs/launch/dangerous-action-policy.md` accordingly; OR
+  2. Confirm the agent has no external effect and update
+     `tests/unit/test_launch_mode_deny.py::TestAgentRegistryLock`
+     in the same change.
+
+The registry-lock regression test enforces this contract:
+`tests/unit/test_launch_mode_deny.py::TestAgentRegistryLock`.
 """
 
 from typing import TYPE_CHECKING
@@ -9,7 +35,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
-# Agent metadata for UI display
+# Agent metadata for UI display.
+# WARNING: this set is locked by TestAgentRegistryLock — see module docstring.
 AGENT_METADATA = {
     "gtm-strategist": {
         "title": "GTM Strategist",

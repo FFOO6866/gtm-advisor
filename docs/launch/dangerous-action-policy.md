@@ -33,6 +33,43 @@ An action is **NOT dangerous** if it:
 
 ---
 
+## Dangerous vs destructive (orthogonal concerns)
+
+> Permanent policy language. Originally surfaced in Cycle 4 self-challenge Challenge 2; promoted out of the cycle memo into standing policy in Cycle 5 setup so future cycles cannot lose the distinction.
+
+**"Dangerous"** and **"destructive"** are not the same. They are orthogonal: an action can be one, the other, both, or neither. The dangerous-action policy in this document covers *dangerous* actions only. Destructive actions are governed separately.
+
+| | Not destructive | Destructive |
+|---|---|---|
+| **Not dangerous** | Read, list, internal-status flip, pause, export | Delete a draft campaign, clear local cache, reset a session |
+| **Dangerous** | Send email, enroll lead, create CRM contact, schedule outreach | (rare) An action that both deletes internal state AND triggers an outbound message — handle as both |
+
+**Definitions**:
+
+- **Dangerous**: produces an *external effect* — communicates with a third party, mutates a record visible outside our system, or transitions an entity into a state whose downstream automation will produce one of these later (the 5 clauses above). The blast radius escapes our system boundary.
+- **Destructive**: *destroys internal state* without external effect — deletes a row, clears a table, wipes a cache, resets a configuration. The blast radius is contained inside our system but the action is hard or impossible to reverse.
+
+**Concrete examples** (each listed under exactly the right column):
+
+| Action | Dangerous? | Destructive? | Where it is governed |
+|---|---|---|---|
+| `POST /approvals/{id}/approve` → SendGrid send | ✅ | ❌ | This policy (`require_execution_enabled`) |
+| `POST /sequences/activate-playbook` → cascading enrollments | ✅ | ❌ | This policy (cascading state, clause 3) |
+| `DELETE /companies/{id}/campaigns/{id}` (deletes a draft) | ❌ | ✅ | Frontend `settingsDangerZone` flag and similar UI gating; **not** in this policy |
+| Settings "Clear all data" wipe | ❌ | ✅ | Frontend `settingsDangerZone` flag |
+| `POST /companies/{id}/leads/{id}/qualify` (status flip) | ❌ | ❌ | Neither — not gated |
+| Hypothetical "delete contact AND send goodbye email" | ✅ | ✅ | Both: must satisfy this policy AND destructive-UX gating |
+
+**Why this matters**:
+
+1. **Symmetry confusion** — without the distinction, a reviewer sees `DELETE /campaigns/{id}` and asks "should this be in `require_execution_enabled`?" The answer is no — destructive operations are handled by frontend gating because the blast radius is internal. Putting them in the dangerous-action gate would either dilute the signal (fewer reviewers would understand what `require_execution_enabled` means) or under-protect them (the 404 response is the wrong UX for a destructive action; the user needs a confirmation, not a silent disappearance).
+2. **Aesthetic protection drift** — Cycle 3 removed `reject_item` from `require_execution_enabled` because it was state-only (neither dangerous nor destructive). If "destructive" were folded into "dangerous", a future reviewer could re-add it on the wrong basis. The two columns must stay separate.
+3. **Coverage matrix integrity** — the execution-verification coverage matrix only enumerates dangerous actions. If destructive operations were included, the matrix would either bloat or become inconsistent. Cycle 4 finding F-7's exemption note already calls this out; promoting it to standing policy makes the distinction non-negotiable for future cycles.
+
+**Rule of thumb**: if you cannot explain the action's blast radius without using the words "external" or "third party", it is destructive, not dangerous.
+
+---
+
 ## Why this distinction matters
 
 Frontend hiding prevents customers from discovering execution surfaces in normal use. The backend deny dependency is the second layer: it denies direct API invocation by anyone who has discovered the endpoint via a leaked URL, a screenshot, a curl, or an API client.
@@ -78,13 +115,26 @@ These endpoints touch execution-related state but pass the policy test (no exter
 
 ## Watch list (potential dangerous actions, reviewed each cycle)
 
-These endpoints **may become dangerous** as the execution layer evolves. Re-audited in each cycle's execution verification.
+These endpoints **may become dangerous** as the execution layer evolves. They are governed by the **watch-item discipline** defined in `workstream-status.md` — every entry must declare Owner, Why safe today, Danger trigger, and Required response. The formalized records live there; this section is the index and the routing.
 
-- `POST /companies/{id}/campaigns/{id}/activate` — currently safe. **Re-audited in Cycle 4**: grep for `CampaignStatus.ACTIVE` returns only the setter itself; no scheduler or handler consumes it. Still a watch item for any future wiring. (LD-9)
-- `POST /companies/{id}/workforce/design` — currently creates a config record only; re-audited Cycle 4 as safe.
-- `PATCH /companies/{id}/workforce/{id}/approve` — transitions DRAFT → ACTIVE. Before Cycle 4's F-1 fix, this implicitly enabled a scheduler cascade (signal monitor → auto-enroll → enrollments). Cycle 4 broke the cascade at the scheduler call site, so `/approve` does not need HTTP protection and remains exempt. See Cycle 4 finding F-2 in `execution-verification.md`.
-- `POST /api/v1/agents/{name}/run` and `POST /api/v1/companies/{id}/agents/{id}/run` — currently safe because the agent registry at `agents_registry.py` narrows to the 6 analysis agents. This is an **implicit** gate; if execution agents (outreach-executor, crm-sync) are ever added to the registry, these endpoints become bypasses. See Cycle 4 finding F-4.
-- Any new agent endpoint that posts to social media, books meetings, or calls external APIs
+| Watch item | Launch debt ID | Formalized record | Status |
+|---|---|---|---|
+| `POST /companies/{id}/campaigns/{id}/activate` | LD-9 | `workstream-status.md` § Watch-item discipline | Open — re-audited Cycle 4 as still safe (no consumers of `CampaignStatus.ACTIVE`) |
+| `_run_lead_enrichment_all` and `_run_weekly_roi_summary` lack runtime gate | LD-10 | `workstream-status.md` § Watch-item discipline | Open — Cycle 5 polish target; required if ROI summary TODO ships |
+| `POST /api/v1/agents/{name}/run` and `POST /api/v1/companies/{id}/agents/{id}/run` registry-lock | LD-11 | `workstream-status.md` § Watch-item discipline | ✅ Closed Cycle 5 setup — `tests/unit/test_launch_mode_deny.py::TestAgentRegistryLock` |
+| `POST /companies/{id}/workforce/design` | — | This file (below) | Open — config record only; re-audited Cycle 4 as safe |
+| `PATCH /companies/{id}/workforce/{id}/approve` | — | This file (below) | Open — DRAFT → ACTIVE; cascade broken by Cycle 4 F-1 fix at scheduler |
+
+### Light-touch watch items (no formalized record yet)
+
+These two are tracked here rather than in `workstream-status.md` because the safety argument is short and stable. If either becomes contested or the safety argument requires more than one line, promote to a formalized record.
+
+- `POST /companies/{id}/workforce/design` — creates a config record only; no external effect, no cascade (the cascade was at the scheduler auto-enroll call, gated in Cycle 4 F-1).
+- `PATCH /companies/{id}/workforce/{id}/approve` — transitions DRAFT → ACTIVE. Before Cycle 4's F-1 fix this implicitly enabled the scheduler cascade. Cycle 4 broke the cascade at the scheduler call site, so `/approve` does not need HTTP protection and remains exempt. See Cycle 4 finding F-2 in `execution-verification.md`.
+
+### Open-ended watch class
+
+- Any new agent endpoint that posts to social media, books meetings, or calls external APIs falls under this policy automatically and must be classified before merge.
 
 ## Scheduler coverage (added in Cycle 4)
 
